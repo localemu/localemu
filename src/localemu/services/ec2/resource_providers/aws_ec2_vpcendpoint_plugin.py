@@ -1,0 +1,18 @@
+from localemu.services.cloudformation.resource_provider import (
+    CloudFormationResourceProviderPlugin,
+    ResourceProvider,
+)
+
+
+class EC2VPCEndpointProviderPlugin(CloudFormationResourceProviderPlugin):
+    name = "AWS::EC2::VPCEndpoint"
+
+    def __init__(self):
+        self.factory: type[ResourceProvider] | None = None
+
+    def load(self):
+        from localemu.services.ec2.resource_providers.aws_ec2_vpcendpoint import (
+            EC2VPCEndpointProvider,
+        )
+
+        self.factory = EC2VPCEndpointProvider

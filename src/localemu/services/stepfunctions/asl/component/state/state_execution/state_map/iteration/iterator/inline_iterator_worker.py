@@ -1,0 +1,48 @@
+import logging
+from typing import Final
+
+from localemu.services.stepfunctions.asl.component.common.parargs import Parameters
+from localemu.services.stepfunctions.asl.component.state.state_execution.state_map.item_selector import (
+    ItemSelector,
+)
+from localemu.services.stepfunctions.asl.component.state.state_execution.state_map.iteration.iteration_worker import (
+    IterationWorker,
+)
+from localemu.services.stepfunctions.asl.component.state.state_execution.state_map.iteration.job import (
+    JobPool,
+)
+from localemu.services.stepfunctions.asl.eval.environment import Environment
+
+LOG = logging.getLogger(__name__)
+
+
+class InlineIteratorWorker(IterationWorker):
+    _parameters: Final[Parameters | None]
+    _item_selector: Final[ItemSelector | None]
+
+    def __init__(
+        self,
+        work_name: str,
+        job_pool: JobPool,
+        env: Environment,
+        item_selector: ItemSelector | None,
+        parameters: Parameters | None,
+    ):
+        super().__init__(work_name=work_name, job_pool=job_pool, env=env)
+        self._item_selector = item_selector
+        self._parameters = parameters
+
+    def _eval_input(self, env_frame: Environment) -> None:
+        if not self._parameters and not self._item_selector:
+            return
+
+        map_state_input = self._env.stack[-1]
+        env_frame.states.reset(input_value=map_state_input)
+        env_frame.stack.append(env_frame.states.get_input())
+
+        if self._item_selector:
+            self._item_selector.eval(env_frame)
+        elif self._parameters:
+            self._parameters.eval(env_frame)
+
+        env_frame.states.reset(input_value=env_frame.stack[-1])

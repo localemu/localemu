@@ -1,0 +1,64 @@
+import re
+from string import ascii_letters, digits
+from typing import get_args
+
+from localemu.services.sns.models import SnsApplicationPlatforms
+
+SNS_PROTOCOLS = [
+    "http",
+    "https",
+    "email",
+    "email-json",
+    "sms",
+    "sqs",
+    "application",
+    "lambda",
+    "firehose",
+]
+
+VALID_SUBSCRIPTION_ATTR_NAME: list[str] = [
+    "DeliveryPolicy",
+    "FilterPolicy",
+    "FilterPolicyScope",
+    "RawMessageDelivery",
+    "RedrivePolicy",
+    "SubscriptionRoleArn",
+]
+
+
+VALID_POLICY_ACTIONS = [
+    "GetTopicAttributes",
+    "SetTopicAttributes",
+    "AddPermission",
+    "RemovePermission",
+    "DeleteTopic",
+    "Subscribe",
+    "ListSubscriptionsByTopic",
+    "Publish",
+    "Receive",
+]
+
+MSG_ATTR_NAME_REGEX = re.compile(r"^(?!\.)(?!.*\.$)(?!.*\.\.)[a-zA-Z0-9_\-.]+$")
+ATTR_TYPE_REGEX = re.compile(r"^(String|Number|Binary)\..+$")
+VALID_MSG_ATTR_NAME_CHARS = set(ascii_letters + digits + "." + "-" + "_")
+E164_REGEX = re.compile(r"^\+?[1-9]\d{1,14}$")
+BATCH_ENTRY_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+GCM_URL = "https://fcm.googleapis.com/fcm/send"
+
+# Endpoint to access all the PlatformEndpoint sent Messages
+PLATFORM_ENDPOINT_MSGS_ENDPOINT = "/_aws/sns/platform-endpoint-messages"
+SMS_MSGS_ENDPOINT = "/_aws/sns/sms-messages"
+SUBSCRIPTION_TOKENS_ENDPOINT = "/_aws/sns/subscription-tokens"
+SMS_PHONE_NUMBER_OPT_OUT_ENDPOINT = "/_aws/sns/phone-opt-outs"
+
+# we add hex chars to respect the format of AWS with certificate ID, hardcoded for now
+# we could parametrize the certificate ID in the future
+SNS_CERT_ENDPOINT = "/_aws/sns/SimpleNotificationService-6c6f63616c737461636b69736e696365.pem"
+
+DUMMY_SUBSCRIPTION_PRINCIPAL = "arn:{partition}:iam::{account_id}:user/DummySNSPrincipal"
+
+VALID_APPLICATION_PLATFORMS = list(get_args(SnsApplicationPlatforms))
+
+MAXIMUM_MESSAGE_LENGTH = 262144

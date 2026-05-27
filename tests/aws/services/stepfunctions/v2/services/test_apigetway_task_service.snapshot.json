@@ -1,0 +1,2626 @@
+{
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_query_parameters": {
+    "recorded-date": "06-11-2025, 12:16:28",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": [
+                    "Hello",
+                    "World!"
+                  ]
+                },
+                "AllowNullValues": true,
+                "QueryParameters": {
+                  "param1": [
+                    "Hello"
+                  ],
+                  "param2": [
+                    "World"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": [
+                    "Hello",
+                    "World!"
+                  ]
+                },
+                "AllowNullValues": true,
+                "QueryParameters": {
+                  "param1": [
+                    "Hello"
+                  ],
+                  "param2": [
+                    "World"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "AllowNullValues": true,
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "QueryParameters": {
+                  "param1": [
+                    "Hello"
+                  ],
+                  "param2": [
+                    "World"
+                  ]
+                },
+                "RequestBody": {
+                  "message": [
+                    "Hello",
+                    "World!"
+                  ]
+                }
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "99"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "body": {
+                    "message": [
+                      "Hello",
+                      "World!"
+                    ]
+                  },
+                  "queryStringParameters": "{param1=Hello, param2=World}"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "99"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "body": {
+                    "message": [
+                      "Hello",
+                      "World!"
+                    ]
+                  },
+                  "queryStringParameters": "{param1=Hello, param2=World}"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "99"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "body": {
+                    "message": [
+                      "Hello",
+                      "World!"
+                    ]
+                  },
+                  "queryStringParameters": "{param1=Hello, param2=World}"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_base": {
+    "recorded-date": "06-11-2025, 12:12:42",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "get_constant",
+                "Stage": "sfn-apigw-api"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "get_constant",
+                "Stage": "sfn-apigw-api"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "get_constant",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[None]": {
+    "recorded-date": "06-11-2025, 12:13:06",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": null
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": null
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": null
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {},
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[]": {
+    "recorded-date": "06-11-2025, 12:13:47",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": ""
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": ""
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": ""
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "2"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[HelloWorld]": {
+    "recorded-date": "06-11-2025, 12:14:17",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "HelloWorld"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "HelloWorld"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "HelloWorld"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "12"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "HelloWorld",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "12"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "HelloWorld",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "12"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "HelloWorld",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[\"HelloWorld\"]": {
+    "recorded-date": "20-08-2023, 15:23:33",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "\"HelloWorld\""
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "\"HelloWorld\""
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "\"HelloWorld\""
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "16"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "\"HelloWorld\"",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "16"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "\"HelloWorld\"",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "16"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "\"HelloWorld\"",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[0]": {
+    "recorded-date": "20-08-2023, 15:24:06",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "0"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "0"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "0"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "3"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "0",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "3"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "0",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "3"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "0",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[true]": {
+    "recorded-date": "20-08-2023, 15:24:28",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "true"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "true"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "true"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "6"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "true",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "6"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "true",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "6"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "true",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[{\"message\": \"HelloWorld!\"}]": {
+    "recorded-date": "20-08-2023, 15:24:56",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "{\"message\": \"HelloWorld!\"}"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "{\"message\": \"HelloWorld!\"}"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "{\"message\": \"HelloWorld!\"}"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "32"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "{\"message\": \"HelloWorld!\"}",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "32"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "{\"message\": \"HelloWorld!\"}",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "32"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": "{\"message\": \"HelloWorld!\"}",
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_error": {
+    "recorded-date": "06-11-2025, 12:16:53",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_funcinvalid",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "HelloWorld"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_funcinvalid",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": "HelloWorld"
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_funcinvalid",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": "HelloWorld"
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskFailedEventDetails": {
+              "cause": {
+                "message": "Missing Authentication Token"
+              },
+              "error": "ApiGateway.403",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskFailed"
+          },
+          {
+            "executionFailedEventDetails": {
+              "cause": {
+                "message": "Missing Authentication Token"
+              },
+              "error": "ApiGateway.403"
+            },
+            "id": 6,
+            "previousEventId": 5,
+            "timestamp": "timestamp",
+            "type": "ExecutionFailed"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_body_post[request_body3]": {
+    "recorded-date": "06-11-2025, 12:14:54",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                }
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_headers[singleStringHeader]": {
+    "recorded-date": "06-10-2024, 14:50:24",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": "singleStringHeader"
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": "singleStringHeader"
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "executionFailedEventDetails": {
+              "cause": "An error occurred while executing the state 'ApiGatewayInvoke' (entered at the event id #2). The Parameters '<json-input:1>' could not be used to start the Task: [The value of the field 'Headers' has an invalid format]",
+              "error": "States.Runtime"
+            },
+            "id": 3,
+            "previousEventId": 2,
+            "timestamp": "timestamp",
+            "type": "ExecutionFailed"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_headers[custom_header1]": {
+    "recorded-date": "06-11-2025, 12:15:22",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0"
+                  ]
+                },
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                }
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_apigetway_task_service.py::TestTaskApiGateway::test_invoke_with_headers[custom_header2]": {
+    "recorded-date": "06-11-2025, 12:16:00",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0",
+                    "arrayHeader1"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "Path": "id_func",
+                "Stage": "sfn-apigw-api",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                },
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0",
+                    "arrayHeader1"
+                  ]
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "ApiGatewayInvoke"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "Path": "id_func",
+                "Headers": {
+                  "custom_header": [
+                    "arrayHeader0",
+                    "arrayHeader1"
+                  ]
+                },
+                "Stage": "sfn-apigw-api",
+                "ApiEndpoint": "<api-endpoint>",
+                "Method": "POST",
+                "RequestBody": {
+                  "message": "HelloWorld!"
+                }
+              },
+              "region": "<region>",
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "invoke",
+              "resourceType": "apigateway"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "ApiGatewayInvoke",
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "Headers": {
+                  "Connection": [
+                    "keep-alive"
+                  ],
+                  "Content-Length": [
+                    "26"
+                  ],
+                  "Content-Type": [
+                    "application/json"
+                  ],
+                  "Date": "<headers-date>",
+                  "Via": "<headers-Via>",
+                  "x-amz-apigw-id": "<headers-x-amz-apigw-id>",
+                  "X-Amz-Cf-Id": "<headers-X-Amz-Cf-Id>",
+                  "X-Amz-Cf-Pop": "<headers-X-Amz-Cf-Pop>",
+                  "x-amzn-RequestId": "<headers-x-amzn-RequestId>",
+                  "X-Amzn-Trace-Id": "<headers-X-Amzn-Trace-Id>",
+                  "X-Cache": [
+                    "Miss from cloudfront"
+                  ]
+                },
+                "ResponseBody": {
+                  "message": "HelloWorld!"
+                },
+                "StatusCode": 200,
+                "StatusText": "OK"
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 7,
+            "previousEventId": 6,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  }
+}

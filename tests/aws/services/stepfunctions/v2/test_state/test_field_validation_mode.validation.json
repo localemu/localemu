@@ -1,0 +1,155 @@
+{
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_kms_task[wrong_blob_length_less_than_minimum]": {
+    "last_validated_date": "2025-12-03T01:10:13+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.24,
+      "teardown": 0.0,
+      "total": 0.24
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_kms_task[wrong_blob_type_number]": {
+    "last_validated_date": "2025-12-03T01:10:12+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_lambda_get_function_task[integer_less_than_minimum_allowed]": {
+    "last_validated_date": "2025-12-03T01:10:13+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_lambda_get_function_task[integer_more_than_maximum_allowed]": {
+    "last_validated_date": "2025-12-03T01:10:13+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_s3_task[non_existent_enum_value]": {
+    "last_validated_date": "2025-12-03T01:10:12+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.28,
+      "teardown": 0.0,
+      "total": 0.28
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_aws_sdk_s3_task[wrong_long_type_string]": {
+    "last_validated_date": "2025-12-03T01:10:12+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_dynamodb_task[wrong_float_type_string]": {
+    "last_validated_date": "2025-12-03T01:10:12+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.22,
+      "teardown": 0.0,
+      "total": 0.22
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_eventbridge_task[wrong_type_2nd_array_element]": {
+    "last_validated_date": "2025-12-03T01:10:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_eventbridge_task[wrong_type_nested_field]": {
+    "last_validated_date": "2025-12-03T01:10:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_eventbridge_task[wrong_type_top_level_field]": {
+    "last_validated_date": "2025-12-03T01:10:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_lambda_task[wrong_integer_type_string]": {
+    "last_validated_date": "2025-12-03T01:10:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.22,
+      "teardown": 0.0,
+      "total": 0.22
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_mock_result_field_not_in_api_spec[empty_json]": {
+    "last_validated_date": "2025-12-03T01:10:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_mock_result_field_not_in_api_spec[field_not_part_of_api_spec]": {
+    "last_validated_date": "2025-12-03T01:10:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.52,
+      "call": 0.65,
+      "teardown": 0.0,
+      "total": 1.17
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_sfn_task[field_name_not_in_sfn_case]": {
+    "last_validated_date": "2025-12-03T01:10:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_sfn_task[missing_required_fields]": {
+    "last_validated_date": "2025-12-03T01:10:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.26,
+      "teardown": 0.0,
+      "total": 0.26
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_sfn_task[wrong_timestamp_type_bool]": {
+    "last_validated_date": "2025-12-03T01:10:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_field_validation_mode.py::TestFieldValidationMode::test_strict_mode_sfn_task[wrong_timestamp_type_number]": {
+    "last_validated_date": "2025-12-03T01:10:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  }
+}

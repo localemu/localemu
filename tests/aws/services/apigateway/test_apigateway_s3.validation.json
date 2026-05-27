@@ -1,0 +1,32 @@
+{
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_request[CONVERT_TO_TEXT]": {
+    "last_validated_date": "2025-03-17T20:09:38+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_request[None]": {
+    "last_validated_date": "2025-03-17T20:09:05+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_request_convert_to_binary": {
+    "last_validated_date": "2025-03-17T20:10:12+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_request_convert_to_binary_with_request_template": {
+    "last_validated_date": "2025-03-17T20:10:23+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_response_convert_to_binary": {
+    "last_validated_date": "2025-03-17T20:12:11+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_response_convert_to_binary_with_request_template": {
+    "last_validated_date": "2025-03-17T20:12:45+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_response_convert_to_text": {
+    "last_validated_date": "2025-03-17T20:11:38+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::TestApiGatewayS3BinarySupport::test_apigw_s3_binary_support_response_no_content_handling": {
+    "last_validated_date": "2025-03-17T20:11:02+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::test_apigateway_s3_any": {
+    "last_validated_date": "2025-01-31T19:00:37+00:00"
+  },
+  "tests/aws/services/apigateway/test_apigateway_s3.py::test_apigateway_s3_method_mapping": {
+    "last_validated_date": "2024-06-14T16:12:27+00:00"
+  }
+}

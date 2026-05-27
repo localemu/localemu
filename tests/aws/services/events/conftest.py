@@ -1,0 +1,398 @@
+import json
+import logging
+
+import pytest
+
+from localemu.testing.snapshots.transformer_utility import TransformerUtility
+from localemu.utils.aws.arns import get_partition
+from localemu.utils.strings import short_uid
+from localemu.utils.sync import retry
+from tests.aws.services.events.helper_functions import put_entries_assert_results_sqs
+
+LOG = logging.getLogger(__name__)
+
+# some fixtures are shared in localemu/testing/pytest/fixtures.py
+
+
+@pytest.fixture
+def events_create_default_or_custom_event_bus(events_create_event_bus, region_name, account_id):
+    def _create_default_or_custom_event_bus(event_bus_type: str = "default"):
+        if event_bus_type == "default":
+            event_bus_name = "default"
+            event_bus_arn = f"arn:{get_partition(region_name)}:events:{region_name}:{account_id}:event-bus/default"
+        else:
+            event_bus_name = f"test-bus-{short_uid()}"
+            response = events_create_event_bus(Name=event_bus_name)
+            event_bus_arn = response["EventBusArn"]
+        return event_bus_name, event_bus_arn
+
+    return _create_default_or_custom_event_bus
+
+
+@pytest.fixture
+def events_create_archive(aws_client, region_name, account_id):
+    archives = []
+
+    def _create_archive(**kwargs):
+        if "ArchiveName" not in kwargs:
+            kwargs["ArchiveName"] = f"test-archive-{short_uid()}"
+
+        if "EventSourceArn" not in kwargs:
+            kwargs["EventSourceArn"] = (
+                f"arn:aws:events:{region_name}:{account_id}:event-bus/default"
+            )
+
+        response = aws_client.events.create_archive(**kwargs)
+        archives.append(kwargs["ArchiveName"])
+        return response
+
+    yield _create_archive
+
+    for archive in archives:
+        try:
+            aws_client.events.delete_archive(ArchiveName=archive)
+        except Exception as e:
+            LOG.warning(
+                "Failed to delete archive %s: %s",
+                archive,
+                e,
+            )
+
+
+@pytest.fixture
+def put_event_to_archive(aws_client, events_create_event_bus, events_create_archive):
+    def _put_event_to_archive(
+        archive_name: str | None = None,
+        event_pattern: dict | None = None,
+        event_bus_name: str | None = None,
+        event_source_arn: str | None = None,
+        entries: list[dict] | None = None,
+        num_events: int = 1,
+    ):
+        if not event_bus_name:
+            event_bus_name = f"test-bus-{short_uid()}"
+        if not event_source_arn:
+            response = events_create_event_bus(Name=event_bus_name)
+            event_source_arn = response["EventBusArn"]
+        if not archive_name:
+            archive_name = f"test-archive-{short_uid()}"
+
+        response = events_create_archive(
+            ArchiveName=archive_name,
+            EventSourceArn=event_source_arn,
+            EventPattern=json.dumps(event_pattern),
+            RetentionDays=1,
+        )
+        archive_arn = response["ArchiveArn"]
+
+        if entries:
+            num_events = len(entries)
+        else:
+            entries = []
+            for i in range(num_events):
+                entries.append(
+                    {
+                        "Source": "testSource",
+                        "DetailType": "testDetailType",
+                        "Detail": f"event number {i}",
+                        "EventBusName": event_bus_name,
+                    }
+                )
+
+        aws_client.events.put_events(
+            Entries=entries,
+        )
+
+        def wait_for_archive_event_count():
+            response = aws_client.events.describe_archive(ArchiveName=archive_name)
+            event_count = response["EventCount"]
+            assert event_count == num_events
+
+        retry(
+            wait_for_archive_event_count, retries=35, sleep=10
+        )  # events are batched and sent to the archive, this mostly takes at least 5 minutes on AWS
+
+        return {
+            "ArchiveName": archive_name,
+            "ArchiveArn": archive_arn,
+            "EventBusName": event_bus_name,
+            "EventBusArn": event_source_arn,
+        }
+
+    yield _put_event_to_archive
+
+
+@pytest.fixture
+def events_allow_event_rule_to_sqs_queue(aws_client):
+    def _allow_event_rule(sqs_queue_url, sqs_queue_arn, event_rule_arn) -> None:
+        # allow event rule to write to sqs queue
+        aws_client.sqs.set_queue_attributes(
+            QueueUrl=sqs_queue_url,
+            Attributes={
+                "Policy": json.dumps(
+                    {
+                        "Statement": [
+                            {
+                                "Sid": "AllowEventsToQueue",
+                                "Effect": "Allow",
+                                "Principal": {"Service": "events.amazonaws.com"},
+                                "Action": "sqs:SendMessage",
+                                "Resource": sqs_queue_arn,
+                                "Condition": {"ArnEquals": {"aws:SourceArn": event_rule_arn}},
+                            }
+                        ]
+                    }
+                )
+            },
+        )
+
+    return _allow_event_rule
+
+
+@pytest.fixture
+def put_events_with_filter_to_sqs(
+    aws_client, events_create_event_bus, events_put_rule, sqs_as_events_target
+):
+    def _put_events_with_filter_to_sqs(
+        pattern: dict,
+        entries_asserts: list[tuple[list[dict], bool]],
+        event_bus_name: str = None,
+        input_path: str = None,
+        input_transformer: dict[dict, str] = None,
+    ):
+        rule_name = f"test-rule-{short_uid()}"
+        target_id = f"test-target-{short_uid()}"
+        if not event_bus_name:
+            event_bus_name = f"test-bus-{short_uid()}"
+            events_create_event_bus(Name=event_bus_name)
+
+        queue_url, queue_arn, _ = sqs_as_events_target()
+
+        events_put_rule(
+            Name=rule_name,
+            EventBusName=event_bus_name,
+            EventPattern=json.dumps(pattern),
+        )
+
+        kwargs = {"InputPath": input_path} if input_path else {}
+        if input_transformer:
+            kwargs["InputTransformer"] = input_transformer
+
+        response = aws_client.events.put_targets(
+            Rule=rule_name,
+            EventBusName=event_bus_name,
+            Targets=[{"Id": target_id, "Arn": queue_arn, **kwargs}],
+        )
+
+        assert response["FailedEntryCount"] == 0
+        assert response["FailedEntries"] == []
+
+        messages = []
+        for entry_asserts in entries_asserts:
+            entries = entry_asserts[0]
+            for entry in entries:
+                entry["EventBusName"] = event_bus_name
+            message = put_entries_assert_results_sqs(
+                aws_client.events,
+                aws_client.sqs,
+                queue_url,
+                entries=entries,
+                should_match=entry_asserts[1],
+            )
+            if message is not None:
+                messages.extend(message)
+
+        return messages
+
+    yield _put_events_with_filter_to_sqs
+
+
+@pytest.fixture
+def events_log_group(aws_client, account_id, region_name):
+    log_groups = []
+    policy_names = []
+
+    def _create_log_group():
+        log_group_name = f"/aws/events/test-log-group-{short_uid()}"
+        aws_client.logs.create_log_group(logGroupName=log_group_name)
+        log_group_arn = f"arn:aws:logs:{region_name}:{account_id}:log-group:{log_group_name}"
+        log_groups.append(log_group_name)
+
+        resource_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "EventBridgePutLogEvents",
+                    "Effect": "Allow",
+                    "Principal": {"Service": "events.amazonaws.com"},
+                    "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+                    "Resource": f"{log_group_arn}:*",
+                }
+            ],
+        }
+        policy_name = f"EventBridgePolicy-{short_uid()}"
+        aws_client.logs.put_resource_policy(
+            policyName=policy_name, policyDocument=json.dumps(resource_policy)
+        )
+        policy_names.append(policy_name)
+
+        return {
+            "log_group_name": log_group_name,
+            "log_group_arn": log_group_arn,
+            "policy_name": policy_name,
+        }
+
+    yield _create_log_group
+
+    for log_group in log_groups:
+        try:
+            aws_client.logs.delete_log_group(logGroupName=log_group)
+        except Exception as e:
+            LOG.debug("error cleaning up log group %s: %s", log_group, e)
+
+    for policy_name in policy_names:
+        try:
+            aws_client.logs.delete_resource_policy(policyName=policy_name)
+        except Exception as e:
+            LOG.debug("error cleaning up resource policy %s: %s", policy_name, e)
+
+
+@pytest.fixture
+def logs_create_log_group(aws_client):
+    log_group_names = []
+
+    def _create_log_group(name: str = None) -> str:
+        if not name:
+            name = f"test-log-group-{short_uid()}"
+
+        aws_client.logs.create_log_group(logGroupName=name)
+        log_group_names.append(name)
+
+        return name
+
+    yield _create_log_group
+
+    for name in log_group_names:
+        try:
+            aws_client.logs.delete_log_group(logGroupName=name)
+        except Exception as e:
+            LOG.debug("error cleaning up log group %s: %s", name, e)
+
+
+@pytest.fixture
+def add_resource_policy_logs_events_access(aws_client):
+    policies = []
+
+    def _add_resource_policy_logs_events_access(log_group_arn: str):
+        policy_name = f"test-policy-{short_uid()}"
+
+        policy_document = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "AllowPutEvents",
+                    "Effect": "Allow",
+                    "Principal": {"Service": "events.amazonaws.com"},
+                    "Action": ["logs:PutLogEvents", "logs:CreateLogStream"],
+                    "Resource": log_group_arn,
+                },
+            ],
+        }
+        policy = aws_client.logs.put_resource_policy(
+            policyName=policy_name,
+            policyDocument=json.dumps(policy_document),
+        )
+
+        policies.append(policy_name)
+
+        return policy
+
+    yield _add_resource_policy_logs_events_access
+
+    for policy_name in policies:
+        aws_client.logs.delete_resource_policy(policyName=policy_name)
+
+
+@pytest.fixture
+def connection_name():
+    return f"test-connection-{short_uid()}"
+
+
+@pytest.fixture
+def destination_name():
+    return f"test-destination-{short_uid()}"
+
+
+@pytest.fixture
+def create_connection(aws_client, connection_name):
+    """Fixture to create a connection with given auth type and parameters."""
+
+    def _create_connection(auth_type_or_auth, auth_parameters=None):
+        # Handle both formats:
+        # 1. (auth_type, auth_parameters) - used by TestEventBridgeConnections
+        # 2. (auth) - used by TestEventBridgeApiDestinations
+        if auth_parameters is None:
+            # Format 2: Single auth dict parameter
+            auth = auth_type_or_auth
+            return aws_client.events.create_connection(
+                Name=connection_name,
+                AuthorizationType=auth.get("type"),
+                AuthParameters={
+                    auth.get("key"): auth.get("parameters"),
+                },
+            )
+        else:
+            # Format 1: auth type and auth parameters
+            return aws_client.events.create_connection(
+                Name=connection_name,
+                AuthorizationType=auth_type_or_auth,
+                AuthParameters=auth_parameters,
+            )
+
+    yield _create_connection
+
+    try:
+        aws_client.events.delete_connection(Name=connection_name)
+    except Exception as e:
+        LOG.debug("Error cleaning up connection: %s", e)
+
+
+@pytest.fixture
+def create_api_destination(aws_client, destination_name):
+    """Fixture to create an API destination with given parameters."""
+
+    def _create_api_destination(**kwargs):
+        return aws_client.events.create_api_destination(
+            Name=destination_name,
+            **kwargs,
+        )
+
+    return _create_api_destination
+
+
+#############################
+# Common Transformer Fixtures
+#############################
+
+
+@pytest.fixture
+def api_destination_snapshot(snapshot, destination_name):
+    snapshot.add_transformers_list(
+        [
+            snapshot.transform.regex(destination_name, "<destination-name>"),
+            snapshot.transform.key_value("ApiDestinationArn", reference_replacement=False),
+            snapshot.transform.key_value("ConnectionArn", reference_replacement=False),
+        ]
+    )
+    return snapshot
+
+
+@pytest.fixture
+def connection_snapshot(snapshot, connection_name):
+    snapshot.add_transformers_list(
+        [
+            snapshot.transform.regex(connection_name, "<connection-name>"),
+            TransformerUtility.resource_name(),
+        ]
+    )
+    return snapshot

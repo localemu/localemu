@@ -1,0 +1,18 @@
+from localemu.services.cloudformation.resource_provider import (
+    CloudFormationResourceProviderPlugin,
+    ResourceProvider,
+)
+
+
+class SESEmailIdentityProviderPlugin(CloudFormationResourceProviderPlugin):
+    name = "AWS::SES::EmailIdentity"
+
+    def __init__(self):
+        self.factory: type[ResourceProvider] | None = None
+
+    def load(self):
+        from localemu.services.ses.resource_providers.aws_ses_emailidentity import (
+            SESEmailIdentityProvider,
+        )
+
+        self.factory = SESEmailIdentityProvider

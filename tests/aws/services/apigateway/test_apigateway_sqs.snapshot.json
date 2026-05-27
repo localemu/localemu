@@ -1,0 +1,123 @@
+{
+  "tests/aws/services/apigateway/test_apigateway_sqs.py::test_sqs_request_and_response_xml_templates_integration": {
+    "recorded-date": "12-07-2024, 16:27:03",
+    "recorded-content": {
+      "sqs-json-response": {
+        "messageId": "<uuid:1>",
+        "requestId": "<uuid:2>"
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_sqs.py::test_sqs_aws_integration_with_message_attribute[MessageAttribute]": {
+    "recorded-date": "06-06-2024, 00:38:25",
+    "recorded-content": {
+      "sqs-message-body": {
+        "foo": "bar"
+      },
+      "sqs-message-attributes": {
+        "user-agent": {
+          "DataType": "String",
+          "StringValue": "BAR-Header"
+        }
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_sqs.py::test_sqs_aws_integration_with_message_attribute[MessageAttributes]": {
+    "recorded-date": "06-06-2024, 00:38:34",
+    "recorded-content": {
+      "sqs-message-body": {
+        "foo": "bar"
+      },
+      "sqs-message-attributes": {
+        "user-agent": {
+          "DataType": "String",
+          "StringValue": "BAR-Header"
+        }
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_sqs.py::test_sqs_aws_integration": {
+    "recorded-date": "19-03-2025, 13:27:52",
+    "recorded-content": {
+      "sqs-aws-integration-with-payload": {
+        "message": "great success!"
+      },
+      "sqs-aws-integration-without-payload": {
+        "message": "great success!"
+      },
+      "sqs-messages": [
+        {
+          "MessageId": "<uuid:1>",
+          "ReceiptHandle": "<receipt-handle:1>",
+          "MD5OfBody": "94232c5b8fc9272f6f73a1e36eb68fcf",
+          "Body": {
+            "foo": "bar"
+          }
+        },
+        {
+          "MessageId": "<uuid:2>",
+          "ReceiptHandle": "<receipt-handle:2>",
+          "MD5OfBody": "99914b932bd37a50b983c5e7c90ae93b",
+          "Body": {}
+        }
+      ]
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_sqs.py::test_sqs_amz_json_protocol": {
+    "recorded-date": "20-05-2025, 15:07:32",
+    "recorded-content": {
+      "sqs-messages": [
+        {
+          "MessageId": "<uuid:1>",
+          "ReceiptHandle": "<receipt-handle:1>",
+          "MD5OfBody": "<m-d5-of-body:1>",
+          "Body": {
+            "context": {
+              "resourceId": "<resource-id:1>",
+              "resourcePath": "/sqs",
+              "httpMethod": "POST",
+              "extendedRequestId": "<extended-request-id:1>",
+              "requestTime": "<request-time:1>",
+              "path": "/testing/sqs",
+              "accountId": "111111111111",
+              "protocol": "HTTP/1.1",
+              "requestOverride": "",
+              "stage": "testing",
+              "domainPrefix": "<api-id:1>",
+              "requestTimeEpoch": "request-time-epoch",
+              "requestId": "<uuid:2>",
+              "identity": "",
+              "domainName": "<domain-name:1>",
+              "deploymentId": "<deployment-id:1>",
+              "responseOverride": "",
+              "apiId": "<api-id:1>"
+            },
+            "identity": {
+              "cognitoIdentityPoolId": "",
+              "accountId": "",
+              "cognitoIdentityId": "",
+              "caller": "",
+              "sourceIp": "<source-ip:1>",
+              "principalOrgId": "",
+              "accessKey": "",
+              "cognitoAuthenticationType": "",
+              "cognitoAuthenticationProvider": "",
+              "userArn": "",
+              "userAgent": "python/requests/tests",
+              "user": ""
+            },
+            "requestOverride": {
+              "path": "",
+              "header": "",
+              "querystring": ""
+            },
+            "responseOverride": {
+              "header": ""
+            },
+            "authorizer_keys": {}
+          }
+        }
+      ]
+    }
+  }
+}

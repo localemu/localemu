@@ -1,0 +1,74 @@
+{
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_conditional_resource_referencing_conditional": {
+    "last_validated_date": "2026-02-04T01:53:29+00:00",
+    "durations_in_seconds": {
+      "setup": 0.7,
+      "call": 23.45,
+      "teardown": 14.46,
+      "total": 38.61
+    }
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_dependent_get_att": {
+    "last_validated_date": "2025-09-30T19:25:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.23,
+      "call": 0.36,
+      "teardown": 0.0,
+      "total": 0.59
+    }
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_dependent_ref": {
+    "last_validated_date": "2025-09-30T19:03:49+00:00",
+    "durations_in_seconds": {
+      "setup": 0.27,
+      "call": 0.34,
+      "teardown": 0.0,
+      "total": 0.61
+    }
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_nested_conditions[prod-bucket-policy]": {
+    "last_validated_date": "2023-06-26T12:24:03+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_nested_conditions[prod-nobucket-nopolicy]": {
+    "last_validated_date": "2023-06-26T12:22:58+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_nested_conditions[test-bucket-nopolicy]": {
+    "last_validated_date": "2023-06-26T12:21:54+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_nested_conditions[test-nobucket-nopolicy]": {
+    "last_validated_date": "2023-06-26T12:20:49+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_output_reference_to_skipped_resource": {
+    "last_validated_date": "2023-06-26T22:43:18+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_references_to_disabled_resources[no]": {
+    "last_validated_date": "2025-10-07T21:21:41+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 7.01,
+      "teardown": 4.39,
+      "total": 11.4
+    }
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_references_to_disabled_resources[yes]": {
+    "last_validated_date": "2025-10-07T21:21:30+00:00",
+    "durations_in_seconds": {
+      "setup": 0.89,
+      "call": 10.41,
+      "teardown": 6.43,
+      "total": 17.73
+    }
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestCloudFormationConditions::test_update_conditions": {
+    "last_validated_date": "2024-06-18T19:43:43+00:00"
+  },
+  "tests/aws/services/cloudformation/engine/test_conditions.py::TestValidateConditions::test_validate_equals_args_len": {
+    "last_validated_date": "2025-10-08T18:18:14+00:00",
+    "durations_in_seconds": {
+      "setup": 0.25,
+      "call": 0.36,
+      "teardown": 0.0,
+      "total": 0.61
+    }
+  }
+}

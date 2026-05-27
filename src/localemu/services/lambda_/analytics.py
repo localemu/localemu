@@ -1,0 +1,63 @@
+from enum import StrEnum
+
+from localemu.utils.analytics.metrics import LabeledCounter
+
+NAMESPACE = "lambda"
+
+hotreload_counter = LabeledCounter(namespace=NAMESPACE, name="hotreload", labels=["operation"])
+
+function_counter = LabeledCounter(
+    namespace=NAMESPACE,
+    name="function",
+    labels=[
+        "operation",
+        "status",
+        "runtime",
+        "package_type",
+        "invocation_type",  # only for operation "invoke", otherwise "n/a"
+        "initialization_type",
+    ],
+    schema_version=2,
+)
+
+
+class FunctionOperation(StrEnum):
+    invoke = "invoke"
+    create = "create"
+
+
+class FunctionStatus(StrEnum):
+    success = "success"
+    zero_reserved_concurrency_error = "zero_reserved_concurrency_error"
+    event_age_exceeded_error = "event_age_exceeded_error"
+    throttle_error = "throttle_error"
+    system_error = "system_error"
+    unhandled_state_error = "unhandled_state_error"
+    failed_state_error = "failed_state_error"
+    pending_state_error = "pending_state_error"
+    invalid_payload_error = "invalid_payload_error"
+    invocation_error = "invocation_error"
+
+
+class FunctionInitializationType(StrEnum):
+    # Maps to the Lambda environment variable AWS_LAMBDA_INITIALIZATION_TYPE
+    # Matches with lambda_models.InitializationType
+    on_demand = "on-demand"
+    lambda_managed_instances = "lambda-managed-instances"
+    # Only applies to the operation "invoke" because provisioned concurrency is not configured on "create"
+    provisioned_concurrency = "provisioned-concurrency"
+
+
+esm_counter = LabeledCounter(namespace=NAMESPACE, name="esm", labels=["source", "status"])
+
+
+class EsmExecutionStatus(StrEnum):
+    success = "success"
+    partial_batch_failure_error = "partial_batch_failure_error"
+    target_invocation_error = "target_invocation_error"
+    unhandled_error = "unhandled_error"
+    source_poller_error = "source_poller_error"
+    # TODO: Add tracking for filter error. Options:
+    #  a) raise filter exception and track it in the esm_worker
+    #  b) somehow add tracking in the individual pollers
+    filter_error = "filter_error"

@@ -1,0 +1,337 @@
+# LocalEmu project configuration
+[build-system]
+requires = ['setuptools>=64', 'wheel']
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localemu"
+version = "1.0.0"
+authors = [
+    { name = "LocalEmu Contributors", email = "info@localemu.cloud" }
+]
+description = "The core library and runtime of LocalEmu"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "asn1crypto>=1.5.1",
+    "click>=8.2.0",
+    "cachetools>=5.0",
+    "cryptography>=46.0.7",
+    "PyJWT[crypto]>=2.8.0",
+    "dnspython>=1.16.0",
+    "plux>=1.14.0",
+    "psutil>=5.4.8",
+    "python-dotenv>=0.19.1",
+    "pyyaml>=5.1",
+    "rich>=12.3.0",
+    "requests>=2.20.0",
+    "semver>=2.10",
+]
+dynamic = ["entry-points"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Emulators",
+]
+
+[project.scripts]
+localemu = "localemu.cli.main:main"
+awsemu = "localemu.cli.awsemu:main"
+lpm = "localemu.cli.lpm:cli"
+
+[project.urls]
+Homepage = "https://localemu.cloud"
+Documentation = "https://localemu.cloud/docs"
+Repository = "https://github.com/localemu/localemu.git"
+Issues = "https://github.com/localemu/localemu/issues"
+
+[project.optional-dependencies]
+# minimal required to actually run localemu on the host for services natively implemented in python
+base-runtime = [
+    # pinned / updated by ASF update action
+    "boto3==1.42.59",
+    # pinned / updated by ASF update action
+    "botocore==1.42.59",
+    # transitive dependency of botocore, added to avoid specific version
+    "awscrt>=0.13.14,!=0.27.1",
+    # cbor2 6.x ships C-only. LocalEmu uses cbor2's public per-call hook
+    # API (semantic_decoders=, encoders=) via aws/protocol/_cbor.py to
+    # apply the AWS Kinesis epoch-millis quirk; no private modules.
+    "cbor2>=6.0",
+    "dill==0.3.6",
+    "dnspython>=1.16.0",
+    "docker>=6.1.1",
+    "jsonpatch>=1.24",
+    "jsonpointer>=3.0.0",
+    "jsonschema>=4.25.1",
+    "hypercorn>=0.14.4",
+    "Twisted[tls]>=26.4.0",
+    "openapi-core>=0.19.2",
+    "pydantic>=2.11.9",
+    "pyopenssl>=23.0.0",
+    "python-dateutil>=2.9.0",
+    "readerwriterlock>=1.0.7",
+    "requests-aws4auth>=1.0",
+    # explicitly set urllib3 to force its usage / ensure compatibility
+    "urllib3>=2.7.0",
+    "Werkzeug>=3.1.3",
+    "xmltodict>=0.13.0",
+    "rolo>=0.8.1",
+]
+
+# required to actually run localemu on the host
+runtime = [
+    "localemu[base-runtime]",
+    # pinned / updated by ASF update action
+    "awscli==1.44.49",
+    "airspeed-ext>=0.6.3",
+    # antlr4-python3-runtime: exact pin because antlr4 runtime is tightly coupled to the generated parser code
+    "antlr4-python3-runtime==4.13.2",
+    "apispec>=5.1.1",
+    # pinning it to a higher version than what moto-ext requires
+    "aws-sam-translator>=1.105.0",
+    "crontab>=0.22.6",
+    "cryptography>=46.0.7",
+    "jinja2>=3.1.6",
+    "jsonpath-ng==1.7.0",
+    "jsonpath-rw>=1.4.0",
+    # kclpy-ext removed: KCL-based Kinesis consumption requires Java at runtime
+    # and is only used for Firehose KinesisStreamAsSource (rarely needed in local dev)
+    "moto-ext[all]>=5.1.22",
+    "opensearch-py>=2.4.1",
+    # Athena DuckDB-backed query engine. ~25 MB wheel, MIT-licensed.
+    # Without it the Athena provider returns empty Rows[] (matches the
+    # historic moto-only behaviour). sqlglot is used for the small
+    # number of dialect rewrites that the regex shim cannot handle.
+    "duckdb>=1.0",
+    "sqlglot>=23",
+    "pymongo>=4.2.0",
+    "PyJWT[crypto]>=2.8.0",
+    "pyopenssl>=23.0.0",
+    "responses>=0.25.8",
+]
+
+# for running tests and coverage analysis
+test = [
+    # runtime dependencies are required for running the tests
+    "localemu[runtime]",
+    "coverage[toml]>=5.5",
+    "httpx[http2]>=0.25",
+    "json5>=0.12.1",
+    "pluggy>=1.3.0",
+    "pytest>=7.4.2",
+    "pytest-split>=0.8.0",
+    "pytest-httpserver>=1.1.2",
+    "pytest-rerunfailures>=12.0",
+    "pytest-tinybird>=0.5.0",
+    "aws-cdk-lib>=2.88.0",
+    "websocket-client>=1.7.0",
+    "deepdiff",
+    "jsonpath-ng>1.6",
+    # Wire-protocol clients used by service-backend E2E tests:
+    #   pika           — AMQP for the MQ (RabbitMQ) round-trip.
+    #   kafka-python   — Apache Kafka producer / consumer for the MSK
+    #                    round-trip against the apache/kafka container.
+    "pika>=1.3",
+    "kafka-python>=2.0",
+]
+
+# for developing localemu
+dev = [
+    # test dependencies are required for developing localemu
+    "localemu[test]",
+    "coveralls>=3.3.1",
+    "deptry>=0.13.0",
+    "Cython",
+    "networkx>=2.8.4",
+    "openapi-spec-validator>=0.7.1",
+    "pandoc",
+    "pre-commit>=3.5.0",
+    "pypandoc",
+    "ruff>=0.3.3",
+    "rstr>=3.2.0",
+    "mypy",
+    "watchdog>=6",
+]
+
+# not strictly necessary for development, but provides type hint support for a better developer experience
+typehint = [
+    # typehint is an optional extension of the dev dependencies
+    "localemu[dev]",
+    # pinned / updated by ASF update action
+    "boto3-stubs[acm,acm-pca,amplify,apigateway,apigatewayv2,appconfig,appconfigdata,application-autoscaling,appsync,athena,autoscaling,backup,batch,ce,cloudcontrol,cloudformation,cloudfront,cloudtrail,cloudwatch,codebuild,codecommit,codeconnections,codedeploy,codepipeline,codestar-connections,cognito-identity,cognito-idp,dms,docdb,dynamodb,dynamodbstreams,ec2,ecr,ecs,efs,eks,elasticache,elasticbeanstalk,elbv2,emr,emr-serverless,es,events,firehose,fis,glacier,glue,iam,identitystore,iot,iot-data,iotwireless,kafka,kinesis,kinesisanalyticsv2,kms,lakeformation,lambda,logs,managedblockchain,mediaconvert,mq,mwaa,neptune,opensearch,organizations,pi,pipes,pinpoint,rds,rds-data,redshift,redshift-data,resource-groups,resourcegroupstaggingapi,route53,route53resolver,s3,s3control,sagemaker,sagemaker-runtime,secretsmanager,serverlessrepo,servicediscovery,ses,sesv2,sns,sqs,ssm,sso-admin,stepfunctions,sts,timestream-query,timestream-write,transcribe,verifiedpermissions,wafv2,xray]",
+]
+
+[tool.setuptools]
+include-package-data = false
+package-dir = { "" = "src" }
+
+[tool.setuptools.dynamic]
+readme = { file = ["README.md"], content-type = "text/markdown" }
+entry-points = { file = ["plux.ini"] }
+
+[tool.setuptools.packages.find]
+where = ["src/"]
+include = ["localemu*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"*" = [
+    "*.md",
+    "Makefile",
+]
+"localemu" = [
+    "aws/**/*.json",
+    "services/**/*.html",
+    "services/**/resource_providers/**/*.schema.json",
+    "runtime/lambda-init/arm64/init",
+    "runtime/lambda-init/x86_64/init",
+    "openapi.yaml",
+    "http/resources/swagger/templates/index.html",
+    "dashboard/static/index.html",
+    "dashboard/static/icons/*.svg"
+]
+
+[tool.ruff]
+# Generate code compatible with version defined in .python-version
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+exclude = [
+    ".venv*",
+    "venv*",
+    "dist",
+    "build",
+    "target",
+    "*.egg-info",
+    "src/*.egg-info",
+    ".filesystem",
+    "src/.filesystem",
+    ".git",
+    "src/localemu/services/stepfunctions/asl/antlr/runtime"
+]
+
+[tool.ruff.per-file-target-version]
+# Only allow minimum version for code used in the CLI
+"src/localemu/cli/**" = "py310"
+"src/localemu/packages/**" = "py310"
+"src/localemu/config.py" = "py310"
+"src/localemu/constants.py" = "py310"
+"src/localemu/utils/**" = "py310"  # imported by CLI tests
+"src/localemu/testing/pytest/**" = "py310" # imported by CLI tests
+"src/localemu/aws/connect.py" = "py310" # imported by CLI tests
+
+[tool.deptry]
+known_first_party = [
+    "vosk", # managed by localemu package manager
+    "debugpy", # managed by localemu package manager
+]
+extend_exclude = [
+    "scripts/**", # dependencies not handled by pyproject.toml
+    "src/localemu/testing/**", # utilities for testing
+    "src/localemu/aws/mocking.py", # not used at runtime
+    "src/localemu/aws/scaffold.py", # not used at runtime
+    "src/localemu/dev/**", # internal dev tooling
+    "src/localemu/services/stepfunctions/asl/antlr/runtime/**" # generated code
+]
+pep621_dev_dependency_groups = ["dev", "typehint", "test"]
+
+[tool.deptry.package_module_name_map]
+"localemu" = ["localemu"]
+
+[tool.deptry.per_rule_ignores]
+DEP001 = [
+    "stevedore", # used for CLI plugin debugging - TODO move this debugging CLI into plux
+]
+DEP002 = [
+    "awscli", # necessary for python init scripts - TODO deprecate python init scripts and remove this
+    "awscrt", # defined to ignore a specific version - TODO evaluate and clean up
+]
+
+[tool.ruff.lint]
+ignore = [
+    "B007", # TODO Loop control variable x not used within loop body
+    "B019", # TODO Use of `functools.lru_cache` or `functools.cache` on methods can lead to memory leaks
+    "B022", # TODO No arguments passed to `contextlib.suppress`. No exceptions will be suppressed and therefore this context manager is redundant
+    "B023", # TODO Function definition does not bind loop variable `server`
+    "B024", # TODO x is an abstract base class, but it has no abstract methods
+    "B027", # TODO `Server.do_shutdown` is an empty method in an abstract base class, but has no abstract decorator
+    "B904", # TODO Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+    "C901", # TODO function is too complex
+    "E402", # TODO Module level import not at top of file
+    "E501", # E501 Line too long - handled by black, see https://docs.astral.sh/ruff/faq/#is-ruff-compatible-with-black
+    "T201", # TODO `print` found
+    "T203", # TODO `pprint` found
+]
+select = ["B", "C", "E", "F", "I", "W", "T", "B9", "G", "UP"]
+extend-safe-fixes = [
+    "UP006", # unsafe-fix for py39
+    "UP035", # unsafe-fix for py39
+]
+
+# The rules below fill fix the code in a way that leaves multiple unused imports.
+# Since F401 (removing unused imports) is currently an unsafe fix, these imports cannot be automatically removed.
+# Therefore, we temporarily disable the rules below for __init__ files.
+[tool.ruff.lint.per-file-ignores]
+"tests/aws/services/lambda_/functions/**" = ["UP"]  # lambda tests parametrize the runtime
+
+[tool.ruff.lint.pyupgrade]
+# Avoid PEP 604 rewrites (e.g. Union[str, int] -> str | int), even with the `from __future__ import annotations`
+# import. It only affects py39 and can be removed after we drop it.
+keep-runtime-typing = true
+
+[tool.mypy]
+# Conservative baseline so mypy can be enabled in CI without immediately
+# drowning in errors. Tighten over time: drop `ignore_missing_imports`
+# once the hot paths have stubs, then flip `check_untyped_defs` on.
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false
+follow_imports = "skip"
+# Per-module overrides go below; start strict on small, owned modules.
+# Example:
+#   [[tool.mypy.overrides]]
+#   module = "localemu.services.lambda_.invocation.lambda_service"
+#   check_untyped_defs = true
+
+[tool.coverage.run]
+relative_files = true
+source = [
+    "localemu",
+]
+omit = [
+    "*/aws/api/*",
+    "*/extensions/api/*",
+    "*/services/stepfunctions/asl/antlr/runtime/*"
+]
+dynamic_context = "test_function"
+
+[tool.coverage.paths]
+source = [
+    "src"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    "raise NotImplemented.",
+    "return NotImplemented",
+    "def __repr__",
+]
+
+[tool.pytest.ini_options]
+log_cli = false
+log_level = "DEBUG"
+log_cli_format = "%(asctime)s.%(msecs)03d %(levelname)5s --- [%(threadName)12s] %(name)-26s : %(message)s"
+log_cli_date_format = "%Y-%m-%dT%H:%M:%S"
+
+[tool.pip-tools]
+# adding localemu itself here because it is referenced in the pyproject.toml for stacking the extras
+# pip, setuptools, and distribute are pip-tools defaults which need to be set again here
+unsafe-package = ["localemu", "pip", "setuptools", "distribute"] # packages that should not be pinned
+
+[tool.plux]
+entrypoint_build_mode = "manual"

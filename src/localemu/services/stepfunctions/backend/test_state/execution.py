@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import logging
+import threading
+
+from localemu.aws.api.stepfunctions import (
+    Arn,
+    ExecutionStatus,
+    InspectionLevel,
+    StateMachineType,
+    TestExecutionStatus,
+    TestStateOutput,
+    Timestamp,
+)
+from localemu.services.stepfunctions.asl.eval.evaluation_details import (
+    EvaluationDetails,
+)
+from localemu.services.stepfunctions.asl.eval.program_state import (
+    ProgramEnded,
+    ProgramError,
+    ProgramState,
+)
+from localemu.services.stepfunctions.asl.eval.test_state.program_state import (
+    ProgramCaughtError,
+    ProgramChoiceSelected,
+    ProgramRetriable,
+)
+from localemu.services.stepfunctions.asl.utils.encoding import to_json_str
+from localemu.services.stepfunctions.backend.activity import Activity
+from localemu.services.stepfunctions.backend.execution import (
+    BaseExecutionWorkerCommunication,
+    Execution,
+)
+from localemu.services.stepfunctions.backend.state_machine import StateMachineInstance
+from localemu.services.stepfunctions.backend.test_state.execution_worker import (
+    TestStateExecutionWorker,
+)
+from localemu.services.stepfunctions.backend.test_state.test_state_mock import TestStateMock
+
+LOG = logging.getLogger(__name__)
+
+
+class TestStateExecution(Execution):
+    exec_worker: TestStateExecutionWorker | None
+    next_state: str | None
+    state_name: str | None
+    mock: TestStateMock | None
+    variables: dict | None
+
+    class TestCaseExecutionWorkerCommunication(BaseExecutionWorkerCommunication):
+        _execution: TestStateExecution
+
+        def terminated(self) -> None:
+            exit_program_state: ProgramState = self.execution.exec_worker.env.program_state()
+            if isinstance(exit_program_state, ProgramChoiceSelected):
+                self.execution.exec_status = ExecutionStatus.SUCCEEDED
+                self.execution.output = self.execution.exec_worker.env.states.get_input()
+                self.execution.next_state = exit_program_state.next_state_name
+            elif isinstance(exit_program_state, ProgramCaughtError):
+                self.execution.exec_status = ExecutionStatus.SUCCEEDED
+                self.execution.error = exit_program_state.error
+                self.execution.cause = exit_program_state.cause
+                self.execution.output = self.execution.exec_worker.env.states.get_input()
+                self.execution.next_state = exit_program_state.next_state_name
+            elif isinstance(exit_program_state, ProgramRetriable):
+                self.execution.exec_status = ExecutionStatus.SUCCEEDED
+                self.execution.error = exit_program_state.error
+                self.execution.cause = exit_program_state.cause
+            else:
+                self._reflect_execution_status()
+
+    def __init__(
+        self,
+        name: str,
+        role_arn: Arn,
+        exec_arn: Arn,
+        account_id: str,
+        region_name: str,
+        state_machine: StateMachineInstance,
+        start_date: Timestamp,
+        activity_store: dict[Arn, Activity],
+        state_name: str | None = None,
+        input_data: dict | None = None,
+        mock: TestStateMock | None = None,
+        variables: dict | None = None,
+    ):
+        super().__init__(
+            name=name,
+            sm_type=StateMachineType.STANDARD,
+            role_arn=role_arn,
+            exec_arn=exec_arn,
+            account_id=account_id,
+            region_name=region_name,
+            state_machine=state_machine,
+            start_date=start_date,
+            activity_store=activity_store,
+            input_data=input_data,
+            cloud_watch_logging_session=None,
+            trace_header=None,
+        )
+        self._execution_terminated_event = threading.Event()
+        self.next_state = None
+        self.state_name = state_name
+        self.mock = mock
+        self.variables = variables
+
+    def _get_start_execution_worker_comm(self) -> BaseExecutionWorkerCommunication:
+        return self.TestCaseExecutionWorkerCommunication(self)
+
+    def _get_start_execution_worker(self) -> TestStateExecutionWorker:
+        return TestStateExecutionWorker(
+            evaluation_details=EvaluationDetails(
+                aws_execution_details=self._get_start_aws_execution_details(),
+                execution_details=self.get_start_execution_details(),
+                state_machine_details=self.get_start_state_machine_details(),
+            ),
+            exec_comm=self._get_start_execution_worker_comm(),
+            cloud_watch_logging_session=self._cloud_watch_logging_session,
+            activity_store=self._activity_store,
+            state_name=self.state_name,
+            mock=self.mock,
+            variables=self.variables,
+        )
+
+    def publish_execution_status_change_event(self):
+        # Do not publish execution status change events during test state execution.
+        pass
+
+    def to_test_state_output(self, inspection_level: InspectionLevel) -> TestStateOutput:
+        exit_program_state: ProgramState = self.exec_worker.env.program_state()
+        if isinstance(exit_program_state, ProgramEnded):
+            output_str = to_json_str(self.output)
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.SUCCEEDED, output=output_str
+            )
+        elif isinstance(exit_program_state, ProgramError):
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.FAILED,
+                error=exit_program_state.error["error"],
+                cause=exit_program_state.error["cause"],
+            )
+        elif isinstance(exit_program_state, ProgramChoiceSelected):
+            output_str = to_json_str(self.output)
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.SUCCEEDED, nextState=self.next_state, output=output_str
+            )
+        elif isinstance(exit_program_state, ProgramCaughtError):
+            output_str = to_json_str(self.output)
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.CAUGHT_ERROR,
+                nextState=self.next_state,
+                output=output_str,
+                error=exit_program_state.error,
+                cause=exit_program_state.cause,
+            )
+        elif isinstance(exit_program_state, ProgramRetriable):
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.RETRIABLE,
+                error=exit_program_state.error,
+                cause=exit_program_state.cause,
+            )
+        else:
+            # TODO: handle other statuses
+            LOG.warning(
+                "Unsupported StateMachine exit type for TestState '%s'",
+                type(exit_program_state),
+            )
+            output_str = to_json_str(self.output)
+            test_state_output = TestStateOutput(
+                status=TestExecutionStatus.FAILED, output=output_str
+            )
+
+        match inspection_level:
+            case InspectionLevel.TRACE:
+                test_state_output["inspectionData"] = self.exec_worker.env.inspection_data
+            case InspectionLevel.DEBUG:
+                test_state_output["inspectionData"] = self.exec_worker.env.inspection_data
+
+        return test_state_output

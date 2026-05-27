@@ -1,0 +1,232 @@
+import textwrap
+
+import requests
+
+from localemu.utils.bootstrap import (
+    Container,
+    ContainerConfigurators,
+    configure_container,
+    get_gateway_url,
+)
+from localemu.utils.common import external_service_ports
+from localemu.utils.container_utils.container_client import BindMount
+
+
+def test_common_container_fixture_configurators(
+    container_factory, wait_for_localemu_ready, tmp_path
+):
+    volume = tmp_path / "localemu-volume"
+    volume.mkdir(parents=True)
+
+    container: Container = container_factory(
+        configurators=[
+            ContainerConfigurators.random_container_name,
+            ContainerConfigurators.random_gateway_port,
+            ContainerConfigurators.random_service_port_range(20),
+            ContainerConfigurators.debug,
+            ContainerConfigurators.mount_docker_socket,
+            ContainerConfigurators.mount_localemu_volume(volume),
+            ContainerConfigurators.env_vars(
+                {
+                    "FOOBAR": "foobar",
+                    "MY_TEST_ENV": "test",
+                }
+            ),
+        ]
+    )
+
+    running_container = container.start()
+    wait_for_localemu_ready(running_container)
+    url = get_gateway_url(container)
+
+    # port was exposed correctly
+    response = requests.get(f"{url}/_localemu/health")
+    assert response.ok
+
+    # volume was mounted and directories were created correctly
+    assert (volume / "cache" / "machine.json").exists()
+
+    inspect = running_container.inspect()
+    # volume was mounted correctly
+    assert {
+        "Type": "bind",
+        "Source": str(volume),
+        "Destination": "/var/lib/localemu",
+        "Mode": "",
+        "RW": True,
+        "Propagation": "rprivate",
+    } in inspect["Mounts"]
+    # docker socket was mounted correctly
+    assert {
+        "Type": "bind",
+        "Source": "/var/run/docker.sock",
+        "Destination": "/var/run/docker.sock",
+        "Mode": "",
+        "RW": True,
+        "Propagation": "rprivate",
+    } in inspect["Mounts"]
+
+    # debug was set
+    assert "DEBUG=1" in inspect["Config"]["Env"]
+    # environment variables were set
+    assert "FOOBAR=foobar" in inspect["Config"]["Env"]
+    assert "MY_TEST_ENV=test" in inspect["Config"]["Env"]
+    # container name was set
+    assert f"MAIN_CONTAINER_NAME={container.config.name}" in inspect["Config"]["Env"]
+
+
+def test_custom_command_configurator(container_factory, tmp_path, stream_container_logs):
+    tmp_dir = tmp_path
+
+    script = tmp_dir / "my-command.sh"
+    script.write_text(
+        textwrap.dedent(
+            """
+            #!/bin/bash
+            echo "foobar"
+            echo "$@"
+            """
+        ).strip()
+    )
+    script.chmod(0o777)
+
+    container: Container = container_factory(
+        configurators=[
+            ContainerConfigurators.random_container_name,
+            ContainerConfigurators.custom_command(
+                ["/tmp/pytest-tmp-path/my-command.sh", "hello", "world"]
+            ),
+            ContainerConfigurators.volume(BindMount(str(tmp_path), "/tmp/pytest-tmp-path")),
+        ],
+        remove=False,
+    )
+
+    running_container = container.start()
+    assert running_container.wait_until_ready(timeout=5)
+    assert running_container.get_logs().strip() == "foobar\nhello world"
+
+
+def test_default_localemu_container_configurator(
+    container_factory, wait_for_localemu_ready, tmp_path, monkeypatch, stream_container_logs
+):
+    volume = tmp_path / "localemu-volume"
+    volume.mkdir(parents=True)
+
+    # overwrite a few config variables
+    from localemu import config
+
+    monkeypatch.setenv("DEBUG", "1")
+    monkeypatch.setenv("LOCALEMU_API_KEY", "")
+    monkeypatch.setenv("ACTIVATE_PRO", "0")
+    monkeypatch.setattr(config, "DEBUG", True)
+    monkeypatch.setattr(config, "VOLUME_DIR", str(volume))
+    monkeypatch.setattr(config, "DOCKER_FLAGS", "-p 23456:4566 -e MY_TEST_VAR=foobar")
+
+    container: Container = container_factory()
+    configure_container(container)
+
+    stream_container_logs(container)
+    wait_for_localemu_ready(container.start())
+
+    # check startup works correctly
+    response = requests.get("http://localhost:4566/_localemu/health")
+    assert response.ok
+
+    # check docker-flags was created correctly
+    response = requests.get("http://localhost:23456/_localemu/health")
+    assert response.ok, "couldn't reach localemu on port 23456 - does DOCKER_FLAGS work?"
+
+    response = requests.get("http://localhost:4566/_localemu/diagnose")
+    assert response.ok, "couldn't reach diagnose endpoint. is DEBUG=1 set?"
+    diagnose = response.json()
+
+    # a few smoke tests of important configs
+    assert diagnose["config"]["GATEWAY_LISTEN"] == ["0.0.0.0:4566"]
+    # check that docker-socket was mounted correctly
+    assert diagnose["docker-inspect"], "was the docker socket mounted?"
+    assert diagnose["docker-inspect"]["Config"]["Image"] == "localemu/localemu"
+    assert diagnose["docker-inspect"]["Path"] == "docker-entrypoint.sh"
+    assert {
+        "Type": "bind",
+        "Source": str(volume),
+        "Destination": "/var/lib/localemu",
+        "Mode": "",
+        "RW": True,
+        "Propagation": "rprivate",
+    } in diagnose["docker-inspect"]["Mounts"]
+
+    # from DOCKER_FLAGS
+    assert "MY_TEST_VAR=foobar" in diagnose["docker-inspect"]["Config"]["Env"]
+
+    # check that external service ports were mapped correctly
+    ports = diagnose["docker-inspect"]["NetworkSettings"]["Ports"]
+    for port in external_service_ports:
+        assert ports[f"{port}/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": f"{port}"}]
+
+
+def test_container_configurator_deprecation_warning(container_factory, monkeypatch, caplog):
+    # set non-prefixed well-known environment variable on the mocked OS env
+    monkeypatch.setenv("SERVICES", "1")
+
+    # config the container
+    container: Container = container_factory()
+    configure_container(container)
+
+    # assert the deprecation warning
+    assert "Non-prefixed environment variable" in caplog.text
+    assert "SERVICES" in container.config.env_vars
+
+
+def test_container_configurator_no_deprecation_warning_on_prefix(
+    container_factory, monkeypatch, caplog
+):
+    # set non-prefixed well-known environment variable on the mocked OS env
+    monkeypatch.setenv("LOCALEMU_SERVICES", "1")
+
+    container: Container = container_factory()
+    configure_container(container)
+
+    assert "Non-prefixed environment variable" not in caplog.text
+    assert "LOCALEMU_SERVICES" in container.config.env_vars
+
+
+def test_container_configurator_no_deprecation_warning_for_ci_env_var(
+    container_factory, monkeypatch, caplog
+):
+    # set the "CI" env var indicating that we are running in a CI environment
+    monkeypatch.setenv("CI", "1")
+
+    container: Container = container_factory()
+    configure_container(container)
+
+    assert "Non-prefixed environment variable" not in caplog.text
+    assert "CI" in container.config.env_vars
+
+
+def test_container_configurator_no_deprecation_warning_on_profile(
+    container_factory, monkeypatch, caplog, tmp_path
+):
+    from localemu import config
+
+    # create a test profile
+    tmp_config_dir = tmp_path
+    test_profile = tmp_config_dir / "testprofile.env"
+    test_profile.write_text(
+        textwrap.dedent(
+            """
+            SERVICES=1
+            """
+        ).strip()
+    )
+
+    # patch the profile config / env
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_config_dir)
+    monkeypatch.setattr(config, "LOADED_PROFILES", ["testprofile"])
+    monkeypatch.setenv("SERVICES", "1")
+
+    container: Container = container_factory()
+    configure_container(container)
+
+    # assert that profile env vars do not raise a deprecation warning
+    assert "Non-prefixed environment variable SERVICES" not in caplog.text
+    assert "SERVICES" in container.config.env_vars

@@ -1,0 +1,90 @@
+import pytest
+
+from localemu.services.cloudformation.api_utils import is_local_service_url
+from localemu.services.cloudformation.deployment_utils import (
+    PLACEHOLDER_AWS_NO_VALUE,
+    remove_none_values,
+)
+from localemu.services.cloudformation.engine.template_deployer import order_resources
+from localemu.services.cloudformation.engine.v2.resolving import REGEX_DYNAMIC_REF
+
+
+def test_is_local_service_url():
+    local_urls = [
+        "http://localhost",
+        "https://localhost",
+        "http://localhost:4566",
+        "https://localhost:4566",
+        "http://localhost:4566",
+        "https://s3.localhost",
+        "http://mybucket.s3.localhost:4566",
+        "https://mybucket.s3.localhost",
+    ]
+    remote_urls = [
+        "https://mybucket.s3.amazonaws.com",
+        "http://mybucket.s3.us-east-1.amazonaws.com",
+    ]
+    for url in local_urls:
+        assert is_local_service_url(url)
+    for url in remote_urls:
+        assert not is_local_service_url(url)
+
+
+def test_remove_none_values():
+    template = {
+        "Properties": {
+            "prop1": 123,
+            "nested": {"test1": PLACEHOLDER_AWS_NO_VALUE, "test2": None},
+            "list": [1, 2, PLACEHOLDER_AWS_NO_VALUE, 3, None],
+        }
+    }
+    result = remove_none_values(template)
+    assert result == {"Properties": {"prop1": 123, "nested": {}, "list": [1, 2, 3]}}
+
+
+def test_order_resources():
+    resources: dict[str, dict] = {
+        "B": {
+            "Type": "AWS::SSM::Parameter",
+            "Properties": {
+                "Type": "String",
+                "Value": {
+                    "Ref": "A",
+                },
+            },
+        },
+        "A": {
+            "Type": "AWS::SNS::Topic",
+        },
+    }
+
+    sorted_resources = order_resources(
+        resources=resources, resolved_conditions={}, resolved_parameters={}
+    )
+
+    assert list(sorted_resources.keys()) == ["A", "B"]
+
+
+class TestDynamicResolving:
+    @pytest.mark.parametrize(
+        "value,matches",
+        [
+            pytest.param("{{resolve:ssm:abc123}}", True, id="ssm-basic"),
+            pytest.param("abc:{{resolve:ssm:abc123}}:foo", True, id="ssm-with-surrounding"),
+            pytest.param("{{resolve:ssm:${ParameterName}}}", False, id="ssm-in-sub"),
+            pytest.param("{{resolve:secretsmanager:foo}}", True, id="secrets-basic"),
+            pytest.param(
+                "{{resolve:secretsmanager:arn:aws:secretsmanager:us-east-1:000000000000:secret:foo:SecretString:}}",
+                True,
+                id="secrets-partial",
+            ),
+            pytest.param(
+                "{{resolve:secretsmanager:arn:aws:secretsmanager:us-east-1:000000000000:secret:foo:SecretString:::}}",
+                True,
+                id="secrets-full",
+            ),
+            pytest.param("{{resolve:secretsmanager:${SecretName}}}", False, id="secrets-in-sub"),
+        ],
+    )
+    def test_dynamic_ref_regex_matches(self, value, matches):
+        assert bool(REGEX_DYNAMIC_REF.search(value)) == matches

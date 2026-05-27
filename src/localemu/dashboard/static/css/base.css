@@ -1,0 +1,145 @@
+/* Solarized dark palette + global resets. Single source of truth for
+   colour tokens; every other stylesheet references these CSS variables. */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --base03: #002b36;
+  --base02: #073642;
+  --base01: #586e75;
+  --base00: #657b83;
+  --base0:  #839496;
+  --base1:  #93a1a1;
+  --teal:   #2aa198;
+  --green:  #859900;
+  --yellow: #b58900;
+  --orange: #cb4b16;
+  --red:    #dc322f;
+  --blue:   #268bd2;
+  --violet: #6c71c4;
+  --sidebar-width: 240px;
+  --topbar-height: 48px;
+  --activity-height: 200px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--base03);
+  color: var(--base0);
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--teal);
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover { text-decoration: underline; }
+
+/* ── Top bar shell ── */
+#topbar {
+  height: var(--topbar-height);
+  background: var(--base03);
+  border-bottom: 1px solid var(--base02);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+#topbar-left, #topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#topbar-left .logo-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--teal);
+  letter-spacing: 0.5px;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+#topbar-left a.logo-text:hover { background: rgba(42, 161, 152, 0.15); }
+#topbar-left a.logo-text:focus-visible { outline: 1px solid var(--teal); outline-offset: 2px; }
+#topbar-left .separator { color: var(--base01); }
+#hamburger-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--base1);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--base02);
+  color: var(--base0);
+  border: 1px solid var(--base01);
+  white-space: nowrap;
+  user-select: none;
+}
+.badge.accent { border-color: var(--teal); color: var(--teal); }
+.badge .badge-label { color: var(--base01); margin-right: 4px; }
+.badge input[type=checkbox] { margin-right: 6px; vertical-align: middle; }
+
+#export-btn {
+  background: var(--base02);
+  border: 1px solid var(--base01);
+  color: var(--base0);
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+#export-btn:hover { border-color: var(--teal); color: var(--teal); }
+
+/* ── Connection status ── */
+.conn-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--base01);
+  margin-right: 6px;
+}
+.conn-dot.connected { background: var(--green); }
+.conn-dot.polling   { background: var(--yellow); }
+.conn-dot.offline   { background: var(--red); }
+.conn-label { font-size: 11px; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: var(--base02);
+  border: 1px solid var(--teal);
+  color: var(--teal);
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+#toast.visible { opacity: 1; transform: translateY(0); }
+#toast.error { border-color: var(--red); color: var(--red); }

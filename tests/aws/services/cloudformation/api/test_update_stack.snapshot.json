@@ -1,0 +1,206 @@
+{
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_update_with_resource_types": {
+    "recorded-date": "19-11-2022, 14:34:18",
+    "recorded-content": {
+      "invalid_type_error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Resource type AWS::SNS::Topic is not allowed by parameter ResourceTypes [AWS::EC2:*]",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "resource_not_allowed": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Resource type AWS::SNS::Topic is not allowed by parameter ResourceTypes [AWS::EC2::*]",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_basic_update": {
+    "recorded-date": "21-11-2022, 08:27:37",
+    "recorded-content": {
+      "update_response": {
+        "StackId": "<stack-id:1>",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_no_template_error": {
+    "recorded-date": "21-11-2022, 08:57:45",
+    "recorded-content": {
+      "error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Either Template URL or Template Body must be specified.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_no_parameters_error_update": {
+    "recorded-date": "21-11-2022, 09:45:22",
+    "recorded-content": {}
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_update_with_previous_parameter_value": {
+    "recorded-date": "08-08-2025, 21:51:58",
+    "recorded-content": {
+      "topic-attributes": {
+        "DisplayName": "",
+        "EffectiveDeliveryPolicy": {
+          "http": {
+            "defaultHealthyRetryPolicy": {
+              "minDelayTarget": 20,
+              "maxDelayTarget": 20,
+              "numRetries": 3,
+              "numMaxDelayRetries": 0,
+              "numNoDelayRetries": 0,
+              "numMinDelayRetries": 0,
+              "backoffFunction": "linear"
+            },
+            "disableSubscriptionOverrides": false,
+            "defaultRequestPolicy": {
+              "headerContentType": "text/plain; charset=UTF-8"
+            }
+          }
+        },
+        "Owner": "111111111111",
+        "Policy": {
+          "Version": "2008-10-17",
+          "Id": "__default_policy_ID",
+          "Statement": [
+            {
+              "Sid": "__default_statement_ID",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Action": [
+                "SNS:GetTopicAttributes",
+                "SNS:SetTopicAttributes",
+                "SNS:AddPermission",
+                "SNS:RemovePermission",
+                "SNS:DeleteTopic",
+                "SNS:Subscribe",
+                "SNS:ListSubscriptionsByTopic",
+                "SNS:Publish"
+              ],
+              "Resource": "arn:<partition>:sns:<region>:111111111111:topic-e848c848",
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceOwner": "111111111111"
+                }
+              }
+            }
+          ]
+        },
+        "SubscriptionsConfirmed": "0",
+        "SubscriptionsDeleted": "0",
+        "SubscriptionsPending": "0",
+        "TopicArn": "arn:<partition>:sns:<region>:111111111111:topic-e848c848"
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_update_with_role_without_permissions": {
+    "recorded-date": "21-11-2022, 14:14:52",
+    "recorded-content": {
+      "error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Role arn:<partition>:iam::111111111111:role/role-fb405076 is invalid or cannot be assumed",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_update_with_invalid_rollback_configuration_errors": {
+    "recorded-date": "21-11-2022, 15:36:32",
+    "recorded-content": {
+      "type_error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Rollback Trigger Type not supported",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "arn_error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "RelativeId of a Rollback Trigger's ARN is incorrect",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_diff_after_update": {
+    "recorded-date": "09-04-2024, 06:19:23",
+    "recorded-content": {
+      "get-template-response": {
+        "StagesAvailable": [
+          "Original",
+          "Processed"
+        ],
+        "TemplateBody": "\nResources:\n    SimpleParam1:\n        Type: AWS::SSM::Parameter\n        Properties:\n            Value: after-stack-update\n            Type: String\n",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "update-error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "No updates are to be performed.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_update_stack.py::test_update_deleted_stack": {
+    "recorded-date": "10-10-2025, 21:42:05",
+    "recorded-content": {
+      "Error": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "Stack:<stack-id> is in DELETE_COMPLETE state and can not be updated.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  }
+}

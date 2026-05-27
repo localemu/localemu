@@ -1,0 +1,173 @@
+{
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[DEBUG-BASE_FAIL_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.19,
+      "teardown": 0.0,
+      "total": 0.19
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[DEBUG-BASE_MAP_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.18,
+      "teardown": 0.0,
+      "total": 0.18
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[DEBUG-BASE_PASS_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.19,
+      "teardown": 0.0,
+      "total": 0.19
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[INFO-BASE_FAIL_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:38+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[INFO-BASE_MAP_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[INFO-BASE_PASS_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:38+00:00",
+    "durations_in_seconds": {
+      "setup": 0.5,
+      "call": 0.6,
+      "teardown": 0.0,
+      "total": 1.1
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[TRACE-BASE_FAIL_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:40+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.19,
+      "teardown": 0.0,
+      "total": 0.19
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[TRACE-BASE_MAP_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:40+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name[TRACE-BASE_PASS_STATE_MACHINE]": {
+    "last_validated_date": "2025-12-03T00:48:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.18,
+      "teardown": 0.0,
+      "total": 0.18
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[DEBUG-State0]": {
+    "last_validated_date": "2025-12-03T00:48:40+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[DEBUG-State1]": {
+    "last_validated_date": "2025-12-03T00:48:41+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.27,
+      "teardown": 0.0,
+      "total": 0.27
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[INFO-State0]": {
+    "last_validated_date": "2025-12-03T00:48:40+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.19,
+      "teardown": 0.0,
+      "total": 0.19
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[INFO-State1]": {
+    "last_validated_date": "2025-12-03T00:48:40+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[TRACE-State0]": {
+    "last_validated_date": "2025-12-03T00:48:41+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.21,
+      "teardown": 0.0,
+      "total": 0.21
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_multi_state[TRACE-State1]": {
+    "last_validated_date": "2025-12-03T00:48:41+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.18,
+      "teardown": 0.0,
+      "total": 0.18
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_validation_failures[dne]": {
+    "last_validated_date": "2025-12-03T00:48:41+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.2,
+      "teardown": 0.0,
+      "total": 0.2
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_validation_failures[empty]": {
+    "last_validated_date": "2025-12-03T00:48:42+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.06,
+      "teardown": 0.0,
+      "total": 0.06
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_base_state_name_validation_failures[invalid]": {
+    "last_validated_date": "2025-12-03T00:48:42+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.59,
+      "teardown": 0.0,
+      "total": 0.59
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_machine_scenarios.py::TestStateMachineScenarios::test_state_name_invalid_state_definition": {
+    "last_validated_date": "2025-12-04T12:16:39+00:00",
+    "durations_in_seconds": {
+      "setup": 0.55,
+      "call": 0.67,
+      "teardown": 0.0,
+      "total": 1.22
+    }
+  }
+}

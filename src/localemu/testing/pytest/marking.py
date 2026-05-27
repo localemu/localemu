@@ -1,0 +1,231 @@
+"""
+Custom pytest mark typings
+"""
+
+import os
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+import pytest
+from _pytest.config import PytestPluginManager
+from _pytest.config.argparsing import Parser
+
+
+class AwsCompatibilityMarkers:
+    # test has been successfully run against AWS, ideally multiple times
+    validated = pytest.mark.aws_validated
+
+    # implies aws_validated. test needs additional setup, configuration or some other steps not included in the test setup itself
+    manual_setup_required = pytest.mark.aws_manual_setup_required
+
+    # fails against AWS but should be made runnable against AWS in the future, basically a TODO
+    needs_fixing = pytest.mark.aws_needs_fixing
+
+    # only runnable against localemu by design
+    only_localemu = pytest.mark.aws_only_localemu
+
+    # it's unknown if the test works (reliably) against AWS or not
+    unknown = pytest.mark.aws_unknown
+
+
+class ParityMarkers:
+    aws_validated = pytest.mark.aws_validated
+    only_localemu = pytest.mark.only_localemu
+
+
+class SkipSnapshotVerifyMarker:
+    def __call__(
+        self,
+        *,
+        paths: "list[str] | None" = None,
+        condition: "Callable[[...], bool] | None" = None,
+    ): ...
+
+
+class MultiRuntimeMarker:
+    def __call__(self, *, scenario: str, runtimes: list[str] | None = None): ...
+
+
+class SnapshotMarkers:
+    skip_snapshot_verify: SkipSnapshotVerifyMarker = pytest.mark.skip_snapshot_verify
+
+
+class Markers:
+    aws = AwsCompatibilityMarkers
+    parity = ParityMarkers  # TODO: in here for compatibility sake. Remove when -ext has been refactored to use @markers.aws.*
+    snapshot = SnapshotMarkers
+
+    multiruntime: MultiRuntimeMarker = pytest.mark.multiruntime
+
+    # test selection
+    acceptance_test = pytest.mark.acceptance_test
+    """This test is an acceptance test"""
+    skip_offline = pytest.mark.skip_offline
+    """Test is skipped if offline, as it requires some sort of internet connection to run"""
+    only_on_amd64 = pytest.mark.only_on_amd64
+    """Test requires ability of the system to execute amd64 binaries"""
+    only_on_arm64 = pytest.mark.only_on_arm64
+    """Test requires ability of the system to execute arm64 binaries"""
+    resource_heavy = pytest.mark.resource_heavy
+    """Test is very resource heavy, and might be skipped in CI"""
+    requires_in_container = pytest.mark.requires_in_container
+    """Test requires LocalEmu to run inside a container"""
+    requires_in_process = pytest.mark.requires_in_process
+    """The test and the LS instance have to be run in the same process"""
+    requires_docker = pytest.mark.requires_docker
+    """The test requires docker or a compatible container engine - will not work on kubernetes"""
+    lambda_runtime_update = pytest.mark.lambda_runtime_update
+    """Tests to execute when updating snapshots for a new Lambda runtime"""
+    skip_k8s = pytest.mark.skip_k8s
+    """This test will be skipped in k8s environment"""
+
+
+# pytest plugin
+if TYPE_CHECKING:
+    from _pytest.config import Config
+
+
+@pytest.hookimpl
+def pytest_addoption(parser: Parser, pluginmanager: PytestPluginManager):
+    parser.addoption(
+        "--offline",
+        action="store_true",
+        default=False,
+        help="test run will not have an internet connection",
+    )
+
+
+def enforce_single_aws_marker(items: list[pytest.Item]):
+    """Enforce that each test has exactly one aws compatibility marker"""
+    marker_errors = []
+
+    for item in items:
+        # we should only concern ourselves with tests in tests/aws/
+        if "tests/aws" not in item.fspath.dirname:
+            continue
+
+        aws_markers = []
+        for mark in item.iter_markers():
+            if mark.name.startswith("aws_"):
+                aws_markers.append(mark.name)
+
+        if len(aws_markers) > 1:
+            marker_errors.append(f"{item.nodeid}: Too many aws markers specified: {aws_markers}")
+        elif len(aws_markers) == 0:
+            marker_errors.append(
+                f"{item.nodeid}: Missing aws marker. Specify at least one marker, e.g. @markers.aws.validated"
+            )
+
+    if marker_errors:
+        raise pytest.UsageError(*marker_errors)
+
+
+def filter_by_markers(config: "Config", items: list[pytest.Item]):
+    """Filter tests by markers."""
+    from localemu import config as localemu_config
+    from localemu.utils.bootstrap import in_ci
+    from localemu.utils.platform import Arch, get_arch
+
+    is_offline = config.getoption("--offline")
+    is_in_docker = localemu_config.is_in_docker
+    is_in_ci = in_ci()
+    is_amd64 = get_arch() == Arch.amd64
+    is_arm64 = get_arch() == Arch.arm64
+    # Inlining `is_aws_cloud()` here because localemu.testing.aws.util imports boto3,
+    # which is not installed for the CLI tests
+    is_real_aws = os.environ.get("TEST_TARGET", "") == "AWS_CLOUD"
+
+    if is_real_aws:
+        # Do not skip any tests if they are executed against real AWS
+        return
+
+    skip_offline = pytest.mark.skip(
+        reason="Test cannot be executed offline / in a restricted network environment. "
+        "Add network connectivity and remove the --offline option when running "
+        "the test."
+    )
+    requires_in_container = pytest.mark.skip(
+        reason="Test requires execution inside a container (e.g., to install system packages)"
+    )
+    only_on_amd64 = pytest.mark.skip(
+        reason="Test uses features that are currently only supported for AMD64. Skipping in CI."
+    )
+    only_on_arm64 = pytest.mark.skip(
+        reason="Test uses features that are currently only supported for ARM64. Skipping in CI."
+    )
+
+    for item in items:
+        if is_offline and "skip_offline" in item.keywords:
+            item.add_marker(skip_offline)
+        if not is_in_docker and "requires_in_container" in item.keywords:
+            item.add_marker(requires_in_container)
+        if is_in_ci and not is_amd64 and "only_on_amd64" in item.keywords:
+            item.add_marker(only_on_amd64)
+        if is_in_ci and not is_arm64 and "only_on_arm64" in item.keywords:
+            item.add_marker(only_on_arm64)
+
+
+@pytest.hookimpl
+def pytest_collection_modifyitems(
+    session: pytest.Session, config: "Config", items: list[pytest.Item]
+) -> None:
+    enforce_single_aws_marker(items)
+    filter_by_markers(config, items)
+
+
+@pytest.hookimpl
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "skip_offline: mark the test to be skipped when the tests are run offline "
+        "(this test explicitly / semantically needs an internet connection)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "only_on_amd64: mark the test as running only in an amd64 (i.e., x86_64) environment",
+    )
+    config.addinivalue_line(
+        "markers",
+        "only_on_arm64: mark the test as running only in an arm64 environment",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_in_container: mark the test as running only in a container (e.g., requires installation of system packages)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "resource_heavy: mark the test as resource-heavy, e.g., downloading very large external dependencies, "
+        "or requiring high amount of RAM/CPU (can be systematically sampled/optimized in the future)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "aws_validated: mark the test as validated / verified against real AWS",
+    )
+    config.addinivalue_line(
+        "markers",
+        "aws_only_localemu: mark the test as inherently incompatible with AWS, e.g. when testing localemu-specific features",
+    )
+    config.addinivalue_line(
+        "markers",
+        "aws_needs_fixing: test fails against AWS but it shouldn't. Might need refactoring, additional permissions, etc.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "aws_manual_setup_required: validated against real AWS but needs additional setup or account configuration (e.g. increased service quotas)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "aws_unknown: it's unknown if the test works (reliably) against AWS or not",
+    )
+    config.addinivalue_line(
+        "markers",
+        "multiruntime: parametrize test against multiple Lambda runtimes",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_docker: mark the test as requiring docker (or a compatible container engine) - will not work on kubernetes.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_in_process: mark the test as requiring the test to run inside the same process as LocalEmu - will not work if tests are run against a running LS container.",
+    )

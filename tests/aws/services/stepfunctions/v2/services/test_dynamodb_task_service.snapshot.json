@@ -1,0 +1,2689 @@
+{
+  "tests/aws/services/stepfunctions/v2/services/test_dynamodb_task_service.py::TestTaskServiceDynamoDB::test_base_integrations[DYNAMODB_PUT_GET_ITEM]": {
+    "recorded-date": "06-11-2025, 23:10:57",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "PutItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "2"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "2",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "PutItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "id": 7,
+            "previousEventId": 6,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "GetItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 8,
+            "previousEventId": 7,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 9,
+            "previousEventId": 8,
+            "taskStartedEventDetails": {
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 10,
+            "previousEventId": 9,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "x-amzn-requestid": "x-amzn-requestid",
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "53"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "53",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-requestid": "x-amzn-requestid"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 11,
+            "previousEventId": 10,
+            "stateExitedEventDetails": {
+              "name": "GetItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "getItemOutput": {
+                  "Item": {
+                    "data": {
+                      "S": "HelloWorld"
+                    },
+                    "id": {
+                      "S": "id1"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "x-amzn-requestid": "x-amzn-requestid",
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "53"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "53",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-requestid": "x-amzn-requestid"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "getItemOutput": {
+                  "Item": {
+                    "data": {
+                      "S": "HelloWorld"
+                    },
+                    "id": {
+                      "S": "id1"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "x-amzn-requestid": "x-amzn-requestid",
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "53"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "53",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-requestid": "x-amzn-requestid"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 12,
+            "previousEventId": 11,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_dynamodb_task_service.py::TestTaskServiceDynamoDB::test_base_integrations[DYNAMODB_PUT_DELETE_ITEM]": {
+    "recorded-date": "06-11-2025, 23:11:20",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "PutItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "2"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "2",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "PutItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "id": 7,
+            "previousEventId": 6,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "DeleteItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 8,
+            "previousEventId": 7,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "deleteItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 9,
+            "previousEventId": 8,
+            "taskStartedEventDetails": {
+              "resource": "deleteItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 10,
+            "previousEventId": 9,
+            "taskSucceededEventDetails": {
+              "output": {
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "2"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "2",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "deleteItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 11,
+            "previousEventId": 10,
+            "stateExitedEventDetails": {
+              "name": "DeleteItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "deleteItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "deleteItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 12,
+            "previousEventId": 11,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_dynamodb_task_service.py::TestTaskServiceDynamoDB::test_base_integrations[DYNAMODB_PUT_UPDATE_GET_ITEM]": {
+    "recorded-date": "06-11-2025, 23:11:42",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "PutItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "2"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "2",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "PutItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "id": 7,
+            "previousEventId": 6,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "UpdateItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 8,
+            "previousEventId": 7,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "ReturnValues": "UPDATED_NEW",
+                "TableName": "table-name",
+                "UpdateExpression": "set S=:r",
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "updateItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 9,
+            "previousEventId": 8,
+            "taskStartedEventDetails": {
+              "resource": "updateItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 10,
+            "previousEventId": 9,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Attributes": {
+                  "S": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "46"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "46",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "updateItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 11,
+            "previousEventId": 10,
+            "stateExitedEventDetails": {
+              "name": "UpdateItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "updateItemOutput": {
+                  "Attributes": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "46"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "46",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "id": 12,
+            "previousEventId": 11,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "updateItemOutput": {
+                  "Attributes": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "46"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "46",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "GetItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 13,
+            "previousEventId": 12,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 14,
+            "previousEventId": 13,
+            "taskStartedEventDetails": {
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 15,
+            "previousEventId": 14,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Item": {
+                  "S": {
+                    "S": "HelloWorldUpdated"
+                  },
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "x-amzn-requestid": "x-amzn-requestid",
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "83"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "83",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-requestid": "x-amzn-requestid"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "getItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 16,
+            "previousEventId": 15,
+            "stateExitedEventDetails": {
+              "name": "GetItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "updateItemOutput": {
+                  "Attributes": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "46"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "46",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "getItemOutput": {
+                  "Item": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    },
+                    "data": {
+                      "S": "HelloWorld"
+                    },
+                    "id": {
+                      "S": "id1"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "x-amzn-requestid": "x-amzn-requestid",
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "83"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "83",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-requestid": "x-amzn-requestid"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "updateItemOutput": {
+                  "Attributes": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "46"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "46",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "getItemOutput": {
+                  "Item": {
+                    "S": {
+                      "S": "HelloWorldUpdated"
+                    },
+                    "data": {
+                      "S": "HelloWorld"
+                    },
+                    "id": {
+                      "S": "id1"
+                    }
+                  },
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "x-amzn-requestid": "x-amzn-requestid",
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "83"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "83",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-requestid": "x-amzn-requestid"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 17,
+            "previousEventId": 16,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_dynamodb_task_service.py::TestTaskServiceDynamoDB::test_invalid_integration": {
+    "recorded-date": "06-11-2025, 23:12:21",
+    "recorded-content": {
+      "exception": {
+        "exception_typename": "InvalidDefinition",
+        "exception_value": "An error occurred (InvalidDefinition) when calling the CreateStateMachine operation: Invalid State Machine Definition: 'SCHEMA_VALIDATION_FAILED: The resource provided arn:<partition>:states:::dynamodb:query is not recognized. The value is not a valid resource ARN, or the resource is not available in this region. at /States/Query/Resource'"
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/services/test_dynamodb_task_service.py::TestTaskServiceDynamoDB::test_base_integrations[DYNAMODB_PUT_QUERY]": {
+    "recorded-date": "06-11-2025, 23:12:05",
+    "recorded-content": {
+      "get_execution_history": {
+        "events": [
+          {
+            "executionStartedEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "roleArn": "snf_role_arn"
+            },
+            "id": 1,
+            "previousEventId": 0,
+            "timestamp": "timestamp",
+            "type": "ExecutionStarted"
+          },
+          {
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "PutItem"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                }
+              },
+              "region": "<region>",
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+              "output": {
+                "SdkHttpMetadata": {
+                  "AllHttpHeaders": {
+                    "Server": [
+                      "Server"
+                    ],
+                    "Connection": [
+                      "keep-alive"
+                    ],
+                    "x-amzn-RequestId": "x-amzn-RequestId",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "Content-Length": [
+                      "2"
+                    ],
+                    "Date": "date",
+                    "Content-Type": [
+                      "application/x-amz-json-1.0"
+                    ]
+                  },
+                  "HttpHeaders": {
+                    "Connection": "keep-alive",
+                    "Content-Length": "2",
+                    "Content-Type": "application/x-amz-json-1.0",
+                    "Date": "date",
+                    "Server": "Server",
+                    "x-amz-crc32": "x-amz-crc32",
+                    "x-amzn-RequestId": "x-amzn-RequestId"
+                  },
+                  "HttpStatusCode": 200
+                },
+                "SdkResponseMetadata": {
+                  "RequestId": "RequestId"
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "putItem",
+              "resourceType": "dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+              "name": "PutItem",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "id": 7,
+            "previousEventId": 6,
+            "stateEnteredEventDetails": {
+              "input": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                }
+              },
+              "inputDetails": {
+                "truncated": false
+              },
+              "name": "QueryItems"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateEntered"
+          },
+          {
+            "id": 8,
+            "previousEventId": 7,
+            "taskScheduledEventDetails": {
+              "parameters": {
+                "KeyConditionExpression": "id = :id",
+                "ExpressionAttributeValues": {
+                  ":id": {
+                    "S": "id1"
+                  }
+                },
+                "TableName": "table-name"
+              },
+              "region": "<region>",
+              "resource": "query",
+              "resourceType": "aws-sdk:dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskScheduled"
+          },
+          {
+            "id": 9,
+            "previousEventId": 8,
+            "taskStartedEventDetails": {
+              "resource": "query",
+              "resourceType": "aws-sdk:dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStarted"
+          },
+          {
+            "id": 10,
+            "previousEventId": 9,
+            "taskSucceededEventDetails": {
+              "output": {
+                "Count": 1,
+                "Items": [
+                  {
+                    "id": {
+                      "S": "id1"
+                    },
+                    "data": {
+                      "S": "HelloWorld"
+                    }
+                  }
+                ],
+                "ScannedCount": 1
+              },
+              "outputDetails": {
+                "truncated": false
+              },
+              "resource": "query",
+              "resourceType": "aws-sdk:dynamodb"
+            },
+            "timestamp": "timestamp",
+            "type": "TaskSucceeded"
+          },
+          {
+            "id": 11,
+            "previousEventId": 10,
+            "stateExitedEventDetails": {
+              "name": "QueryItems",
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "queryOutput": {
+                  "Count": 1,
+                  "Items": [
+                    {
+                      "id": {
+                        "S": "id1"
+                      },
+                      "data": {
+                        "S": "HelloWorld"
+                      }
+                    }
+                  ],
+                  "ScannedCount": 1
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "timestamp": "timestamp",
+            "type": "TaskStateExited"
+          },
+          {
+            "executionSucceededEventDetails": {
+              "output": {
+                "TableName": "table-name",
+                "Item": {
+                  "data": {
+                    "S": "HelloWorld"
+                  },
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "Key": {
+                  "id": {
+                    "S": "id1"
+                  }
+                },
+                "UpdateExpression": "set S=:r",
+                "ExpressionAttributeValues": {
+                  ":r": {
+                    "S": "HelloWorldUpdated"
+                  }
+                },
+                "putItemOutput": {
+                  "SdkHttpMetadata": {
+                    "AllHttpHeaders": {
+                      "Server": [
+                        "Server"
+                      ],
+                      "Connection": [
+                        "keep-alive"
+                      ],
+                      "x-amzn-RequestId": "x-amzn-RequestId",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "Content-Length": [
+                        "2"
+                      ],
+                      "Date": "date",
+                      "Content-Type": [
+                        "application/x-amz-json-1.0"
+                      ]
+                    },
+                    "HttpHeaders": {
+                      "Connection": "keep-alive",
+                      "Content-Length": "2",
+                      "Content-Type": "application/x-amz-json-1.0",
+                      "Date": "date",
+                      "Server": "Server",
+                      "x-amz-crc32": "x-amz-crc32",
+                      "x-amzn-RequestId": "x-amzn-RequestId"
+                    },
+                    "HttpStatusCode": 200
+                  },
+                  "SdkResponseMetadata": {
+                    "RequestId": "RequestId"
+                  }
+                },
+                "queryOutput": {
+                  "Count": 1,
+                  "Items": [
+                    {
+                      "id": {
+                        "S": "id1"
+                      },
+                      "data": {
+                        "S": "HelloWorld"
+                      }
+                    }
+                  ],
+                  "ScannedCount": 1
+                }
+              },
+              "outputDetails": {
+                "truncated": false
+              }
+            },
+            "id": 12,
+            "previousEventId": 11,
+            "timestamp": "timestamp",
+            "type": "ExecutionSucceeded"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  }
+}

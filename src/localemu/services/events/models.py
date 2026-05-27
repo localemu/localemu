@@ -1,0 +1,314 @@
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, TypedDict
+
+from localemu.aws.api import CommonServiceException
+from localemu.aws.api.events import (
+    ApiDestinationDescription,
+    ApiDestinationHttpMethod,
+    ApiDestinationInvocationRateLimitPerSecond,
+    ApiDestinationName,
+    ApiDestinationState,
+    ArchiveDescription,
+    ArchiveName,
+    ArchiveState,
+    Arn,
+    ConnectionArn,
+    ConnectionAuthorizationType,
+    ConnectionDescription,
+    ConnectionName,
+    ConnectionState,
+    ConnectivityResourceParameters,
+    CreateConnectionAuthRequestParameters,
+    CreatedBy,
+    EventBusName,
+    EventPattern,
+    EventResourceList,
+    EventSourceName,
+    HttpsEndpoint,
+    ManagedBy,
+    ReplayDescription,
+    ReplayDestination,
+    ReplayName,
+    ReplayState,
+    ReplayStateReason,
+    RetentionDays,
+    RoleArn,
+    RuleDescription,
+    RuleName,
+    RuleState,
+    ScheduleExpression,
+    TagList,
+    Target,
+    TargetId,
+    Timestamp,
+)
+from localemu.services.stores import (
+    AccountRegionBundle,
+    BaseStore,
+    CrossRegionAttribute,
+    LocalAttribute,
+)
+from localemu.utils.aws.arns import (
+    event_bus_arn,
+    events_api_destination_arn,
+    events_archive_arn,
+    events_connection_arn,
+    events_replay_arn,
+    events_rule_arn,
+)
+from localemu.utils.strings import short_uid
+from localemu.utils.tagging import TaggingService
+
+TargetDict = dict[TargetId, Target]
+
+
+class ValidationException(CommonServiceException):
+    def __init__(self, message: str):
+        super().__init__("ValidationException", message, 400, True)
+
+
+class InvalidEventPatternException(Exception):
+    reason: str
+
+    def __init__(self, reason=None, message=None) -> None:
+        self.reason = reason
+        self.message = message or f"Event pattern is not valid. Reason: {reason}"
+
+
+FormattedEvent = TypedDict(  # functional syntax required due to name-name keys
+    "FormattedEvent",
+    {
+        "version": str,
+        "id": str,
+        "detail-type": str | None,
+        "source": EventSourceName | None,
+        "account": str,
+        "time": str,
+        "region": str,
+        "resources": EventResourceList | None,
+        "detail": dict[str, Any],
+        "replay-name": ReplayName | None,
+        "event-bus-name": EventBusName,
+    },
+)
+
+
+FormattedEventDict = dict[str, FormattedEvent]
+FormattedEventList = list[FormattedEvent]
+
+type TransformedEvent = FormattedEvent | dict | str
+
+
+class ResourceType(Enum):
+    EVENT_BUS = "event_bus"
+    RULE = "rule"
+
+
+class ResourcePolicy(TypedDict):
+    Version: str
+    Statement: list[dict[str, Any]]
+
+
+@dataclass
+class Rule:
+    name: RuleName
+    region: str
+    account_id: str
+    schedule_expression: ScheduleExpression | None = None
+    event_pattern: EventPattern | None = None
+    state: RuleState | None = None
+    description: RuleDescription | None = None
+    role_arn: RoleArn | None = None
+    tags: TagList = field(default_factory=list)
+    event_bus_name: EventBusName = "default"
+    targets: TargetDict = field(default_factory=dict)
+    managed_by: ManagedBy | None = None  # can only be set by AWS services
+    created_by: CreatedBy = field(init=False)
+
+    def __post_init__(self):
+        self.created_by = self.account_id
+        if self.tags is None:
+            self.tags = []
+        if self.targets is None:
+            self.targets = {}
+        if self.state is None:
+            self.state = RuleState.ENABLED
+
+    @property
+    def arn(self) -> Arn:
+        return events_rule_arn(self.name, self.account_id, self.region, self.event_bus_name)
+
+
+RuleDict = dict[RuleName, Rule]
+
+
+@dataclass
+class Replay:
+    name: str
+    region: str
+    account_id: str
+    event_source_arn: Arn
+    destination: ReplayDestination  # Event Bus Arn or Rule Arns
+    event_start_time: Timestamp
+    event_end_time: Timestamp
+    description: ReplayDescription | None = None
+    state: ReplayState | None = None
+    state_reason: ReplayStateReason | None = None
+    event_last_replayed_time: Timestamp | None = None
+    replay_start_time: Timestamp | None = None
+    replay_end_time: Timestamp | None = None
+
+    @property
+    def arn(self) -> Arn:
+        return events_replay_arn(self.name, self.account_id, self.region)
+
+
+ReplayDict = dict[ReplayName, Replay]
+
+
+@dataclass
+class Archive:
+    name: ArchiveName
+    region: str
+    account_id: str
+    event_source_arn: Arn
+    description: ArchiveDescription | None = None
+    event_pattern: EventPattern | None = None
+    retention_days: RetentionDays | None = None
+    state: ArchiveState = field(init=False, default=ArchiveState.DISABLED)
+    creation_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    events: FormattedEventDict = field(init=False, default_factory=dict)
+    # TODO how to deal with updating this value?
+    size_bytes: int = field(init=False, default=0)
+
+    @property
+    def arn(self) -> Arn:
+        return events_archive_arn(self.name, self.account_id, self.region)
+
+    @property
+    def event_count(self) -> int:
+        return len(self.events)
+
+
+ArchiveDict = dict[ArchiveName, Archive]
+
+
+@dataclass
+class EventBus:
+    name: EventBusName
+    region: str
+    account_id: str
+    event_source_name: str | None = None
+    description: str | None = None
+    tags: TagList = field(default_factory=list)
+    policy: ResourcePolicy | None = None
+    rules: RuleDict = field(default_factory=dict)
+    creation_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    last_modified_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+
+    def __post_init__(self):
+        if self.rules is None:
+            self.rules = {}
+        if self.tags is None:
+            self.tags = []
+
+    @property
+    def arn(self) -> Arn:
+        return event_bus_arn(self.name, self.account_id, self.region)
+
+
+EventBusDict = dict[EventBusName, EventBus]
+
+
+@dataclass
+class Connection:
+    name: ConnectionName
+    region: str
+    account_id: str
+    authorization_type: ConnectionAuthorizationType
+    auth_parameters: CreateConnectionAuthRequestParameters
+    state: ConnectionState
+    secret_arn: Arn
+    description: ConnectionDescription | None = None
+    invocation_connectivity_parameters: ConnectivityResourceParameters | None = None
+    creation_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    last_modified_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    last_authorized_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    tags: TagList = field(default_factory=list)
+    id: str = str(uuid.uuid4())
+
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+
+    @property
+    def arn(self) -> Arn:
+        return events_connection_arn(self.name, self.id, self.account_id, self.region)
+
+
+ConnectionDict = dict[ConnectionName, Connection]
+
+
+@dataclass
+class ApiDestination:
+    name: ApiDestinationName
+    region: str
+    account_id: str
+    connection_arn: ConnectionArn
+    invocation_endpoint: HttpsEndpoint
+    http_method: ApiDestinationHttpMethod
+    state: ApiDestinationState
+    _invocation_rate_limit_per_second: ApiDestinationInvocationRateLimitPerSecond | None = None
+    description: ApiDestinationDescription | None = None
+    creation_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    last_modified_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    last_authorized_time: Timestamp = field(init=False, default_factory=lambda: datetime.now(UTC))
+    tags: TagList = field(default_factory=list)
+    id: str = str(short_uid())
+
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+
+    @property
+    def arn(self) -> Arn:
+        return events_api_destination_arn(self.name, self.id, self.account_id, self.region)
+
+    @property
+    def invocation_rate_limit_per_second(self) -> int:
+        return self._invocation_rate_limit_per_second or 300  # Default value
+
+    @invocation_rate_limit_per_second.setter
+    def invocation_rate_limit_per_second(
+        self, value: ApiDestinationInvocationRateLimitPerSecond | None
+    ):
+        self._invocation_rate_limit_per_second = value
+
+
+ApiDestinationDict = dict[ApiDestinationName, ApiDestination]
+
+
+class EventsStore(BaseStore):
+    # Map of eventbus names to eventbus objects. The name MUST be unique per account and region (works with AccountRegionBundle)
+    event_buses: EventBusDict = LocalAttribute(default=dict)
+
+    # Map of archive names to archive objects. The name MUST be unique per account and region (works with AccountRegionBundle)
+    archives: ArchiveDict = LocalAttribute(default=dict)
+
+    # Map of replay names to replay objects. The name MUST be unique per account and region (works with AccountRegionBundle)
+    replays: ReplayDict = LocalAttribute(default=dict)
+
+    # Map of connection names to connection objects.
+    connections: ConnectionDict = LocalAttribute(default=dict)
+
+    # Map of api destination names to api destination objects
+    api_destinations: ApiDestinationDict = LocalAttribute(default=dict)
+
+    # Maps resource ARN to tags
+    TAGS: TaggingService = CrossRegionAttribute(default=TaggingService)
+
+
+events_stores = AccountRegionBundle("events", EventsStore)

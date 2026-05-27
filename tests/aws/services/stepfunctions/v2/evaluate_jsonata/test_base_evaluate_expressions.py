@@ -1,0 +1,293 @@
+import json
+
+import pytest
+from localemu.testing.snapshots.transformer import RegexTransformer
+
+from localemu.aws.api.lambda_ import Runtime
+from localemu.testing.aws.util import is_aws_cloud
+from localemu.testing.pytest import markers
+from localemu.testing.pytest.stepfunctions.utils import (
+    create_and_record_execution,
+)
+from localemu.utils.strings import short_uid
+from tests.aws.services.stepfunctions.templates.evaluatejsonata.evaluate_jsonata_templates import (
+    EvaluateJsonataTemplate as EJT,
+)
+from tests.aws.services.stepfunctions.templates.querylanguage.query_language_templates import (
+    QueryLanguageTemplate as QLT,
+)
+from tests.aws.services.stepfunctions.templates.services.services_templates import (
+    ServicesTemplates as ST,
+)
+
+
+@markers.snapshot.skip_snapshot_verify(
+    paths=[
+        "$..redriveCount",
+        "$..redriveStatus",
+        "$..RedriveCount",
+        "$..SdkHttpMetadata",
+        "$..SdkResponseMetadata",
+    ]
+)
+class TestBaseEvaluateJsonata:
+    @markers.aws.validated
+    @pytest.mark.parametrize(
+        "expression_dict",
+        [
+            pytest.param(
+                {"TimeoutSeconds": EJT.JSONATA_NUMBER_EXPRESSION},
+                marks=pytest.mark.skipif(
+                    condition=not is_aws_cloud(),
+                    reason="Polling and timeouts are flakey.",
+                ),
+            ),
+            {"HeartbeatSeconds": EJT.JSONATA_NUMBER_EXPRESSION},
+        ],
+        ids=[
+            "TIMEOUT_SECONDS",
+            "HEARTBEAT_SECONDS",
+        ],
+    )
+    def test_base_task(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+        create_lambda_function,
+        expression_dict,
+    ):
+        function_name = f"fn-eval-{short_uid()}"
+        create_res = create_lambda_function(
+            func_name=function_name,
+            handler_file=ST.LAMBDA_ID_FUNCTION,
+            runtime=Runtime.python3_12,
+        )
+
+        function_arn = create_res["CreateFunctionResponse"]["FunctionArn"]
+
+        sfn_snapshot.add_transformer(RegexTransformer(function_name, "<lambda-function-name>"))
+
+        template = EJT.load_sfn_template(EJT.BASE_TASK)
+        template["States"]["Start"].update(expression_dict)
+        definition = json.dumps(template)
+        definition = definition.replace(
+            QLT.LAMBDA_FUNCTION_ARN_LITERAL_PLACEHOLDER,
+            function_arn,
+        )
+
+        exec_input = json.dumps({})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )
+
+    @markers.aws.validated
+    @pytest.mark.parametrize(
+        "expression_dict",
+        [
+            {"Items": EJT.JSONATA_ARRAY_ELEMENT_EXPRESSION},
+            {"Items": EJT.JSONATA_ARRAY_ELEMENT_EXPRESSION_DOUBLE_QUOTES},
+            {"MaxConcurrency": EJT.JSONATA_NUMBER_EXPRESSION},
+            {"ToleratedFailurePercentage": EJT.JSONATA_NUMBER_EXPRESSION},
+            {"ToleratedFailureCount": EJT.JSONATA_NUMBER_EXPRESSION},
+        ],
+        ids=[
+            "ITEMS",
+            "ITEMS_DOUBLE_QUOTES",
+            "MAX_CONCURRENCY",
+            "TOLERATED_FAILURE_PERCENTAGE",
+            "TOLERATED_FAILURE_COUNT",
+        ],
+    )
+    def test_base_map(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+        expression_dict,
+    ):
+        template = EJT.load_sfn_template(EJT.BASE_MAP)
+        template["States"]["Start"].update(expression_dict)
+        definition = json.dumps(template)
+
+        exec_input = json.dumps({})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )
+
+    @markers.aws.validated
+    @pytest.mark.parametrize(
+        "expression_string",
+        [
+            EJT.JSONATA_REGEX_EXPRESSION_BASE,
+            EJT.JSONATA_REGEX_EXPRESSION_BASE_FALSE,
+            EJT.JSONATA_REGEX_EXPRESSION_BASE_SINGLE_QUOTE,
+            EJT.JSONATA_REGEX_EXPRESSION_BASE_SINGLE_QUOTE_FALSE,
+        ],
+        ids=[
+            "BASE",
+            "BASE_FALSE",
+            "BASE_SINGLE_QUOTE",
+            "BASE_SINGLE_QUOTE_FALSE",
+        ],
+    )
+    def test_base_jsonata_regular_expressions(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+        expression_string,
+    ):
+        template = EJT.load_sfn_template(EJT.BASE_PASS)
+        template["States"]["Start"]["Output"] = expression_string
+        definition = json.dumps(template)
+        exec_input = json.dumps({})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )
+
+    @markers.aws.validated
+    def test_merge_with_dynamic_args(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+    ):
+        """Regression test for #13579: $merge with dynamic variable references in array literals."""
+        template = EJT.load_sfn_template(EJT.BASE_PASS)
+        template["States"]["Start"]["Output"] = (
+            "{% $merge([$states.input.part1, $states.input.part2]) %}"
+        )
+        definition = json.dumps(template)
+        exec_input = json.dumps({"part1": {"hello": "world"}, "part2": {"foo": "bar"}})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )
+
+    @markers.aws.validated
+    @pytest.mark.parametrize(
+        "field,input_value",
+        [
+            pytest.param(
+                "TimeoutSeconds", 1, id="TIMEOUT_SECONDS", marks=pytest.mark.skip(reason="flaky")
+            ),
+            pytest.param("HeartbeatSeconds", 1, id="HEARTBEAT_SECONDS"),
+        ],
+    )
+    def test_base_task_from_input(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+        create_lambda_function,
+        field,
+        input_value,
+    ):
+        function_name = f"fn-eval-{short_uid()}"
+        create_res = create_lambda_function(
+            func_name=function_name,
+            handler_file=ST.LAMBDA_ID_FUNCTION,
+            runtime=Runtime.python3_12,
+        )
+
+        function_arn = create_res["CreateFunctionResponse"]["FunctionArn"]
+
+        sfn_snapshot.add_transformer(RegexTransformer(function_name, "<lambda-function-name>"))
+
+        template = EJT.load_sfn_template(EJT.BASE_TASK)
+        template["States"]["Start"][field] = EJT.JSONATA_STATE_INPUT_EXPRESSION
+        definition = json.dumps(template)
+        definition = definition.replace(
+            QLT.LAMBDA_FUNCTION_ARN_LITERAL_PLACEHOLDER,
+            function_arn,
+        )
+
+        exec_input = json.dumps({"input_value": input_value})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )
+
+    @markers.aws.validated
+    @pytest.mark.parametrize(
+        "field,input_value",
+        [
+            pytest.param("Items", [1, 2, 3], id="ITEMS"),
+            pytest.param("MaxConcurrency", 1, id="MAX_CONCURRENCY"),
+            pytest.param("ToleratedFailurePercentage", 100, id="TOLERATED_FAILURE_PERCENTAGE"),
+            pytest.param("ToleratedFailureCount", 1, id="TOLERATED_FAILURE_COUNT"),
+        ],
+        ids=[
+            "ITEMS",
+            "MAX_CONCURRENCY",
+            "TOLERATED_FAILURE_PERCENTAGE",
+            "TOLERATED_FAILURE_COUNT",
+        ],
+    )
+    def test_base_map_from_input(
+        self,
+        aws_client,
+        create_state_machine_iam_role,
+        create_state_machine,
+        sfn_snapshot,
+        create_lambda_function,
+        field,
+        input_value,
+    ):
+        function_name = f"fn-eval-{short_uid()}"
+        create_res = create_lambda_function(
+            func_name=function_name,
+            handler_file=ST.LAMBDA_ID_FUNCTION,
+            runtime=Runtime.python3_12,
+        )
+
+        function_arn = create_res["CreateFunctionResponse"]["FunctionArn"]
+
+        sfn_snapshot.add_transformer(RegexTransformer(function_name, "<lambda-function-name>"))
+
+        template = EJT.load_sfn_template(EJT.BASE_MAP)
+        template["States"]["Start"][field] = EJT.JSONATA_STATE_INPUT_EXPRESSION
+        definition = json.dumps(template)
+        definition = definition.replace(
+            QLT.LAMBDA_FUNCTION_ARN_LITERAL_PLACEHOLDER,
+            function_arn,
+        )
+
+        exec_input = json.dumps({"input_value": input_value})
+        create_and_record_execution(
+            aws_client,
+            create_state_machine_iam_role=create_state_machine_iam_role,
+            create_state_machine=create_state_machine,
+            sfn_snapshot=sfn_snapshot,
+            definition=definition,
+            execution_input=exec_input,
+        )

@@ -1,0 +1,15 @@
+LocalEmu
+Copyright (c) 2026 TocConsulting and LocalEmu contributors
+
+This product includes software developed by LocalStack Inc. and contributors
+(Copyright (c) 2017-2026 LocalStack Inc and contributors), originally
+released under the Apache License, Version 2.0. LocalEmu is a community
+fork of the archived LocalStack community edition.
+
+This product also includes portions originally developed by Atlassian Pty Ltd
+(Copyright (c) 2016 Atlassian Pty Ltd), released under the Apache License,
+Version 2.0, from which LocalStack itself was originally derived.
+
+The full Apache License, Version 2.0 is reproduced in the LICENSE file at
+the root of this repository, together with the preserved copyright lines
+listed above.

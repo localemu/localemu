@@ -1,0 +1,7 @@
+# CODEOWNERS for LocalEmu
+#
+# LocalEmu is currently maintained solely by Tarek CHEIKH (TocConsulting).
+# When the contributor base grows, this file will be updated with per-area
+# co-maintainers.
+
+* @TarekCheikh

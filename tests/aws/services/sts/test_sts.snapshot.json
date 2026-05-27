@@ -1,0 +1,282 @@
+{
+  "tests/aws/services/sts/test_sts.py::TestSTSIntegrations::test_get_federation_token": {
+    "recorded-date": "05-06-2024, 13:39:17",
+    "recorded-content": {
+      "get-federation-token": {
+        "Credentials": {
+          "AccessKeyId": "<access-key-id:1>",
+          "Expiration": "<datetime>",
+          "SecretAccessKey": "<secret-access-key:1>",
+          "SessionToken": "<session-token:1>"
+        },
+        "FederatedUser": {
+          "Arn": "arn:<partition>:sts::111111111111:federated-user/<resource:1>",
+          "FederatedUserId": "111111111111:<resource:1>"
+        },
+        "PackedPolicySize": 0,
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/sts/test_sts.py::TestSTSIntegrations::test_assume_role": {
+    "recorded-date": "05-06-2024, 17:23:49",
+    "recorded-content": {
+      "role-session-name": {
+        "RoleSessionName": "<role-session-name:1>"
+      },
+      "create-role": {
+        "Role": {
+          "Arn": "arn:<partition>:iam::111111111111:role/<resource:1>",
+          "AssumeRolePolicyDocument": {
+            "Statement": [
+              {
+                "Action": "sts:AssumeRole",
+                "Effect": "Allow",
+                "Principal": {
+                  "AWS": "111111111111"
+                }
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "CreateDate": "<datetime>",
+          "Path": "/",
+          "RoleId": "<role-id:1>",
+          "RoleName": "<resource:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "assume-role": {
+        "AssumedRoleUser": {
+          "Arn": "arn:<partition>:sts::111111111111:assumed-role/<resource:1>/<role-session-name:1>",
+          "AssumedRoleId": "<role-id:1>:<role-session-name:1>"
+        },
+        "Credentials": {
+          "AccessKeyId": "<access-key-id:1>",
+          "Expiration": "<datetime>",
+          "SecretAccessKey": "<secret-access-key:1>",
+          "SessionToken": "<session-token:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/sts/test_sts.py::TestSTSAssumeRoleTagging::test_assume_role_tag_validation": {
+    "recorded-date": "10-04-2025, 08:53:12",
+    "recorded-content": {
+      "role-1": {
+        "Role": {
+          "Arn": "arn:<partition>:iam::111111111111:role/<role-name:1>",
+          "AssumeRolePolicyDocument": {
+            "Statement": [
+              {
+                "Action": [
+                  "sts:AssumeRole",
+                  "sts:TagSession"
+                ],
+                "Effect": "Allow",
+                "Principal": {
+                  "AWS": "111111111111"
+                }
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "CreateDate": "<datetime>",
+          "Path": "/",
+          "RoleId": "<role-id:1>",
+          "RoleName": "<role-name:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "invalid-transitive-tag-keys": {
+        "Error": {
+          "Code": "InvalidParameterValue",
+          "Message": "The specified transitive tag key must be included in the requested tags.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "duplicate-tag-keys-different-casing": {
+        "Error": {
+          "Code": "InvalidParameterValue",
+          "Message": "Duplicate tag keys found. Please note that Tag keys are case insensitive.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/sts/test_sts.py::TestSTSAssumeRoleTagging::test_iam_role_chaining_override_transitive_tags": {
+    "recorded-date": "10-04-2025, 08:53:00",
+    "recorded-content": {
+      "role-1": {
+        "Role": {
+          "Arn": "arn:<partition>:iam::111111111111:role/<role-name:1>",
+          "AssumeRolePolicyDocument": {
+            "Statement": [
+              {
+                "Action": [
+                  "sts:AssumeRole",
+                  "sts:TagSession"
+                ],
+                "Effect": "Allow",
+                "Principal": {
+                  "AWS": "111111111111"
+                }
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "CreateDate": "<datetime>",
+          "Path": "/",
+          "RoleId": "<role-id:1>",
+          "RoleName": "<role-name:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "role-2": {
+        "Role": {
+          "Arn": "arn:<partition>:iam::111111111111:role/<role-name:2>",
+          "AssumeRolePolicyDocument": {
+            "Statement": [
+              {
+                "Action": [
+                  "sts:AssumeRole",
+                  "sts:TagSession"
+                ],
+                "Effect": "Allow",
+                "Principal": {
+                  "AWS": "111111111111"
+                }
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "CreateDate": "<datetime>",
+          "Path": "/",
+          "RoleId": "<role-id:2>",
+          "RoleName": "<role-name:2>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "override-transitive-tag-error": {
+        "Error": {
+          "Code": "InvalidParameterValue",
+          "Message": "One of the specified transitive tag keys can't be set because it conflicts with a transitive tag key from the calling session.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "override-transitive-tag-case-ignore-error": {
+        "Error": {
+          "Code": "InvalidParameterValue",
+          "Message": "One of the specified transitive tag keys can't be set because it conflicts with a transitive tag key from the calling session.",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/sts/test_sts.py::TestSTSIntegrations::test_sts_invalid_parameters": {
+    "recorded-date": "21-07-2025, 19:25:22",
+    "recorded-content": {
+      "malformed-arn": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "nothing-valid-in-here is invalid",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "no-partition": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "arn::b:::something/test-role is invalid",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "no-service": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "arn:a::::something/test-role is invalid",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "not-enough-colons": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "arn:a:::something/test-role is invalid",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "no-resource": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "arn:a:a::aaaaaaaaaa: is invalid",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "invalid-session-name": {
+        "Error": {
+          "Code": "ValidationError",
+          "Message": "1 validation error detected: Value 'Session1:2' at 'roleSessionName' failed to satisfy constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]*",
+          "Type": "Sender"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  }
+}

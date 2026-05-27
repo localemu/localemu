@@ -1,0 +1,22 @@
+from json import JSONEncoder
+from typing import Any
+
+from rolo import Response as RoloResponse
+
+from localemu.utils.common import CustomEncoder
+
+
+class Response(RoloResponse):
+    """
+    An HTTP Response object, which simply extends werkzeug's Response object with a few convenience methods.
+    """
+
+    def set_json(self, doc: Any, cls: type[JSONEncoder] = CustomEncoder):
+        """
+        Serializes the given dictionary using localemu's ``CustomEncoder`` into a json response, and sets the
+        mimetype automatically to ``application/json``.
+
+        :param doc: the response dictionary to be serialized as JSON
+        :param cls: the json encoder used
+        """
+        return super().set_json(doc, cls or CustomEncoder)

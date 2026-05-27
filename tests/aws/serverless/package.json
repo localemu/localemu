@@ -1,0 +1,16 @@
+{
+  "name": "sls-localemu-test",
+  "version": "0.0.1",
+  "description": "Simple Serverless tests for LocalEmu",
+  "scripts": {
+    "deploy": "serverless deploy --stage local",
+    "undeploy": "serverless remove --stage local",
+    "deploy-aws": "serverless deploy --stage dev",
+    "undeploy-aws": "serverless remove --stage dev",
+    "version": "serverless --version"
+  },
+  "devDependencies": {
+    "serverless": "2.48.0",
+    "serverless-localemu": "^0.4.30"
+  }
+}

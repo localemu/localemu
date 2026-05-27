@@ -1,0 +1,56 @@
+{
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_add_to_static_property": {
+    "last_validated_date": "2025-05-28T13:14:01+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_change_get_att_reference": {
+    "last_validated_date": "2025-05-28T14:44:47+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_change_in_selected_element_type_ref": {
+    "last_validated_date": "2025-05-28T13:32:24+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_change_in_selection_index_only": {
+    "last_validated_date": "2025-05-28T13:23:46+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_change_in_selection_list": {
+    "last_validated_date": "2025-05-28T13:21:34+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_fn_select_remove_from_static_property": {
+    "last_validated_date": "2025-05-28T13:17:47+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_invalid_select_index_type[index-out-of-range]": {
+    "last_validated_date": "2025-09-12T11:09:16+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.13,
+      "teardown": 0.0,
+      "total": 0.13
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_invalid_select_index_type[non-integer-index]": {
+    "last_validated_date": "2025-09-12T11:09:16+00:00",
+    "durations_in_seconds": {
+      "setup": 0.76,
+      "call": 0.3,
+      "teardown": 0.0,
+      "total": 1.06
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_invalid_select_index_type[non-list-list]": {
+    "last_validated_date": "2025-09-12T11:09:16+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 0.14,
+      "teardown": 0.0,
+      "total": 0.14
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_fn_select.py::TestChangeSetFnSelect::test_nested_select_within_other_intrinsics": {
+    "last_validated_date": "2025-09-16T10:30:37+00:00",
+    "durations_in_seconds": {
+      "setup": 0.95,
+      "call": 12.37,
+      "teardown": 6.51,
+      "total": 19.83
+    }
+  }
+}

@@ -1,0 +1,115 @@
+/* Sidebar: scrollable column of grouped services with a search filter. */
+
+#sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: var(--base02);
+  border-right: 1px solid var(--base01);
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+#sidebar-search-wrap {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--base01);
+}
+#sidebar-search {
+  width: 100%;
+  background: var(--base03);
+  border: 1px solid var(--base01);
+  color: var(--base0);
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+#sidebar-search:focus { border-color: var(--teal); }
+
+#sidebar-list { flex: 1; padding-bottom: 12px; }
+
+.sidebar-group { margin-bottom: 2px; }
+.sidebar-group-header {
+  width: 100%;
+  background: transparent;
+  border: none;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--base01);
+  font-family: inherit;
+}
+.sidebar-group-header:hover { color: var(--base1); }
+.sidebar-group-caret {
+  font-size: 9px;
+  color: var(--base01);
+  transition: transform 0.12s ease;
+}
+.sidebar-group.collapsed .sidebar-group-caret { transform: rotate(-90deg); }
+.sidebar-group.collapsed .sidebar-group-body { display: none; }
+
+.service-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  color: var(--base0);
+  user-select: none;
+}
+.service-item:hover { background: rgba(131, 148, 150, 0.08); }
+.service-item.selected {
+  border-left-color: var(--teal);
+  color: var(--teal);
+  background: rgba(42, 161, 152, 0.06);
+}
+.service-item img {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.service-item.selected img { opacity: 1; }
+.service-item .service-name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.service-item .count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(42, 161, 152, 0.15);
+  color: var(--teal);
+  flex-shrink: 0;
+}
+.service-item .count-badge.zero {
+  background: var(--base02);
+  color: var(--base01);
+}
+
+.match-hi {
+  background: rgba(181, 137, 0, 0.25);
+  color: var(--yellow);
+  border-radius: 2px;
+  padding: 0 1px;
+}

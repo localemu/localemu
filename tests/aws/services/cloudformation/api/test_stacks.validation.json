@@ -1,0 +1,233 @@
+{
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_create_stack_url_as_template": {
+    "last_validated_date": "2025-10-23T19:25:10+00:00",
+    "durations_in_seconds": {
+      "setup": 0.82,
+      "call": 0.82,
+      "teardown": 0.02,
+      "total": 1.66
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_failure_options_for_stack_update[False-2]": {
+    "last_validated_date": "2024-06-25T17:21:51+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_failure_options_for_stack_update[True-1]": {
+    "last_validated_date": "2024-06-25T17:22:31+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template[json]": {
+    "last_validated_date": "2022-08-11T08:55:35+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template[yaml]": {
+    "last_validated_date": "2022-08-11T08:55:10+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template_using_changesets[json]": {
+    "last_validated_date": "2025-01-02T19:09:40+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template_using_changesets[yaml]": {
+    "last_validated_date": "2025-01-02T19:08:41+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template_using_create_stack[json]": {
+    "last_validated_date": "2025-01-02T19:11:20+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_get_template_using_create_stack[yaml]": {
+    "last_validated_date": "2025-01-02T19:11:14+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_list_events_after_deployment": {
+    "last_validated_date": "2022-10-05T11:33:55+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_description_lifecycle[no-tags]": {
+    "last_validated_date": "2025-09-09T09:37:20+00:00",
+    "durations_in_seconds": {
+      "setup": 0.84,
+      "call": 9.6,
+      "teardown": 0.19,
+      "total": 10.63
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_description_lifecycle[with-tags]": {
+    "last_validated_date": "2025-09-09T09:37:28+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 8.26,
+      "teardown": 0.18,
+      "total": 8.44
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_description_special_chars": {
+    "last_validated_date": "2025-08-08T15:20:07+00:00",
+    "durations_in_seconds": {
+      "setup": 1.41,
+      "call": 61.6,
+      "teardown": 4.47,
+      "total": 67.48
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_lifecycle": {
+    "last_validated_date": "2023-11-28T12:24:40+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_name_creation": {
+    "last_validated_date": "2023-04-19T10:44:47+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_stack_update_resources": {
+    "last_validated_date": "2022-08-29T22:13:26+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_update_stack_with_same_template_withoutchange": {
+    "last_validated_date": "2024-05-07T08:35:29+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::TestStacksApi::test_update_stack_with_same_template_withoutchange_transformation": {
+    "last_validated_date": "2024-05-07T09:26:39+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_blank_parameter_value": {
+    "last_validated_date": "2025-09-10T21:37:22+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 6.32,
+      "teardown": 0.16,
+      "total": 6.48
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_blocked_stack_deletion": {
+    "last_validated_date": "2023-09-06T09:01:18+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_describe_stack_events_errors": {
+    "last_validated_date": "2024-03-26T17:54:41+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_events_resource_types": {
+    "last_validated_date": "2023-02-15T09:46:53+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_linting_error_during_creation": {
+    "last_validated_date": "2022-11-11T07:10:14+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_name_conflicts": {
+    "last_validated_date": "2024-03-26T17:59:43+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_no_echo_parameter": {
+    "last_validated_date": "2025-08-15T12:01:58+00:00",
+    "durations_in_seconds": {
+      "setup": 1.28,
+      "call": 67.64,
+      "teardown": 4.43,
+      "total": 73.35
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_no_parameters_given": {
+    "last_validated_date": "2025-07-31T16:12:14+00:00",
+    "durations_in_seconds": {
+      "setup": 1.85,
+      "call": 0.32,
+      "teardown": 0.0,
+      "total": 2.17
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_non_existing_stack_message": {
+    "last_validated_date": "2025-07-21T18:00:27+00:00",
+    "durations_in_seconds": {
+      "setup": 0.3,
+      "call": 0.32,
+      "teardown": 0.0,
+      "total": 0.62
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deletion_order[A-B-C]": {
+    "last_validated_date": "2025-08-01T16:12:23+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 28.8,
+      "teardown": 0.17,
+      "total": 28.97
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deletion_order[B-C]": {
+    "last_validated_date": "2025-08-01T16:11:54+00:00",
+    "durations_in_seconds": {
+      "setup": 0.0,
+      "call": 28.69,
+      "teardown": 0.13,
+      "total": 28.82
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deletion_order[C]": {
+    "last_validated_date": "2025-08-01T16:11:25+00:00",
+    "durations_in_seconds": {
+      "setup": 1.17,
+      "call": 31.29,
+      "teardown": 0.13,
+      "total": 32.59
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2": {
+    "last_validated_date": "2024-05-21T09:48:14+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[A-B-C]": {
+    "last_validated_date": "2024-05-21T10:00:44+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[A-C-B]": {
+    "last_validated_date": "2024-05-21T10:01:07+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[B-A-C]": {
+    "last_validated_date": "2024-05-21T10:01:29+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[B-C-A]": {
+    "last_validated_date": "2024-05-21T10:01:50+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[C-A-B]": {
+    "last_validated_date": "2024-05-21T10:02:11+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[C-B-A]": {
+    "last_validated_date": "2024-05-21T10:02:33+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order0]": {
+    "last_validated_date": "2024-05-21T09:49:59+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order1]": {
+    "last_validated_date": "2024-05-21T09:50:22+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order2]": {
+    "last_validated_date": "2024-05-21T09:50:44+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order3]": {
+    "last_validated_date": "2024-05-21T09:51:07+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order4]": {
+    "last_validated_date": "2024-05-21T09:51:28+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order2[deploy_order5]": {
+    "last_validated_date": "2024-05-21T09:51:51+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[A-B-C]": {
+    "last_validated_date": "2024-05-29T11:44:14+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[A-C-B]": {
+    "last_validated_date": "2024-05-29T11:44:32+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[B-A-C]": {
+    "last_validated_date": "2024-05-29T11:44:51+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[B-C-A]": {
+    "last_validated_date": "2024-05-29T11:45:12+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[C-A-B]": {
+    "last_validated_date": "2024-05-29T11:45:31+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_deploy_order[C-B-A]": {
+    "last_validated_date": "2024-05-29T11:45:50+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_stack_resource_not_found": {
+    "last_validated_date": "2025-01-29T09:08:15+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_subnet_id_parameter_type": {
+    "last_validated_date": "2025-12-08T15:18:43+00:00",
+    "durations_in_seconds": {
+      "setup": 0.45,
+      "call": 13.02,
+      "teardown": 6.25,
+      "total": 19.72
+    }
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_update_termination_protection": {
+    "last_validated_date": "2023-01-04T15:23:22+00:00"
+  },
+  "tests/aws/services/cloudformation/api/test_stacks.py::test_updating_an_updated_stack_sets_status": {
+    "last_validated_date": "2022-12-02T10:19:41+00:00"
+  }
+}

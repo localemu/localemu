@@ -1,0 +1,18 @@
+from localemu.services.cloudformation.resource_provider import (
+    CloudFormationResourceProviderPlugin,
+    ResourceProvider,
+)
+
+
+class StepFunctionsActivityProviderPlugin(CloudFormationResourceProviderPlugin):
+    name = "AWS::StepFunctions::Activity"
+
+    def __init__(self):
+        self.factory: type[ResourceProvider] | None = None
+
+    def load(self):
+        from localemu.services.stepfunctions.resource_providers.aws_stepfunctions_activity import (
+            StepFunctionsActivityProvider,
+        )
+
+        self.factory = StepFunctionsActivityProvider

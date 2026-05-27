@@ -1,0 +1,30 @@
+{
+  "Comment": "SNS_PUBLISH_MESSAGE_ATTRIBUTES",
+  "StartAt": "Publish",
+  "States": {
+    "Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn.$": "$.TopicArn",
+        "Message.$": "$.Message",
+        "MessageAttributes": {
+          "my_attribute_no_1": {
+            "DataType": "String",
+            "StringValue.$": "$.MessageAttributeValue1"
+          },
+          "my_attribute_no_2": {
+            "DataType": "String",
+            "StringValue.$": "$.MessageAttributeValue2"
+          },
+          // Test the parsing of soft-keywords as payload templates key bindings.
+          "Version": {
+            "DataType": "String",
+            "StringValue": "string value literal"
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}

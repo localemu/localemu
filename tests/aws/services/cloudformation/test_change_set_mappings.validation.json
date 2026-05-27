@@ -1,0 +1,47 @@
+{
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_fn_find_in_map_with_multiple_nested_functions": {
+    "last_validated_date": "2026-02-03T09:11:57+00:00",
+    "durations_in_seconds": {
+      "setup": 0.65,
+      "call": 92.72,
+      "teardown": 0.33,
+      "total": 93.7
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_fn_find_in_map_with_nested_ref": {
+    "last_validated_date": "2026-02-02T11:35:11+00:00",
+    "durations_in_seconds": {
+      "setup": 0.59,
+      "call": 119.51,
+      "teardown": 0.31,
+      "total": 120.41
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_fn_find_in_map_with_nested_ref_change_mapping": {
+    "last_validated_date": "2026-02-04T11:54:54+00:00",
+    "durations_in_seconds": {
+      "setup": 0.61,
+      "call": 91.81,
+      "teardown": 0.32,
+      "total": 92.74
+    }
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_addition_with_resource": {
+    "last_validated_date": "2025-04-15T13:05:52+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_deletion_with_resource_remap": {
+    "last_validated_date": "2025-04-15T13:08:27+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_key_addition_with_resource": {
+    "last_validated_date": "2025-04-15T13:07:01+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_key_deletion_with_resource_remap": {
+    "last_validated_date": "2025-04-15T13:15:54+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_key_update": {
+    "last_validated_date": "2025-04-15T13:04:43+00:00"
+  },
+  "tests/aws/services/cloudformation/test_change_set_mappings.py::TestChangeSetMappings::test_mapping_leaf_update": {
+    "last_validated_date": "2025-04-15T13:03:18+00:00"
+  }
+}

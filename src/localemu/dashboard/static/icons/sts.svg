@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#DD344C"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="14" y="22" width="36" height="22" rx="2.5"/>
+    <path d="M14 30 L50 30"/>
+    <path d="M20 38 L30 38"/>
+    <path d="M36 38 L44 38"/>
+  </g>
+  <text x="32" y="20" font-family="Menlo,Monaco,monospace" font-size="9" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">TOKEN</text>
+</svg>

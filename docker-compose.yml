@@ -1,0 +1,19 @@
+services:
+  localemu:
+    container_name: "${LOCALEMU_DOCKER_NAME:-localemu-main}"
+    image: localemu/localemu
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4566:4566"            # LocalEmu Gateway
+      - "127.0.0.1:4510-4559:4510-4559"  # external services port range
+    environment:
+      # LocalEmu configuration: https://localemu.cloud/docs/configuration
+      - DEBUG=${DEBUG:-0}
+    volumes:
+      - "${LOCALEMU_VOLUME_DIR:-./volume}:/var/lib/localemu"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    deploy:
+      resources:
+        limits:
+          memory: ${LOCALEMU_MEM_LIMIT:-4g}
+          cpus: "${LOCALEMU_CPU_LIMIT:-2.0}"

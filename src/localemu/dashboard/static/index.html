@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LocalEmu Control Center</title>
+
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/base.css">
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/layout.css">
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/sidebar.css">
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/tables.css">
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/modals.css">
+<link rel="stylesheet" href="/_localemu/dashboard/static/css/activity.css">
+</head>
+
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="topbar-left">
+      <button id="hamburger-btn" aria-label="Toggle sidebar menu" type="button">&#9776;</button>
+      <a class="logo-text" id="brand-home" href="#/" title="Back to overview">LocalEmu</a>
+      <span class="separator">|</span>
+      <span class="badge accent" id="topbar-version"><span class="badge-label">v</span>...</span>
+    </div>
+    <div id="topbar-right">
+      <span class="badge" id="topbar-port"><span class="badge-label">port</span>...</span>
+      <span class="badge" id="topbar-uptime"><span class="badge-label">up</span>...</span>
+      <span class="badge" id="connection-badge" title="Live event stream status">
+        <span class="conn-dot" id="conn-dot"></span>
+        <span class="conn-label" id="conn-label">connecting</span>
+      </span>
+    </div>
+  </header>
+
+  <div id="content">
+    <aside id="sidebar">
+      <div id="sidebar-search-wrap">
+        <input type="text" id="sidebar-search" placeholder="Filter services..." autocomplete="off">
+      </div>
+      <div id="sidebar-list"></div>
+    </aside>
+    <main id="main">
+      <div id="main-content"></div>
+    </main>
+  </div>
+
+  <footer id="activity">
+    <div id="activity-header">
+      <h3>Activity</h3>
+      <span class="activity-spacer"></span>
+      <select id="activity-filter" aria-label="Filter activity by service">
+        <option value="">All services</option>
+      </select>
+      <button id="activity-pause-btn" type="button" title="Pause / resume activity stream">Pause</button>
+      <button id="activity-clear-btn" type="button" title="Clear local activity buffer (server keeps history)">Clear</button>
+    </div>
+    <div id="activity-list"></div>
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="action-modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="action-modal" id="action-modal"></div>
+</div>
+
+<script src="/_localemu/dashboard/static/js/utils.js"></script>
+<script src="/_localemu/dashboard/static/js/services.js"></script>
+<script src="/_localemu/dashboard/static/js/cache.js"></script>
+<script src="/_localemu/dashboard/static/js/api.js"></script>
+<script src="/_localemu/dashboard/static/js/bus.js"></script>
+<script src="/_localemu/dashboard/static/js/registry.js"></script>
+<script src="/_localemu/dashboard/static/js/render.js"></script>
+<script src="/_localemu/dashboard/static/js/sidebar.js"></script>
+<script src="/_localemu/dashboard/static/js/overview.js"></script>
+<script src="/_localemu/dashboard/static/js/resources.js"></script>
+<script src="/_localemu/dashboard/static/js/activity.js"></script>
+<script src="/_localemu/dashboard/static/js/cloudtrail.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/_framework.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/s3.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/ddb.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/sqs.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/logs.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/sns.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/events.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/lambda.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/stepfunctions.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/kms.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/iam.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/stepfunctions_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/secretsmanager.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/lambda_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/rds.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/ec2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/sqs_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/sns_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/apigatewayv2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/dynamodb_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/logs_v2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/eks.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/opensearch.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/ecs.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/athena.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/cloudformation.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/elbv2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/route53.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/cognito_idp.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/kinesis.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/firehose.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/kafka.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/mq.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/acm.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/efs.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/vpc.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/ecr.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/batch.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/pipes.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/scheduler.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/wafv2.js"></script>
+<script src="/_localemu/dashboard/static/js/drills/glue.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/_modal.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/lambda-invoke.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/sqs-send.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/sns-publish.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/events-put.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/secret-rotate.js"></script>
+<script src="/_localemu/dashboard/static/js/actions/dynamodb.js"></script>
+<script src="/_localemu/dashboard/static/js/app.js"></script>
+</body>
+</html>

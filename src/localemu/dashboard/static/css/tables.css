@@ -1,0 +1,233 @@
+/* Resource list tables + drill-down detail tables. */
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.detail-toolbar .search-input {
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 5px 10px;
+  background: var(--base03);
+  border: 1px solid var(--base01);
+  color: var(--base0);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.detail-toolbar .search-input:focus { border-color: var(--teal); }
+.detail-toolbar .row-count { font-size: 11px; color: var(--base01); }
+
+.resource-table-wrap { overflow-x: auto; }
+.resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.resource-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--base02);
+  color: var(--base01);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  border-bottom: 1px solid var(--base01);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+.resource-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(88, 110, 117, 0.25);
+  color: var(--base0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+.resource-table tr:nth-child(even) td { background: rgba(7, 54, 66, 0.4); }
+.resource-table tr:hover td { background: rgba(42, 161, 152, 0.06); }
+
+.clickable-name {
+  cursor: pointer;
+  color: var(--teal);
+}
+.clickable-name:hover { text-decoration: underline; }
+
+td.actions-cell {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+.row-action {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--base01);
+  padding: 1px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  margin-left: 2px;
+}
+.row-action:hover { color: var(--teal); border-color: var(--teal); }
+.row-action.primary {
+  color: var(--blue);
+  border-color: rgba(38, 139, 210, 0.35);
+}
+.row-action.primary:hover { border-color: var(--blue); }
+
+.state-indicator { display: inline-flex; align-items: center; gap: 6px; }
+.state-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.state-dot.active   { background: var(--green); }
+.state-dot.pending  { background: var(--yellow); }
+.state-dot.failed   { background: var(--red); }
+.state-dot.unknown  { background: var(--base01); }
+
+.activity-status {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: inherit;
+}
+.activity-status.ok    { background: rgba(133, 153, 0,   0.15); color: var(--green); }
+.activity-status.warn  { background: rgba(181, 137, 0,   0.15); color: var(--yellow); }
+.activity-status.error { background: rgba(220, 50,  47,  0.15); color: var(--red); }
+
+.resource-table tr.row-highlighted > td {
+  background: rgba(38, 139, 210, 0.10);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+
+.cross-ref-banner {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--blue);
+  background: rgba(38, 139, 210, 0.08);
+  color: var(--base00);
+  font-size: 13px;
+}
+.cross-ref-banner a { color: var(--blue); text-decoration: underline; }
+
+.action-modal .result-section {
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--base01);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Tier badge in drill page header. */
+.tier-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: 6px;
+}
+.tier-badge.tier-live { background: rgba(133, 153, 0, 0.18); color: var(--green); }
+.tier-badge.tier-meta { background: rgba(181, 137, 0, 0.18); color: var(--yellow); }
+.tier-badge.tier-stub { background: rgba(220, 50, 47, 0.18); color: var(--red); }
+
+.drill-subtitle {
+  color: var(--base01);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.tier-banner {
+  padding: 9px 14px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--blue);
+  background: rgba(38, 139, 210, 0.08);
+  color: var(--base00);
+  font-size: 13px;
+}
+.tier-banner-live   { border-left-color: var(--green);  background: rgba(133, 153, 0, 0.06); }
+.tier-banner-metadata{ border-left-color: var(--yellow); background: rgba(181, 137, 0, 0.06); }
+.tier-banner-not_emulated { border-left-color: var(--red); background: rgba(220, 50, 47, 0.06); }
+
+/* Tab strip used by drills/_framework.js. */
+.drill-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--base02);
+  margin-bottom: 14px;
+  overflow-x: auto;
+  flex-wrap: wrap;
+}
+.drill-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--base01);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+}
+.drill-tab:hover { color: var(--base00); }
+.drill-tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  font-weight: 700;
+}
+.drill-tab.disabled {
+  color: var(--base01);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.drill-body { min-height: 200px; }
+
+.drill-json {
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--base00);
+  background: rgba(0,0,0,0.18);
+  padding: 10px 12px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.drill-kv {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.drill-kv th {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 12px 6px 0;
+  font-weight: 700;
+  color: var(--base01);
+  white-space: nowrap;
+  width: 1%;
+}
+.drill-kv td {
+  padding: 6px 0;
+  color: var(--base00);
+  word-break: break-word;
+}
+
+.row-action.destructive {
+  border-color: var(--red);
+  color: var(--red);
+}
+.row-action.destructive:hover {
+  background: rgba(220, 50, 47, 0.12);
+}

@@ -1,0 +1,56 @@
+from localemu.aws.api.stepfunctions import HistoryEventType, TaskFailedEventDetails
+from localemu.services.stepfunctions.asl.component.common.error_name.custom_error_name import (
+    CustomErrorName,
+)
+from localemu.services.stepfunctions.asl.component.common.error_name.failure_event import (
+    FailureEvent,
+    FailureEventException,
+)
+from localemu.services.stepfunctions.asl.component.state.state import CommonStateField
+from localemu.services.stepfunctions.asl.component.state.state_continue_with import (
+    ContinueWithEnd,
+)
+from localemu.services.stepfunctions.asl.component.state.state_fail.cause_decl import CauseDecl
+from localemu.services.stepfunctions.asl.component.state.state_fail.error_decl import ErrorDecl
+from localemu.services.stepfunctions.asl.component.state.state_props import StateProps
+from localemu.services.stepfunctions.asl.eval.environment import Environment
+from localemu.services.stepfunctions.asl.eval.event.event_detail import EventDetails
+
+
+class StateFail(CommonStateField):
+    def __init__(self):
+        super().__init__(
+            state_entered_event_type=HistoryEventType.FailStateEntered,
+            state_exited_event_type=None,
+        )
+        self.cause: CauseDecl | None = None
+        self.error: ErrorDecl | None = None
+
+    def from_state_props(self, state_props: StateProps) -> None:
+        super().from_state_props(state_props)
+        self.cause = state_props.get(CauseDecl)
+        self.error = state_props.get(ErrorDecl)
+        self.continue_with = ContinueWithEnd()
+
+    def _eval_state(self, env: Environment) -> None:
+        task_failed_event_details = TaskFailedEventDetails()
+
+        error_value = None
+        if self.error:
+            self.error.eval(env=env)
+            error_value = env.stack.pop()
+            task_failed_event_details["error"] = error_value
+
+        if self.cause:
+            self.cause.eval(env=env)
+            cause_value = env.stack.pop()
+            task_failed_event_details["cause"] = cause_value
+
+        error_name = CustomErrorName(error_value) if error_value else None
+        failure_event = FailureEvent(
+            env=env,
+            error_name=error_name,
+            event_type=HistoryEventType.TaskFailed,
+            event_details=EventDetails(taskFailedEventDetails=task_failed_event_details),
+        )
+        raise FailureEventException(failure_event=failure_event)

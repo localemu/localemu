@@ -1,0 +1,1748 @@
+import json
+import logging
+import re
+import threading
+import time
+from collections.abc import Iterable
+from concurrent.futures.thread import ThreadPoolExecutor
+from itertools import islice
+
+from botocore.utils import InvalidArnException
+from werkzeug import Request as WerkzeugRequest
+
+from localemu import config
+from localemu.aws.api import CommonServiceException, RequestContext, ServiceException
+from localemu.aws.api.sqs import (
+    ActionNameList,
+    AttributeNameList,
+    AWSAccountIdList,
+    BatchEntryIdsNotDistinct,
+    BatchRequestTooLong,
+    BatchResultErrorEntry,
+    BoxedInteger,
+    CancelMessageMoveTaskResult,
+    ChangeMessageVisibilityBatchRequestEntryList,
+    ChangeMessageVisibilityBatchResult,
+    CreateQueueResult,
+    DeleteMessageBatchRequestEntryList,
+    DeleteMessageBatchResult,
+    DeleteMessageBatchResultEntry,
+    EmptyBatchRequest,
+    GetQueueAttributesResult,
+    GetQueueUrlResult,
+    InvalidAttributeName,
+    InvalidBatchEntryId,
+    InvalidMessageContents,
+    ListDeadLetterSourceQueuesResult,
+    ListMessageMoveTasksResult,
+    ListMessageMoveTasksResultEntry,
+    ListQueuesResult,
+    ListQueueTagsResult,
+    Message,
+    MessageAttributeNameList,
+    MessageBodyAttributeMap,
+    MessageBodySystemAttributeMap,
+    MessageSystemAttributeList,
+    MessageSystemAttributeName,
+    NullableInteger,
+    PurgeQueueInProgress,
+    QueueAttributeMap,
+    QueueAttributeName,
+    QueueDeletedRecently,
+    QueueDoesNotExist,
+    QueueNameExists,
+    ReceiveMessageResult,
+    ResourceNotFoundException,
+    SendMessageBatchRequestEntryList,
+    SendMessageBatchResult,
+    SendMessageBatchResultEntry,
+    SendMessageResult,
+    SqsApi,
+    StartMessageMoveTaskResult,
+    String,
+    TagKeyList,
+    TagMap,
+    Token,
+    TooManyEntriesInBatchRequest,
+)
+from localemu.aws.spec import load_service
+from localemu.config import SQS_DISABLE_MAX_NUMBER_OF_MESSAGE_LIMIT
+from localemu.services.edge import ROUTER
+from localemu.services.plugins import ServiceLifecycleHook
+from localemu.services.sqs import constants as sqs_constants
+from localemu.services.sqs import query_api
+from localemu.services.sqs.constants import (
+    HEADER_LOCALEMU_SQS_OVERRIDE_MESSAGE_COUNT,
+    HEADER_LOCALEMU_SQS_OVERRIDE_WAIT_TIME_SECONDS,
+    MAX_RESULT_LIMIT,
+)
+from localemu.services.sqs.developer_api import SqsDeveloperApi
+from localemu.services.sqs.exceptions import (
+    InvalidParameterValueException,
+    MissingRequiredParameterException,
+)
+from localemu.services.sqs.models import (
+    FifoQueue,
+    MessageMoveTask,
+    MessageMoveTaskStatus,
+    SqsMessage,
+    SqsQueue,
+    SqsStore,
+    StandardQueue,
+    sqs_stores,
+    to_sqs_api_message,
+)
+from localemu.services.sqs.utils import (
+    create_message_attribute_hash,
+    decode_move_task_handle,
+    generate_message_id,
+    is_fifo_queue,
+    is_message_deduplication_id_required,
+    parse_queue_url,
+)
+from localemu.services.stores import AccountRegionBundle
+from localemu.state import StateVisitor
+from localemu.utils.aws.arns import parse_arn
+from localemu.utils.bootstrap import is_api_enabled
+from localemu.utils.cloudwatch.cloudwatch_util import (
+    SqsMetricBatchData,
+    publish_sqs_metric,
+    publish_sqs_metric_batch,
+)
+from localemu.utils.collections import PaginatedList
+from localemu.utils.run import FuncThread
+from localemu.utils.scheduler import Scheduler
+from localemu.utils.strings import md5, token_generator
+from localemu.utils.threads import start_thread
+from localemu.utils.time import now
+
+LOG = logging.getLogger(__name__)
+
+MAX_NUMBER_OF_MESSAGES = 10
+_STORE_LOCK = threading.RLock()
+
+
+def assert_queue_name(queue_name: str, fifo: bool = False):
+    if queue_name.endswith(".fifo"):
+        if not fifo:
+            # Standard queues with .fifo suffix are not allowed
+            raise InvalidParameterValueException(
+                "Can only include alphanumeric characters, hyphens, or underscores. 1 to 80 in length"
+            )
+        # The .fifo suffix counts towards the 80-character queue name quota.
+        queue_name = queue_name[:-5] + "_fifo"
+
+    # slashes are actually not allowed, but we've allowed it explicitly in localemu
+    if not re.match(r"^[a-zA-Z0-9/_-]{1,80}$", queue_name):
+        raise InvalidParameterValueException(
+            "Can only include alphanumeric characters, hyphens, or underscores. 1 to 80 in length"
+        )
+
+
+def check_message_min_size(message_body: str):
+    if _message_body_size(message_body) == 0:
+        raise MissingRequiredParameterException(
+            "The request must contain the parameter MessageBody."
+        )
+
+
+def check_message_max_size(
+    message_body: str, message_attributes: MessageBodyAttributeMap, max_message_size: int
+):
+    # https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html
+    error = "One or more parameters are invalid. "
+    error += f"Reason: Message must be shorter than {max_message_size} bytes."
+    if (
+        _message_body_size(message_body) + _message_attributes_size(message_attributes)
+        > max_message_size
+    ):
+        raise InvalidParameterValueException(error)
+
+
+def _message_body_size(body: str):
+    return _bytesize(body)
+
+
+def _message_attributes_size(attributes: MessageBodyAttributeMap):
+    """Compute the size (in bytes) of message attributes per AWS SQS semantics.
+
+    Per AWS docs, the size of a message attribute is:
+      attribute_name + DataType + value_bytes
+    where `value_bytes` is taken from exactly ONE of StringValue / BinaryValue /
+    StringListValues / BinaryListValues. An earlier implementation iterated over the
+    attribute's ``.values()`` which could incorrectly sum unrelated fields (e.g. both
+    StringValue and a stale BinaryValue) and raised on list-typed fields because
+    ``_bytesize`` only supports str/bytes (SQS-4).
+    """
+    if not attributes:
+        return 0
+    total = 0
+    for name, attr in attributes.items():
+        total += _bytesize(name)
+        data_type = attr.get("DataType")
+        if data_type:
+            total += _bytesize(data_type)
+        # Pick the single populated value field; precedence mirrors AWS SDK behaviour.
+        if (string_value := attr.get("StringValue")) is not None:
+            total += _bytesize(string_value)
+        elif (binary_value := attr.get("BinaryValue")) is not None:
+            total += _bytesize(binary_value)
+        elif string_list := attr.get("StringListValues"):
+            total += sum(_bytesize(v) for v in string_list)
+        elif binary_list := attr.get("BinaryListValues"):
+            total += sum(_bytesize(v) for v in binary_list)
+    return total
+
+
+def _bytesize(value: str | bytes):
+    # must encode as utf8 to get correct bytes with len
+    return len(value.encode("utf8")) if isinstance(value, str) else len(value)
+
+
+def check_message_content(message_body: str):
+    error = "Invalid characters found. Valid unicode characters are #x9 | #xA | #xD | #x20 to #xD7FF | #xE000 to #xFFFD | #x10000 to #x10FFFF"
+
+    if not re.match(sqs_constants.MSG_CONTENT_REGEX, message_body):
+        raise InvalidMessageContents(error)
+
+
+class CloudwatchDispatcher:
+    """
+    Dispatches SQS metrics for specific api-calls using a ThreadPool
+    """
+
+    def __init__(self, num_thread: int = 3):
+        self.executor = ThreadPoolExecutor(
+            num_thread, thread_name_prefix="sqs-metrics-cloudwatch-dispatcher"
+        )
+        self.running = True
+
+    def shutdown(self):
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.running = False
+
+    def dispatch_sqs_metric(
+        self,
+        account_id: str,
+        region: str,
+        queue_name: str,
+        metric: str,
+        value: float = 1,
+        unit: str = "Count",
+    ):
+        """
+        Publishes a metric to Cloudwatch using a Threadpool
+        :param account_id The account id that should be used for Cloudwatch client
+        :param region The region that should be used for Cloudwatch client
+        :param queue_name The name of the queue that the metric belongs to
+        :param metric The name of the metric
+        :param value The value for that metric, default 1
+        :param unit The unit for the value, default "Count"
+        """
+        if not self.running:
+            return
+
+        self.executor.submit(
+            publish_sqs_metric,
+            account_id=account_id,
+            region=region,
+            queue_name=queue_name,
+            metric=metric,
+            value=value,
+            unit=unit,
+        )
+
+    def dispatch_metric_message_sent(self, queue: SqsQueue, message_body_size: int):
+        """
+        Sends metric 'NumberOfMessagesSent' and 'SentMessageSize' to Cloudwatch
+        :param queue The Queue for which the metric will be send
+        :param message_body_size the size of the message in bytes
+        """
+        self.dispatch_sqs_metric(
+            account_id=queue.account_id,
+            region=queue.region,
+            queue_name=queue.name,
+            metric="NumberOfMessagesSent",
+        )
+        self.dispatch_sqs_metric(
+            account_id=queue.account_id,
+            region=queue.region,
+            queue_name=queue.name,
+            metric="SentMessageSize",
+            value=message_body_size,
+            unit="Bytes",
+        )
+
+    def dispatch_metric_message_deleted(self, queue: SqsQueue, deleted: int = 1):
+        """
+        Sends metric 'NumberOfMessagesDeleted' to Cloudwatch
+        :param queue The Queue for which the metric will be sent
+        :param deleted The number of messages that were successfully deleted, default: 1
+        """
+        self.dispatch_sqs_metric(
+            account_id=queue.account_id,
+            region=queue.region,
+            queue_name=queue.name,
+            metric="NumberOfMessagesDeleted",
+            value=deleted,
+        )
+
+    def dispatch_metric_received(self, queue: SqsQueue, received: int):
+        """
+        Sends metric 'NumberOfMessagesReceived' (if received > 0), or 'NumberOfEmptyReceives' to Cloudwatch
+        :param queue The Queue for which the metric will be send
+        :param received The number of messages that have been received
+        """
+        if received > 0:
+            self.dispatch_sqs_metric(
+                account_id=queue.account_id,
+                region=queue.region,
+                queue_name=queue.name,
+                metric="NumberOfMessagesReceived",
+                value=received,
+            )
+        else:
+            self.dispatch_sqs_metric(
+                account_id=queue.account_id,
+                region=queue.region,
+                queue_name=queue.name,
+                metric="NumberOfEmptyReceives",
+            )
+
+
+class CloudwatchPublishWorker:
+    """
+    Regularly publish metrics data about approximate messages to Cloudwatch.
+    Includes: ApproximateNumberOfMessagesVisible, ApproximateNumberOfMessagesNotVisible
+        and ApproximateNumberOfMessagesDelayed
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduler = Scheduler()
+        self.thread: FuncThread | None = None
+
+    def publish_approximate_cloudwatch_metrics(self):
+        """Publishes the metrics for ApproximateNumberOfMessagesVisible, ApproximateNumberOfMessagesNotVisible
+        and ApproximateNumberOfMessagesDelayed to CloudWatch"""
+        # TODO ApproximateAgeOfOldestMessage is missing
+        #  https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-available-cloudwatch-metrics.html
+
+        for account_id, region, store in sqs_stores.iter_stores():
+            start = 0
+            # we can include up to 1000 metric queries for one put-metric-data call
+            #  and we currently include 3 metrics per queue
+            batch_size = 300
+
+            while start < len(store.queues):
+                batch_data = []
+                # Process the current batch
+                for queue in islice(store.queues.values(), start, start + batch_size):
+                    batch_data.append(
+                        SqsMetricBatchData(
+                            QueueName=queue.name,
+                            MetricName="ApproximateNumberOfMessagesVisible",
+                            Value=queue.approximate_number_of_messages,
+                        )
+                    )
+                    batch_data.append(
+                        SqsMetricBatchData(
+                            QueueName=queue.name,
+                            MetricName="ApproximateNumberOfMessagesNotVisible",
+                            Value=queue.approximate_number_of_messages_not_visible,
+                        )
+                    )
+                    batch_data.append(
+                        SqsMetricBatchData(
+                            QueueName=queue.name,
+                            MetricName="ApproximateNumberOfMessagesDelayed",
+                            Value=queue.approximate_number_of_messages_delayed,
+                        )
+                    )
+
+                publish_sqs_metric_batch(
+                    account_id=account_id, region=region, sqs_metric_batch_data=batch_data
+                )
+                # Update for the next batch
+                start += batch_size
+
+    def start(self):
+        if self.thread:
+            return
+
+        self._stop_event = threading.Event()
+
+        def _run(*_args):
+            while not self._stop_event.is_set():
+                try:
+                    self.publish_approximate_cloudwatch_metrics()
+                except Exception:
+                    pass
+                self._stop_event.wait(timeout=config.SQS_CLOUDWATCH_METRICS_REPORT_INTERVAL)
+
+        self.thread = start_thread(_run, name="sqs-approx-metrics-cloudwatch-publisher")
+
+    def stop(self):
+        if hasattr(self, "_stop_event") and self._stop_event:
+            self._stop_event.set()
+
+        if self.thread:
+            self.thread.stop()
+
+        self.thread = None
+
+
+class QueueUpdateWorker:
+    """
+    Regularly re-queues inflight and delayed messages whose visibility timeout has expired or delay deadline has been
+    reached.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduler = Scheduler()
+        self.thread: FuncThread | None = None
+        self.mutex = threading.RLock()
+
+    def iter_queues(self) -> Iterable[SqsQueue]:
+        for account_id, region, store in sqs_stores.iter_stores():
+            yield from store.queues.values()
+
+    def do_update_all_queues(self):
+        for queue in self.iter_queues():
+            try:
+                queue.requeue_inflight_messages()
+            except Exception:
+                LOG.error(
+                    "error re-queueing inflight messages",
+                    exc_info=LOG.isEnabledFor(logging.DEBUG),
+                )
+
+            try:
+                queue.enqueue_delayed_messages()
+            except Exception:
+                LOG.error(
+                    "error enqueueing delayed messages",
+                    exc_info=LOG.isEnabledFor(logging.DEBUG),
+                )
+
+            if config.SQS_ENABLE_MESSAGE_RETENTION_PERIOD:
+                try:
+                    queue.remove_expired_messages()
+                except Exception:
+                    LOG.error(
+                        "error removing expired messages",
+                        exc_info=LOG.isEnabledFor(logging.DEBUG),
+                    )
+
+    def start(self):
+        with self.mutex:
+            if self.thread:
+                return
+
+            self.scheduler = Scheduler()
+            self.scheduler.schedule(self.do_update_all_queues, period=1)
+
+            def _run(*_args):
+                self.scheduler.run()
+
+            self.thread = start_thread(_run, name="sqs-queue-update-worker")
+
+    def stop(self):
+        with self.mutex:
+            if self.scheduler:
+                self.scheduler.close()
+
+            if self.thread:
+                self.thread.stop()
+
+            self.thread = None
+            self.scheduler = None
+
+
+class MessageMoveTaskManager:
+    """
+    Manages and runs MessageMoveTasks.
+
+    TODO: we should check how AWS really moves messages internally: do they use the API?
+     it's hard to know how AWS really does moving of messages. there are a number of things we could do
+     to understand it better, including creating a DLQ chain and letting move tasks fail to see whether
+     move tasks cause message consuming and create receipt handles. for now, we're doing a middle-layer
+     transactional move, foregoing the API layer but using receipt handles and transactions.
+
+    TODO: restoring move tasks from persistence doesn't work, may be a fringe case though
+
+    TODO: re-drive into multiple original source queues
+    """
+
+    def __init__(self, stores: AccountRegionBundle[SqsStore] = None) -> None:
+        self.stores = stores or sqs_stores
+        self.mutex = threading.RLock()
+        self.move_tasks: dict[str, MessageMoveTask] = {}
+        self.executor = ThreadPoolExecutor(max_workers=100, thread_name_prefix="sqs-move-message")
+
+    def submit(self, move_task: MessageMoveTask):
+        with self.mutex:
+            try:
+                source_queue = self._get_queue_by_arn(move_task.source_arn)
+                move_task.approximate_number_of_messages_to_move = (
+                    source_queue.approximate_number_of_messages
+                )
+                move_task.approximate_number_of_messages_moved = 0
+                move_task.mark_started()
+                self.move_tasks[move_task.task_id] = move_task
+                self.executor.submit(self._run, move_task)
+            except Exception as e:
+                self._fail_task(move_task, e)
+                raise
+
+    def cancel(self, move_task: MessageMoveTask):
+        with self.mutex:
+            move_task.status = MessageMoveTaskStatus.CANCELLING
+            move_task.cancel_event.set()
+
+    def close(self):
+        with self.mutex:
+            for move_task in self.move_tasks.values():
+                move_task.cancel_event.set()
+
+            self.executor.shutdown(wait=False, cancel_futures=True)
+
+    def _run(self, move_task: MessageMoveTask):
+        try:
+            if move_task.destination_arn:
+                LOG.info(
+                    "Move task started %s (%s -> %s)",
+                    move_task.task_id,
+                    move_task.source_arn,
+                    move_task.destination_arn,
+                )
+            else:
+                LOG.info(
+                    "Move task started %s (%s -> original sources)",
+                    move_task.task_id,
+                    move_task.source_arn,
+                )
+
+            while not move_task.cancel_event.is_set():
+                # look up queues for every message in case they are removed
+                source_queue = self._get_queue_by_arn(move_task.source_arn)
+
+                receive_result = source_queue.receive(num_messages=1, visibility_timeout=1)
+
+                if receive_result.dead_letter_messages:
+                    raise NotImplementedError("Cannot deal with DLQ chains in move tasks")
+
+                if not receive_result.successful:
+                    # queue empty, task done
+                    break
+
+                message = receive_result.successful[0]
+                receipt_handle = receive_result.receipt_handles[0]
+
+                if move_task.destination_arn:
+                    target_queue = self._get_queue_by_arn(move_task.destination_arn)
+                else:
+                    # we assume that dead_letter_source_arn is set since the message comes from a DLQ
+                    target_queue = self._get_queue_by_arn(message.dead_letter_queue_source_arn)
+
+                target_queue.put(
+                    message=message.message,
+                    message_group_id=message.message_group_id,
+                    message_deduplication_id=message.message_deduplication_id,
+                )
+                source_queue.remove(receipt_handle)
+                move_task.approximate_number_of_messages_moved += 1
+
+                if rate := move_task.max_number_of_messages_per_second:
+                    move_task.cancel_event.wait(timeout=(1 / rate))
+
+        except Exception as e:
+            self._fail_task(move_task, e)
+        else:
+            if move_task.cancel_event.is_set():
+                LOG.info("Move task cancelled %s", move_task.task_id)
+                move_task.status = MessageMoveTaskStatus.CANCELLED
+            else:
+                LOG.info("Move task completed successfully %s", move_task.task_id)
+                move_task.status = MessageMoveTaskStatus.COMPLETED
+
+    def _get_queue_by_arn(self, queue_arn: str) -> SqsQueue:
+        arn = parse_arn(queue_arn)
+        return SqsProvider._require_queue(arn["account"], arn["region"], arn["resource"])
+
+    def _fail_task(self, task: MessageMoveTask, reason: Exception):
+        """
+        Marks a given task as failed due to the given reason.
+
+        :param task: the task to mark as failed
+        :param reason: the failure reason
+        """
+        LOG.info(
+            "Exception occurred during move task %s: %s",
+            task.task_id,
+            reason,
+            exc_info=LOG.isEnabledFor(logging.DEBUG),
+        )
+        task.status = MessageMoveTaskStatus.FAILED
+        if isinstance(reason, ServiceException):
+            task.failure_reason = reason.code
+        else:
+            task.failure_reason = reason.__class__.__name__
+
+
+def check_attributes(message_attributes: MessageBodyAttributeMap):
+    if not message_attributes:
+        return
+    for attribute_name in message_attributes:
+        if len(attribute_name) >= 256:
+            raise InvalidParameterValueException(
+                "Message (user) attribute names must be shorter than 256 Bytes"
+            )
+        if not re.match(sqs_constants.ATTR_NAME_CHAR_REGEX, attribute_name.lower()):
+            raise InvalidParameterValueException(
+                "Message (user) attributes name can only contain upper and lower score characters, digits, periods, "
+                "hyphens and underscores. "
+            )
+        if not re.match(sqs_constants.ATTR_NAME_PREFIX_SUFFIX_REGEX, attribute_name.lower()):
+            raise InvalidParameterValueException(
+                "You can't use message attribute names beginning with 'AWS.' or 'Amazon.'. "
+                "These strings are reserved for internal use. Additionally, they cannot start or end with '.'."
+            )
+
+        attribute = message_attributes[attribute_name]
+        attribute_type = attribute.get("DataType")
+        if not attribute_type:
+            raise InvalidParameterValueException("Missing required parameter DataType")
+        if not re.match(sqs_constants.ATTR_TYPE_REGEX, attribute_type):
+            raise InvalidParameterValueException(
+                f"Type for parameter MessageAttributes.Attribute_name.DataType must be prefixed"
+                f'with "String", "Binary", or "Number", but was: {attribute_type}'
+            )
+        if len(attribute_type) >= 256:
+            raise InvalidParameterValueException(
+                "Message (user) attribute types must be shorter than 256 Bytes"
+            )
+
+        if attribute_type == "String":
+            try:
+                attribute_value = attribute.get("StringValue")
+
+                if not attribute_value:
+                    raise InvalidParameterValueException(
+                        f"Message (user) attribute '{attribute_name}' must contain a non-empty value of type 'String'."
+                    )
+
+                check_message_content(attribute_value)
+            except InvalidMessageContents as e:
+                # AWS throws a different exception here
+                raise InvalidParameterValueException(e.args[0])
+
+
+def check_fifo_id(fifo_id: str | None, parameter: str):
+    if fifo_id is None:
+        return
+    if not re.match(sqs_constants.FIFO_MSG_REGEX, fifo_id):
+        raise InvalidParameterValueException(
+            f"Value {fifo_id} for parameter {parameter} is invalid. "
+            f"Reason: {parameter} can only include alphanumeric and punctuation characters. 1 to 128 in length."
+        )
+
+
+class SqsProvider(SqsApi, ServiceLifecycleHook):
+    """
+    LocalEmu SQS Provider.
+
+    LIMITATIONS:
+        - Pagination of results (NextToken)
+        - Delivery guarantees
+        - The region is not encoded in the queue URL
+
+    CROSS-ACCOUNT ACCESS:
+    LocalEmu permits cross-account access for all operations. However, AWS
+    disallows the same for following operations:
+        - AddPermission
+        - CreateQueue
+        - DeleteQueue
+        - ListQueues
+        - ListQueueTags
+        - RemovePermission
+        - SetQueueAttributes
+        - TagQueue
+        - UntagQueue
+    """
+
+    queues: dict[str, SqsQueue]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._queue_update_worker = QueueUpdateWorker()
+        self._message_move_task_manager = MessageMoveTaskManager()
+        self._router_rules = []
+        self._init_cloudwatch_metrics_reporting()
+
+    def accept_state_visitor(self, visitor: StateVisitor):
+        visitor.visit(sqs_stores)
+
+    @staticmethod
+    def get_store(account_id: str, region: str) -> SqsStore:
+        return sqs_stores[account_id][region]
+
+    def on_after_init(self):
+        # this configuration increases the processing power for Query protocol requests, which are form-encoded and by
+        # default are limited to 500kb payload size by Werkzeug. we make sure we only *increase* the limit if it's
+        # already set, and if it's already set to unlimited we leave it.
+        from rolo import Request as RoloRequest
+
+        # needed for the webserver integration (webservers create Werkzeug request objects)
+        if WerkzeugRequest.max_form_memory_size is not None:
+            WerkzeugRequest.max_form_memory_size = max(
+                WerkzeugRequest.max_form_memory_size, sqs_constants.DEFAULT_MAXIMUM_MESSAGE_SIZE * 2
+            )
+        # needed for internal/proxy requests (which create rolo request objects)
+        if RoloRequest.max_form_memory_size is not None:
+            RoloRequest.max_form_memory_size = max(
+                RoloRequest.max_form_memory_size, sqs_constants.DEFAULT_MAXIMUM_MESSAGE_SIZE * 2
+            )
+
+    def on_before_start(self):
+        query_api.register(ROUTER)
+        self._router_rules = ROUTER.add(SqsDeveloperApi())
+        self._queue_update_worker.start()
+        self._start_cloudwatch_metrics_reporting()
+
+    def on_before_stop(self):
+        ROUTER.remove(self._router_rules)
+
+        self._queue_update_worker.stop()
+        self._message_move_task_manager.close()
+        for _, _, store in sqs_stores.iter_stores():
+            for queue in store.queues.values():
+                queue.shutdown()
+
+        self._stop_cloudwatch_metrics_reporting()
+
+    @staticmethod
+    def _require_queue(
+        account_id: str, region_name: str, name: str, is_query: bool = False
+    ) -> SqsQueue:
+        """
+        Returns the queue for the given name, or raises QueueDoesNotExist if it does not exist.
+
+        :param: context: the request context
+        :param name: the name to look for
+        :param is_query: whether the request is using query protocol (error message is different)
+        :returns: the queue
+        :raises QueueDoesNotExist: if the queue does not exist
+        """
+        store = SqsProvider.get_store(account_id, region_name)
+        with _STORE_LOCK:
+            if name not in store.queues:
+                if is_query:
+                    message = "The specified queue does not exist for this wsdl version."
+                else:
+                    message = "The specified queue does not exist."
+                raise QueueDoesNotExist(message)
+
+            return store.queues[name]
+
+    def _require_queue_by_arn(self, context: RequestContext, queue_arn: str) -> SqsQueue:
+        arn = parse_arn(queue_arn)
+        return self._require_queue(
+            arn["account"],
+            arn["region"],
+            arn["resource"],
+            is_query=context.service.protocol == "query",
+        )
+
+    def _resolve_queue(
+        self,
+        context: RequestContext,
+        queue_name: str | None = None,
+        queue_url: str | None = None,
+    ) -> SqsQueue:
+        """
+        Determines the name of the queue from available information (request context, queue URL) to return the respective queue,
+        or raises QueueDoesNotExist if it does not exist.
+
+        :param context: the request context, used for getting region and account_id, and optionally the queue_url
+        :param queue_name: the queue name (if this is set, then this will be used for the key)
+        :param queue_url: the queue url (if name is not set, this will be used to determine the queue name)
+        :returns: the queue
+        :raises QueueDoesNotExist: if the queue does not exist
+        """
+        account_id, region_name, name = resolve_queue_location(context, queue_name, queue_url)
+        is_query = context.service.protocol == "query"
+        return self._require_queue(
+            account_id, region_name or context.region, name, is_query=is_query
+        )
+
+    def create_queue(
+        self,
+        context: RequestContext,
+        queue_name: String,
+        attributes: QueueAttributeMap = None,
+        tags: TagMap = None,
+        **kwargs,
+    ) -> CreateQueueResult:
+        fifo = attributes and (
+            attributes.get(QueueAttributeName.FifoQueue, "false").lower() == "true"
+        )
+
+        # Special Case TODO: why is an emtpy policy passed at all? same in set_queue_attributes
+        if attributes and attributes.get(QueueAttributeName.Policy) == "":
+            del attributes[QueueAttributeName.Policy]
+
+        store = self.get_store(context.account_id, context.region)
+
+        with _STORE_LOCK:
+            if queue_name in store.queues:
+                queue = store.queues[queue_name]
+
+                if attributes:
+                    # if attributes are set, then we check whether the existing attributes match the passed ones
+                    queue.validate_queue_attributes(attributes)
+                    for k, v in attributes.items():
+                        if queue.attributes.get(k) != v:
+                            LOG.debug(
+                                "queue attribute values %s for queue %s do not match %s (existing) != %s (new)",
+                                k,
+                                queue_name,
+                                queue.attributes.get(k),
+                                v,
+                            )
+                            raise QueueNameExists(
+                                f"A queue already exists with the same name and a different value for attribute {k}"
+                            )
+
+                return CreateQueueResult(QueueUrl=queue.url(context))
+
+            if config.SQS_DELAY_RECENTLY_DELETED:
+                deleted = store.deleted.get(queue_name)
+                if deleted and deleted > (time.time() - sqs_constants.RECENTLY_DELETED_TIMEOUT):
+                    raise QueueDeletedRecently(
+                        "You must wait 60 seconds after deleting a queue before you can create "
+                        "another with the same name."
+                    )
+            store.expire_deleted()
+
+            # create the appropriate queue
+            if fifo:
+                queue = FifoQueue(queue_name, context.region, context.account_id, attributes, tags)
+            else:
+                queue = StandardQueue(
+                    queue_name, context.region, context.account_id, attributes, tags
+                )
+            if tags:
+                self._tag_queue(queue, tags)
+
+            LOG.debug("creating queue key=%s attributes=%s tags=%s", queue_name, attributes, tags)
+
+            store.queues[queue_name] = queue
+
+        return CreateQueueResult(QueueUrl=queue.url(context))
+
+    def get_queue_url(
+        self,
+        context: RequestContext,
+        queue_name: String,
+        queue_owner_aws_account_id: String = None,
+        **kwargs,
+    ) -> GetQueueUrlResult:
+        queue = self._require_queue(
+            queue_owner_aws_account_id or context.account_id,
+            context.region,
+            queue_name,
+            is_query=context.service.protocol == "query",
+        )
+
+        return GetQueueUrlResult(QueueUrl=queue.url(context))
+
+    def list_queues(
+        self,
+        context: RequestContext,
+        queue_name_prefix: String = None,
+        next_token: Token = None,
+        max_results: BoxedInteger = None,
+        **kwargs,
+    ) -> ListQueuesResult:
+        store = self.get_store(context.account_id, context.region)
+
+        if queue_name_prefix:
+            urls = [
+                queue.url(context)
+                for queue in store.queues.values()
+                if queue.name.startswith(queue_name_prefix)
+            ]
+        else:
+            urls = [queue.url(context) for queue in store.queues.values()]
+
+        paginated_list = PaginatedList(urls)
+
+        page_size = max_results if max_results else MAX_RESULT_LIMIT
+        paginated_urls, next_token = paginated_list.get_page(
+            token_generator=token_generator, next_token=next_token, page_size=page_size
+        )
+
+        if len(urls) == 0:
+            return ListQueuesResult()
+
+        return ListQueuesResult(QueueUrls=paginated_urls, NextToken=next_token)
+
+    def change_message_visibility(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        receipt_handle: String,
+        visibility_timeout: NullableInteger,
+        **kwargs,
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        queue.update_visibility_timeout(receipt_handle, visibility_timeout)
+
+    def change_message_visibility_batch(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        entries: ChangeMessageVisibilityBatchRequestEntryList,
+        **kwargs,
+    ) -> ChangeMessageVisibilityBatchResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        self._assert_batch(entries)
+
+        successful = []
+        failed = []
+
+        with queue.mutex:
+            for entry in entries:
+                try:
+                    queue.update_visibility_timeout(
+                        entry["ReceiptHandle"], entry["VisibilityTimeout"]
+                    )
+                    successful.append({"Id": entry["Id"]})
+                except Exception as e:
+                    failed.append(
+                        BatchResultErrorEntry(
+                            Id=entry["Id"],
+                            SenderFault=False,
+                            Code=e.__class__.__name__,
+                            Message=str(e),
+                        )
+                    )
+
+        return ChangeMessageVisibilityBatchResult(
+            Successful=successful,
+            Failed=failed,
+        )
+
+    def delete_queue(self, context: RequestContext, queue_url: String, **kwargs) -> None:
+        # Acquire the global store lock BEFORE parsing the URL / touching any store state so that
+        # concurrent create/delete operations on the same queue URL cannot interleave and leave the
+        # store in an inconsistent state (SQS-1).
+        with _STORE_LOCK:
+            account_id, region, name = parse_queue_url(queue_url)
+            if region is None:
+                region = context.region
+
+            if account_id != context.account_id:
+                # Cross-account DeleteQueue is not permitted on real AWS. Reject the request with a
+                # proper access-denied style error rather than silently proceeding (SQS-2).
+                raise CommonServiceException(
+                    code="AccessDenied",
+                    status_code=403,
+                    message=(
+                        f"Access to the resource {queue_url} is denied. "
+                        "Cross-account DeleteQueue operations are not allowed."
+                    ),
+                    sender_fault=True,
+                )
+
+            store = self.get_store(account_id, region)
+            queue = self._resolve_queue(context, queue_url=queue_url)
+            LOG.debug(
+                "deleting queue name=%s, region=%s, account=%s",
+                queue.name,
+                queue.region,
+                queue.account_id,
+            )
+            # Trigger a shutdown prior to removing the queue resource
+            store.queues[queue.name].shutdown()
+            del store.queues[queue.name]
+            store.deleted[queue.name] = time.time()
+            self._remove_all_queue_tags(queue)
+
+    def get_queue_attributes(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        attribute_names: AttributeNameList = None,
+        **kwargs,
+    ) -> GetQueueAttributesResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        result = queue.get_queue_attributes(attribute_names=attribute_names)
+
+        return GetQueueAttributesResult(Attributes=(result if result else None))
+
+    def send_message(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        message_body: String,
+        delay_seconds: NullableInteger = None,
+        message_attributes: MessageBodyAttributeMap = None,
+        message_system_attributes: MessageBodySystemAttributeMap = None,
+        message_deduplication_id: String = None,
+        message_group_id: String = None,
+        **kwargs,
+    ) -> SendMessageResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        queue_item = self._put_message(
+            queue,
+            context,
+            message_body,
+            delay_seconds,
+            message_attributes,
+            message_system_attributes,
+            message_deduplication_id,
+            message_group_id,
+        )
+        message = queue_item.message
+        return SendMessageResult(
+            MessageId=message["MessageId"],
+            MD5OfMessageBody=message["MD5OfBody"],
+            MD5OfMessageAttributes=message.get("MD5OfMessageAttributes"),
+            SequenceNumber=queue_item.sequence_number,
+            MD5OfMessageSystemAttributes=create_message_attribute_hash(message_system_attributes),
+        )
+
+    def send_message_batch(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        entries: SendMessageBatchRequestEntryList,
+        **kwargs,
+    ) -> SendMessageBatchResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        self._assert_batch(
+            entries,
+            require_fifo_queue_params=is_fifo_queue(queue),
+            require_message_deduplication_id=is_message_deduplication_id_required(queue),
+        )
+        # check the total batch size first and raise BatchRequestTooLong id > DEFAULT_MAXIMUM_MESSAGE_SIZE.
+        # This is checked before any messages in the batch are sent.  Raising the exception here should
+        # cause error response, rather than batching error results and returning
+        self._assert_valid_batch_size(entries, sqs_constants.DEFAULT_MAXIMUM_MESSAGE_SIZE)
+
+        successful = []
+        failed = []
+
+        with queue.mutex:
+            for entry in entries:
+                try:
+                    queue_item = self._put_message(
+                        queue,
+                        context,
+                        message_body=entry.get("MessageBody"),
+                        delay_seconds=entry.get("DelaySeconds"),
+                        message_attributes=entry.get("MessageAttributes"),
+                        message_system_attributes=entry.get("MessageSystemAttributes"),
+                        message_deduplication_id=entry.get("MessageDeduplicationId"),
+                        message_group_id=entry.get("MessageGroupId"),
+                    )
+                    message = queue_item.message
+
+                    successful.append(
+                        SendMessageBatchResultEntry(
+                            Id=entry["Id"],
+                            MessageId=message.get("MessageId"),
+                            MD5OfMessageBody=message.get("MD5OfBody"),
+                            MD5OfMessageAttributes=message.get("MD5OfMessageAttributes"),
+                            MD5OfMessageSystemAttributes=create_message_attribute_hash(
+                                message.get("message_system_attributes")
+                            ),
+                            SequenceNumber=queue_item.sequence_number,
+                        )
+                    )
+                except ServiceException as e:
+                    failed.append(
+                        BatchResultErrorEntry(
+                            Id=entry["Id"],
+                            SenderFault=e.sender_fault,
+                            Code=e.code,
+                            Message=e.message,
+                        )
+                    )
+                except Exception as e:
+                    failed.append(
+                        BatchResultErrorEntry(
+                            Id=entry["Id"],
+                            SenderFault=False,
+                            Code=e.__class__.__name__,
+                            Message=str(e),
+                        )
+                    )
+
+        # AWS always returns empty lists rather than null when there are no successful / failed
+        # entries, so mirror that contract (SQS-3).
+        return SendMessageBatchResult(
+            Successful=successful,
+            Failed=failed,
+        )
+
+    def _put_message(
+        self,
+        queue: SqsQueue,
+        context: RequestContext,
+        message_body: String,
+        delay_seconds: NullableInteger = None,
+        message_attributes: MessageBodyAttributeMap = None,
+        message_system_attributes: MessageBodySystemAttributeMap = None,
+        message_deduplication_id: String = None,
+        message_group_id: String = None,
+    ) -> SqsMessage:
+        check_message_min_size(message_body)
+        check_message_max_size(message_body, message_attributes, queue.maximum_message_size)
+        check_message_content(message_body)
+        check_attributes(message_attributes)
+        check_attributes(message_system_attributes)
+        check_fifo_id(message_deduplication_id, "MessageDeduplicationId")
+        check_fifo_id(message_group_id, "MessageGroupId")
+
+        message = Message(
+            MessageId=generate_message_id(),
+            MD5OfBody=md5(message_body),
+            Body=message_body,
+            Attributes=self._create_message_attributes(context, message_system_attributes),
+            MD5OfMessageAttributes=create_message_attribute_hash(message_attributes),
+            MessageAttributes=message_attributes,
+        )
+        if self._cloudwatch_dispatcher:
+            self._cloudwatch_dispatcher.dispatch_metric_message_sent(
+                queue=queue, message_body_size=len(message_body.encode("utf-8"))
+            )
+
+        return queue.put(
+            message=message,
+            message_deduplication_id=message_deduplication_id,
+            message_group_id=message_group_id,
+            delay_seconds=int(delay_seconds) if delay_seconds is not None else None,
+        )
+
+    def receive_message(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        attribute_names: AttributeNameList = None,
+        message_system_attribute_names: MessageSystemAttributeList = None,
+        message_attribute_names: MessageAttributeNameList = None,
+        max_number_of_messages: NullableInteger = None,
+        visibility_timeout: NullableInteger = None,
+        wait_time_seconds: NullableInteger = None,
+        receive_request_attempt_id: String = None,
+        **kwargs,
+    ) -> ReceiveMessageResult:
+        # TODO add support for message_system_attribute_names
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        # ReceiveRequestAttemptId is only valid on FIFO queues. AWS rejects it on standard
+        # queues with an InvalidParameterValue error — mirror that behaviour (SQS-6).
+        if receive_request_attempt_id is not None and not is_fifo_queue(queue):
+            raise InvalidParameterValueException(
+                "Value {} for parameter ReceiveRequestAttemptId is invalid. "
+                "Reason: ReceiveRequestAttemptId can be used only with FIFO queues.".format(
+                    receive_request_attempt_id
+                )
+            )
+
+        poll_empty_queue = False
+        if override := extract_wait_time_seconds_from_headers(context):
+            wait_time_seconds = override
+            poll_empty_queue = True
+        elif wait_time_seconds is None:
+            wait_time_seconds = queue.wait_time_seconds
+        elif wait_time_seconds < 0 or wait_time_seconds > 20:
+            raise InvalidParameterValueException(
+                f"Value {wait_time_seconds} for parameter WaitTimeSeconds is invalid. "
+                f"Reason: Must be >= 0 and <= 20, if provided."
+            )
+        num = max_number_of_messages or 1
+
+        # override receive count with value from custom header
+        if override := extract_message_count_from_headers(context):
+            num = override
+        elif num == -1 and SQS_DISABLE_MAX_NUMBER_OF_MESSAGE_LIMIT:
+            # LocalEmu-specific developer backdoor: when SQS_DISABLE_MAX_NUMBER_OF_MESSAGE_LIMIT is
+            # enabled, a caller may pass ``MaxNumberOfMessages=-1`` to receive every visible
+            # message in the queue in a single call. This is NOT standard AWS behaviour and is
+            # intentionally gated behind the feature flag so it cannot be used against a default
+            # configuration (SQS-5).
+            num = queue.approximate_number_of_messages
+        elif (
+            num < 1 or num > MAX_NUMBER_OF_MESSAGES
+        ) and not SQS_DISABLE_MAX_NUMBER_OF_MESSAGE_LIMIT:
+            raise InvalidParameterValueException(
+                f"Value {num} for parameter MaxNumberOfMessages is invalid. "
+                f"Reason: Must be between 1 and 10, if provided."
+            )
+
+        # we chose to always return the maximum possible number of messages, even though AWS will typically return
+        # fewer messages than requested on small queues. at some point we could maybe change this to randomly sample
+        # between 1 and max_number_of_messages.
+        # see https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html
+        result = queue.receive(
+            num, wait_time_seconds, visibility_timeout, poll_empty_queue=poll_empty_queue
+        )
+
+        # process dead letter messages
+        if result.dead_letter_messages:
+            dead_letter_target_arn = queue.redrive_policy["deadLetterTargetArn"]
+            dl_queue = self._require_queue_by_arn(context, dead_letter_target_arn)
+            # TODO: does this need to be atomic?
+            for standard_message in result.dead_letter_messages:
+                message = standard_message.message
+                message["Attributes"][MessageSystemAttributeName.DeadLetterQueueSourceArn] = (
+                    queue.arn
+                )
+                dl_queue.put(
+                    message=message,
+                    message_deduplication_id=standard_message.message_deduplication_id,
+                    message_group_id=standard_message.message_group_id,
+                )
+
+                if isinstance(queue, FifoQueue):
+                    message_group = queue.get_message_group(standard_message.message_group_id)
+                    queue.update_message_group_visibility(message_group)
+
+        # prepare result
+        messages = []
+        message_system_attribute_names = message_system_attribute_names or attribute_names
+        for i, standard_message in enumerate(result.successful):
+            message = to_sqs_api_message(
+                standard_message, message_system_attribute_names, message_attribute_names
+            )
+            message["ReceiptHandle"] = result.receipt_handles[i]
+            messages.append(message)
+
+        if self._cloudwatch_dispatcher:
+            self._cloudwatch_dispatcher.dispatch_metric_received(queue, received=len(messages))
+
+        # TODO: how does receiving behave if the queue was deleted in the meantime?
+        return ReceiveMessageResult(Messages=(messages if messages else None))
+
+    def list_dead_letter_source_queues(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        next_token: Token = None,
+        max_results: BoxedInteger = None,
+        **kwargs,
+    ) -> ListDeadLetterSourceQueuesResult:
+        urls = []
+        store = self.get_store(context.account_id, context.region)
+        dead_letter_queue = self._resolve_queue(context, queue_url=queue_url)
+        for queue in store.queues.values():
+            if policy := queue.redrive_policy:
+                if policy.get("deadLetterTargetArn") == dead_letter_queue.arn:
+                    urls.append(queue.url(context))
+        return ListDeadLetterSourceQueuesResult(queueUrls=urls)
+
+    def delete_message(
+        self, context: RequestContext, queue_url: String, receipt_handle: String, **kwargs
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        queue.remove(receipt_handle)
+        if self._cloudwatch_dispatcher:
+            self._cloudwatch_dispatcher.dispatch_metric_message_deleted(queue)
+
+    def delete_message_batch(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        entries: DeleteMessageBatchRequestEntryList,
+        **kwargs,
+    ) -> DeleteMessageBatchResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        override = extract_message_count_from_headers(context)
+        self._assert_batch(entries, max_messages_override=override)
+        self._assert_valid_message_ids(entries)
+
+        successful = []
+        failed = []
+
+        with queue.mutex:
+            for entry in entries:
+                try:
+                    queue.remove(entry["ReceiptHandle"])
+                    successful.append(DeleteMessageBatchResultEntry(Id=entry["Id"]))
+                except Exception as e:
+                    failed.append(
+                        BatchResultErrorEntry(
+                            Id=entry["Id"],
+                            SenderFault=False,
+                            Code=e.__class__.__name__,
+                            Message=str(e),
+                        )
+                    )
+        if self._cloudwatch_dispatcher:
+            self._cloudwatch_dispatcher.dispatch_metric_message_deleted(
+                queue, deleted=len(successful)
+            )
+
+        return DeleteMessageBatchResult(
+            Successful=successful,
+            Failed=failed,
+        )
+
+    def purge_queue(self, context: RequestContext, queue_url: String, **kwargs) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        with queue.mutex:
+            if config.SQS_DELAY_PURGE_RETRY:
+                if queue.purge_timestamp and (queue.purge_timestamp + 60) > time.time():
+                    raise PurgeQueueInProgress(
+                        f"Only one PurgeQueue operation on {queue.name} is allowed every 60 seconds.",
+                        status_code=403,
+                    )
+            queue.purge_timestamp = time.time()
+            queue.clear()
+
+    def set_queue_attributes(
+        self, context: RequestContext, queue_url: String, attributes: QueueAttributeMap, **kwargs
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        if not attributes:
+            return
+
+        queue.validate_queue_attributes(attributes)
+
+        for k, v in attributes.items():
+            if k in sqs_constants.INTERNAL_QUEUE_ATTRIBUTES:
+                raise InvalidAttributeName(f"Unknown Attribute {k}.")
+            if k in sqs_constants.DELETE_IF_DEFAULT and v == sqs_constants.DELETE_IF_DEFAULT[k]:
+                if k in queue.attributes:
+                    del queue.attributes[k]
+            else:
+                queue.attributes[k] = v
+
+        # Special cases
+        if queue.attributes.get(QueueAttributeName.Policy) == "":
+            del queue.attributes[QueueAttributeName.Policy]
+
+        redrive_policy = queue.attributes.get(QueueAttributeName.RedrivePolicy)
+        if redrive_policy == "":
+            del queue.attributes[QueueAttributeName.RedrivePolicy]
+            return
+
+        if redrive_policy:
+            _redrive_policy = json.loads(redrive_policy)
+            dl_target_arn = _redrive_policy.get("deadLetterTargetArn")
+            max_receive_count = _redrive_policy.get("maxReceiveCount")
+            # TODO: use the actual AWS responses
+            if not dl_target_arn:
+                raise InvalidParameterValueException(
+                    "The required parameter 'deadLetterTargetArn' is missing"
+                )
+            if max_receive_count is None:
+                raise InvalidParameterValueException(
+                    "The required parameter 'maxReceiveCount' is missing"
+                )
+            try:
+                max_receive_count = int(max_receive_count)
+                valid_count = 1 <= max_receive_count <= 1000
+            except ValueError:
+                valid_count = False
+            if not valid_count:
+                raise InvalidParameterValueException(
+                    f"Value {redrive_policy} for parameter RedrivePolicy is invalid. Reason: Invalid value for "
+                    f"maxReceiveCount: {max_receive_count}, valid values are from 1 to 1000 both inclusive."
+                )
+
+    def list_message_move_tasks(
+        self,
+        context: RequestContext,
+        source_arn: String,
+        max_results: NullableInteger = None,
+        **kwargs,
+    ) -> ListMessageMoveTasksResult:
+        try:
+            self._require_queue_by_arn(context, source_arn)
+        except InvalidArnException:
+            raise InvalidParameterValueException(
+                "You must use this format to specify the SourceArn: arn:<partition>:<service>:<region>:<account-id>:<resource-id>"
+            )
+        except QueueDoesNotExist:
+            raise ResourceNotFoundException(
+                "The resource that you specified for the SourceArn parameter doesn't exist."
+            )
+
+        # get move tasks for queue and sort them by most-recent
+        store = self.get_store(context.account_id, context.region)
+        tasks = [
+            move_task
+            for move_task in store.move_tasks.values()
+            if move_task.source_arn == source_arn
+            and move_task.status != MessageMoveTaskStatus.CREATED
+        ]
+        tasks.sort(key=lambda t: t.started_timestamp, reverse=True)
+
+        # convert to result list
+        n = max_results or 1
+        return ListMessageMoveTasksResult(
+            Results=[self._to_message_move_task_entry(task) for task in tasks[:n]]
+        )
+
+    def _to_message_move_task_entry(
+        self, entity: MessageMoveTask
+    ) -> ListMessageMoveTasksResultEntry:
+        """
+        Converts a ``MoveMessageTask`` entity into a ``ListMessageMoveTasksResultEntry`` API concept.
+
+        :param entity: the entity to convert
+        :return: the typed dict for use in the AWS API
+        """
+        entry = ListMessageMoveTasksResultEntry(
+            SourceArn=entity.source_arn,
+            DestinationArn=entity.destination_arn,
+            Status=entity.status,
+        )
+
+        if entity.status == "RUNNING":
+            entry["TaskHandle"] = entity.task_handle
+        if entity.started_timestamp is not None:
+            entry["StartedTimestamp"] = int(entity.started_timestamp.timestamp() * 1000)
+        if entity.max_number_of_messages_per_second is not None:
+            entry["MaxNumberOfMessagesPerSecond"] = entity.max_number_of_messages_per_second
+        if entity.approximate_number_of_messages_to_move is not None:
+            entry["ApproximateNumberOfMessagesToMove"] = (
+                entity.approximate_number_of_messages_to_move
+            )
+        if entity.approximate_number_of_messages_moved is not None:
+            entry["ApproximateNumberOfMessagesMoved"] = entity.approximate_number_of_messages_moved
+        if entity.failure_reason is not None:
+            entry["FailureReason"] = entity.failure_reason
+
+        return entry
+
+    def start_message_move_task(
+        self,
+        context: RequestContext,
+        source_arn: String,
+        destination_arn: String = None,
+        max_number_of_messages_per_second: NullableInteger = None,
+        **kwargs,
+    ) -> StartMessageMoveTaskResult:
+        try:
+            self._require_queue_by_arn(context, source_arn)
+        except QueueDoesNotExist as e:
+            raise ResourceNotFoundException(
+                "The resource that you specified for the SourceArn parameter doesn't exist.",
+                status_code=404,
+            ) from e
+
+        # check that the source queue is the dlq of some other queue
+        is_dlq = False
+        for _, _, store in sqs_stores.iter_stores():
+            for queue in store.queues.values():
+                if not queue.redrive_policy:
+                    continue
+                if queue.redrive_policy.get("deadLetterTargetArn") == source_arn:
+                    is_dlq = True
+                    break
+            if is_dlq:
+                break
+        if not is_dlq:
+            raise InvalidParameterValueException(
+                "Source queue must be configured as a Dead Letter Queue."
+            )
+
+        # If destination_arn is left blank, the messages will be redriven back to their respective original
+        # source queues.
+        if destination_arn:
+            try:
+                self._require_queue_by_arn(context, destination_arn)
+            except QueueDoesNotExist as e:
+                raise ResourceNotFoundException(
+                    "The resource that you specified for the DestinationArn parameter doesn't exist.",
+                    status_code=404,
+                ) from e
+
+        # check that only one active task exists
+        with self._message_move_task_manager.mutex:
+            store = self.get_store(context.account_id, context.region)
+            tasks = [
+                task
+                for task in store.move_tasks.values()
+                if task.source_arn == source_arn
+                and task.status
+                in [
+                    MessageMoveTaskStatus.CREATED,
+                    MessageMoveTaskStatus.RUNNING,
+                    MessageMoveTaskStatus.CANCELLING,
+                ]
+            ]
+            if len(tasks) > 0:
+                raise InvalidParameterValueException(
+                    "There is already a task running. Only one active task is allowed for a source queue "
+                    "arn at a given time."
+                )
+
+            task = MessageMoveTask(
+                source_arn,
+                destination_arn,
+                max_number_of_messages_per_second,
+            )
+            store.move_tasks[task.task_id] = task
+
+        self._message_move_task_manager.submit(task)
+
+        return StartMessageMoveTaskResult(TaskHandle=task.task_handle)
+
+    def cancel_message_move_task(
+        self, context: RequestContext, task_handle: String, **kwargs
+    ) -> CancelMessageMoveTaskResult:
+        try:
+            task_id, source_arn = decode_move_task_handle(task_handle)
+        except ValueError as e:
+            raise InvalidParameterValueException(
+                "Value for parameter TaskHandle is invalid."
+            ) from e
+
+        try:
+            self._require_queue_by_arn(context, source_arn)
+        except QueueDoesNotExist as e:
+            raise ResourceNotFoundException(
+                "The resource that you specified for the SourceArn parameter doesn't exist.",
+                status_code=404,
+            ) from e
+
+        store = self.get_store(context.account_id, context.region)
+        try:
+            move_task = store.move_tasks[task_id]
+        except KeyError:
+            raise ResourceNotFoundException("Task does not exist.", status_code=404)
+
+        # TODO: what happens if move tasks are already cancelled?
+
+        self._message_move_task_manager.cancel(move_task)
+
+        return CancelMessageMoveTaskResult(
+            ApproximateNumberOfMessagesMoved=move_task.approximate_number_of_messages_moved,
+        )
+
+    def tag_queue(self, context: RequestContext, queue_url: String, tags: TagMap, **kwargs) -> None:
+        if not tags:
+            return
+
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        self._tag_queue(queue, tags)
+
+    def list_queue_tags(
+        self, context: RequestContext, queue_url: String, **kwargs
+    ) -> ListQueueTagsResult:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        tags = self._get_queue_tags(queue)
+        return ListQueueTagsResult(Tags=tags if tags else None)
+
+    def untag_queue(
+        self, context: RequestContext, queue_url: String, tag_keys: TagKeyList, **kwargs
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+        self._untag_queue(queue, tag_keys)
+
+    def add_permission(
+        self,
+        context: RequestContext,
+        queue_url: String,
+        label: String,
+        aws_account_ids: AWSAccountIdList,
+        actions: ActionNameList,
+        **kwargs,
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        self._validate_actions(actions)
+
+        queue.add_permission(label=label, actions=actions, account_ids=aws_account_ids)
+
+    def remove_permission(
+        self, context: RequestContext, queue_url: String, label: String, **kwargs
+    ) -> None:
+        queue = self._resolve_queue(context, queue_url=queue_url)
+
+        queue.remove_permission(label=label)
+
+    def _create_message_attributes(
+        self,
+        context: RequestContext,
+        message_system_attributes: MessageBodySystemAttributeMap = None,
+    ) -> dict[MessageSystemAttributeName, str]:
+        result: dict[MessageSystemAttributeName, str] = {
+            MessageSystemAttributeName.SenderId: context.account_id,  # not the account ID in AWS
+            MessageSystemAttributeName.SentTimestamp: str(now(millis=True)),
+        }
+        # we are not using the `context.trace_context` here as it is automatically populated
+        # AWS only adds the `AWSTraceHeader` attribute if the header is explicitly present
+        # TODO: check maybe with X-Ray Active mode?
+        if "X-Amzn-Trace-Id" in context.request.headers:
+            result[MessageSystemAttributeName.AWSTraceHeader] = str(
+                context.request.headers["X-Amzn-Trace-Id"]
+            )
+
+        if message_system_attributes is not None:
+            for attr in message_system_attributes:
+                result[attr] = message_system_attributes[attr]["StringValue"]
+
+        return result
+
+    def _validate_actions(self, actions: ActionNameList):
+        service = load_service(service=self.service, version=self.version)
+        # FIXME: this is a bit of a heuristic as it will also include actions like "ListQueues" which is not
+        #  associated with an action on a queue
+        valid = list(service.operation_names)
+        valid.append("*")
+
+        for action in actions:
+            if action not in valid:
+                raise InvalidParameterValueException(
+                    f"Value SQS:{action} for parameter ActionName is invalid. Reason: Please refer to the appropriate "
+                    "WSDL for a list of valid actions. "
+                )
+
+    def _assert_batch(
+        self,
+        batch: list,
+        *,
+        require_fifo_queue_params: bool = False,
+        require_message_deduplication_id: bool = False,
+        max_messages_override: int | None = None,
+    ) -> None:
+        if not batch:
+            raise EmptyBatchRequest
+
+        max_messages_per_batch = max_messages_override or MAX_NUMBER_OF_MESSAGES
+        if batch and (no_entries := len(batch)) > max_messages_per_batch:
+            raise TooManyEntriesInBatchRequest(
+                f"Maximum number of entries per request are {max_messages_per_batch}. You have sent {no_entries}."
+            )
+        visited = set()
+        for entry in batch:
+            entry_id = entry["Id"]
+            if not re.search(r"^[\w-]+$", entry_id) or len(entry_id) > 80:
+                raise InvalidBatchEntryId(
+                    "A batch entry id can only contain alphanumeric characters, hyphens and underscores. "
+                    "It can be at most 80 letters long."
+                )
+            if require_message_deduplication_id and not entry.get("MessageDeduplicationId"):
+                raise InvalidParameterValueException(
+                    "The queue should either have ContentBasedDeduplication enabled or "
+                    "MessageDeduplicationId provided explicitly"
+                )
+            if require_fifo_queue_params and not entry.get("MessageGroupId"):
+                raise InvalidParameterValueException(
+                    "The request must contain the parameter MessageGroupId."
+                )
+            if entry_id in visited:
+                raise BatchEntryIdsNotDistinct()
+            else:
+                visited.add(entry_id)
+
+    def _assert_valid_batch_size(self, batch: list, max_message_size: int):
+        batch_message_size = sum(
+            _message_body_size(entry.get("MessageBody"))
+            + _message_attributes_size(entry.get("MessageAttributes"))
+            for entry in batch
+        )
+        if batch_message_size > max_message_size:
+            error = f"Batch requests cannot be longer than {max_message_size} bytes."
+            error += f" You have sent {batch_message_size} bytes."
+            raise BatchRequestTooLong(error)
+
+    def _assert_valid_message_ids(self, batch: list):
+        batch_id_regex = r"^[\w-]{1,80}$"
+        for message in batch:
+            if not re.match(batch_id_regex, message.get("Id", "")):
+                raise InvalidBatchEntryId(
+                    "A batch entry id can only contain alphanumeric characters, "
+                    "hyphens and underscores. It can be at most 80 letters long."
+                )
+
+    def _init_cloudwatch_metrics_reporting(self):
+        self.cloudwatch_disabled: bool = (
+            config.SQS_DISABLE_CLOUDWATCH_METRICS or not is_api_enabled("cloudwatch")
+        )
+
+        self._cloudwatch_publish_worker = (
+            None if self.cloudwatch_disabled else CloudwatchPublishWorker()
+        )
+        self._cloudwatch_dispatcher = None if self.cloudwatch_disabled else CloudwatchDispatcher()
+
+    def _start_cloudwatch_metrics_reporting(self):
+        if not self.cloudwatch_disabled:
+            self._cloudwatch_publish_worker.start()
+
+    def _stop_cloudwatch_metrics_reporting(self):
+        if not self.cloudwatch_disabled:
+            self._cloudwatch_publish_worker.stop()
+            self._cloudwatch_dispatcher.shutdown()
+
+    def _get_queue_tags(self, queue: SqsQueue) -> TagMap:
+        store = self.get_store(queue.account_id, queue.region)
+        return store.tags.get_tags(queue.arn)
+
+    def _tag_queue(self, queue: SqsQueue, tags: TagMap) -> None:
+        store = self.get_store(queue.account_id, queue.region)
+        store.tags.update_tags(queue.arn, tags)
+
+    def _untag_queue(self, queue: SqsQueue, tag_keys: TagKeyList) -> None:
+        store = self.get_store(queue.account_id, queue.region)
+        store.tags.delete_tags(queue.arn, tag_keys)
+
+    def _remove_all_queue_tags(self, queue: SqsQueue) -> None:
+        store = self.get_store(queue.account_id, queue.region)
+        store.tags.delete_all_tags(queue.arn)
+
+
+def resolve_queue_location(
+    context: RequestContext, queue_name: str | None = None, queue_url: str | None = None
+) -> tuple[str, str | None, str]:
+    """
+    Resolves a queue location from the given information.
+
+    :param context: the request context, used for getting region and account_id, and optionally the queue_url
+    :param queue_name: the queue name (if this is set, then this will be used for the key)
+    :param queue_url: the queue url (if name is not set, this will be used to determine the queue name)
+    :return: tuple of account id, region and queue_name
+    """
+    if not queue_name:
+        try:
+            if queue_url:
+                return parse_queue_url(queue_url)
+            else:
+                return parse_queue_url(context.request.base_url)
+        except ValueError:
+            # should work if queue name is passed in QueueUrl
+            return context.account_id, context.region, queue_url
+
+    return context.account_id, context.region, queue_name
+
+
+def extract_message_count_from_headers(context: RequestContext) -> int | None:
+    if override := context.request.headers.get(
+        HEADER_LOCALEMU_SQS_OVERRIDE_MESSAGE_COUNT, default=None, type=int
+    ):
+        return override
+
+    return None
+
+
+def extract_wait_time_seconds_from_headers(context: RequestContext) -> int | None:
+    if override := context.request.headers.get(
+        HEADER_LOCALEMU_SQS_OVERRIDE_WAIT_TIME_SECONDS, default=None, type=int
+    ):
+        return override
+
+    return None

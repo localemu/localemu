@@ -1,0 +1,144 @@
+import logging
+import sys
+import warnings
+
+from localemu import config, constants
+
+from ..utils.strings import key_value_pairs_to_dict
+from .format import AddFormattedAttributes, DefaultFormatter
+
+# The log levels for modules are evaluated incrementally for logging granularity,
+# from highest (DEBUG) to lowest (TRACE_INTERNAL). Hence, each module below should have
+# higher level which serves as the default.
+
+default_log_levels = {
+    "asyncio": logging.INFO,
+    "boto3": logging.INFO,
+    "botocore": logging.ERROR,
+    "docker": logging.WARNING,
+    "elasticsearch": logging.ERROR,
+    "hpack": logging.ERROR,
+    "moto": logging.WARNING,
+    "requests": logging.WARNING,
+    "s3transfer": logging.INFO,
+    "urllib3": logging.WARNING,
+    "werkzeug": logging.WARNING,
+    "rolo": logging.WARNING,
+    "parse": logging.WARNING,
+    "localemu.aws.accounts": logging.INFO,
+    "localemu.aws.protocol.serializer": logging.INFO,
+    "localemu.aws.serving.wsgi": logging.WARNING,
+    "localemu.request": logging.INFO,
+    "localemu.request.internal": logging.WARNING,
+    "localemu.state.inspect": logging.INFO,
+    "localemu_persistence": logging.INFO,
+}
+
+trace_log_levels = {
+    "rolo": logging.DEBUG,
+    "localemu.aws.protocol.serializer": logging.DEBUG,
+    "localemu.aws.serving.wsgi": logging.DEBUG,
+    "localemu.request": logging.DEBUG,
+    "localemu.request.internal": logging.INFO,
+    "localemu.state.inspect": logging.DEBUG,
+}
+
+trace_internal_log_levels = {
+    "localemu.aws.accounts": logging.DEBUG,
+    "localemu.request.internal": logging.DEBUG,
+}
+
+
+def setup_logging_for_cli(log_level=logging.INFO):
+    logging.basicConfig(level=log_level)
+
+    # set log levels of loggers
+    logging.root.setLevel(log_level)
+    logging.getLogger("localemu").setLevel(log_level)
+    for logger, level in default_log_levels.items():
+        logging.getLogger(logger).setLevel(level)
+
+
+def get_log_level_from_config():
+    # overriding the log level if LS_LOG has been set
+    if config.LS_LOG:
+        log_level = str(config.LS_LOG).upper()
+        if log_level.lower() in constants.TRACE_LOG_LEVELS:
+            log_level = "DEBUG"
+        log_level = logging._nameToLevel[log_level]
+        return log_level
+
+    return logging.DEBUG if config.DEBUG else logging.INFO
+
+
+def setup_logging_from_config():
+    log_level = get_log_level_from_config()
+    setup_logging(log_level)
+
+    if config.is_trace_logging_enabled():
+        for name, level in trace_log_levels.items():
+            logging.getLogger(name).setLevel(level)
+    if config.LS_LOG == constants.LS_LOG_TRACE_INTERNAL:
+        for name, level in trace_internal_log_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+    raw_logging_override = config.LOG_LEVEL_OVERRIDES
+    if raw_logging_override:
+        logging_overrides = key_value_pairs_to_dict(raw_logging_override)
+        for logger, level_name in logging_overrides.items():
+            level = getattr(logging, level_name, None)
+            if not level:
+                raise ValueError(
+                    f"Failed to configure logging overrides ({raw_logging_override}): '{level_name}' is not a valid log level"
+                )
+            logging.getLogger(logger).setLevel(level)
+
+
+def create_default_handler(log_level: int):
+    log_handler = logging.StreamHandler(stream=sys.stderr)
+    log_handler.setLevel(log_level)
+    log_handler.setFormatter(DefaultFormatter())
+    log_handler.addFilter(AddFormattedAttributes())
+    return log_handler
+
+
+def setup_logging(log_level=logging.INFO) -> None:
+    """
+    Configures the python logging environment for LocalEmu.
+
+    :param log_level: the optional log level.
+    """
+    # set create a default handler for the root logger (basically logging.basicConfig but explicit)
+    log_handler = create_default_handler(log_level)
+
+    # replace any existing handlers
+    logging.basicConfig(level=log_level, handlers=[log_handler])
+
+    # disable some logs and warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
+    warnings.filterwarnings("ignore", category=ResourceWarning)
+    logging.captureWarnings(True)
+
+    # set log levels of loggers
+    logging.root.setLevel(log_level)
+    logging.getLogger("localemu").setLevel(log_level)
+    for logger, level in default_log_levels.items():
+        logging.getLogger(logger).setLevel(level)
+
+
+def setup_hypercorn_logger(hypercorn_config) -> None:
+    """
+    Sets the hypercorn loggers, which are created in a peculiar way, to the localemu settings.
+
+    :param hypercorn_config: a hypercorn.Config object
+    """
+    logger = hypercorn_config.log.access_logger
+    if logger and logger.handlers:
+        logger.handlers[0].addFilter(AddFormattedAttributes())
+        logger.handlers[0].setFormatter(DefaultFormatter())
+
+    logger = hypercorn_config.log.error_logger
+    if logger:
+        logger.handlers[0].addFilter(AddFormattedAttributes())
+        logger.handlers[0].setFormatter(DefaultFormatter())

@@ -1,0 +1,176 @@
+import os
+
+import pytest
+from _pytest.config import Config
+from localemu.testing.snapshots import SnapshotSession
+from localemu.testing.snapshots.transformer import RegexTransformer
+
+from localemu import config as localemu_config
+from localemu import constants
+from localemu.testing import config as test_config
+from localemu.testing.snapshots.transformer_utility import (
+    SNAPSHOT_BASIC_TRANSFORMER,
+    SNAPSHOT_BASIC_TRANSFORMER_NEW,
+    TransformerUtility,
+)
+from localemu.utils.aws.arns import get_partition
+
+
+def pytest_configure(config: Config):
+    # FIXME: note that this should be the same as in tests/integration/conftest.py since both are currently
+    #  run in the same CI test step, but only one localemu instance is started for both.
+    config.option.start_localemu = True
+    localemu_config.FORCE_SHUTDOWN = False
+    localemu_config.GATEWAY_LISTEN = localemu_config.UniqueHostAndPortList(
+        [localemu_config.HostAndPort(host="0.0.0.0", port=constants.DEFAULT_PORT_EDGE)]
+    )
+
+
+def pytest_runtestloop(session):
+    """
+    This pytest plugin allows us to pre-install external dependencies that are usually lazy-loaded by the services.
+    This helps us surface download issues earlier.
+    This is not needed if we are running the test against an external instance, as it installs the dependencies on the
+    runner running the tests.
+    """
+    if not session.items:
+        return
+
+    if session.config.option.collectonly:
+        return
+
+    if test_config.TEST_SKIP_LOCALEMU_START:
+        return
+
+    from localemu.testing.aws.util import is_aws_cloud
+
+    if is_aws_cloud() and not test_config.TEST_FORCE_LOCALEMU_START:
+        return
+
+    # second pytest lifecycle hook (before test runner starts)
+    test_init_functions = set()
+
+    # collect test classes
+    test_classes = set()
+    for item in session.items:
+        if item.parent and item.parent.cls:
+            test_classes.add(item.parent.cls)
+        # OpenSearch/Elasticsearch are pytests, not unit test classes, so we check based on the item parent's name.
+        # Any pytests that rely on opensearch/elasticsearch must be special-cased by adding them to the list below
+        parent_name = str(item.parent).lower()
+        if any(opensearch_test in parent_name for opensearch_test in ["opensearch", "firehose"]):
+            from tests.aws.services.opensearch.test_opensearch import (
+                install_async as opensearch_install_async,
+            )
+
+            test_init_functions.add(opensearch_install_async)
+
+        if any(es_test in parent_name for es_test in ["elasticsearch", "firehose"]):
+            from tests.aws.services.es.test_es import install_async as es_install_async
+
+            test_init_functions.add(es_install_async)
+
+        if "transcribe" in parent_name:
+            from tests.aws.services.transcribe.test_transcribe import (
+                install_async as transcribe_install_async,
+            )
+
+            test_init_functions.add(transcribe_install_async)
+
+    for fn in test_init_functions:
+        fn()
+
+
+# Note: Don't move this into testing lib
+@pytest.fixture(scope="session")
+def cdk_template_path():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "cdk_templates"))
+
+
+# Note: Don't move this into testing lib
+@pytest.fixture(scope="session")
+def infrastructure_setup(cdk_template_path, aws_client):
+    # Note: import needs to be local to avoid CDK import on every test run, which takes quite some time
+    from localemu.testing.scenario.provisioning import InfraProvisioner
+
+    def _infrastructure_setup(namespace: str, force_synth: bool | None = False) -> InfraProvisioner:
+        """
+        :param namespace: repo-unique identifier for this CDK app.
+            A directory with this name will be created at `tests/aws/cdk_templates/<namespace>/`
+        :param force_synth: set to True to always re-synth the CDK app
+        :return: an instantiated CDK InfraProvisioner which can be used to deploy a CDK app
+        """
+        return InfraProvisioner(
+            base_path=cdk_template_path,
+            aws_client=aws_client,
+            namespace=namespace,
+            force_synth=force_synth,
+            persist_output=True,
+        )
+
+    return _infrastructure_setup
+
+
+@pytest.fixture(scope="function")
+def snapshot(request, _snapshot_session: SnapshotSession, account_id, region_name):
+    # Overwrite utility with our own => Will be refactored in the future
+    _snapshot_session.transform = TransformerUtility
+
+    _snapshot_session.add_transformer(RegexTransformer(account_id, "1" * 12), priority=2)
+    _snapshot_session.add_transformer(RegexTransformer(region_name, "<region>"), priority=2)
+    _snapshot_session.add_transformer(
+        RegexTransformer(f"arn:{get_partition(region_name)}:", "arn:<partition>:"), priority=2
+    )
+
+    # Removes the 'x-localemu' header from all responses
+    _snapshot_session.add_transformer(_snapshot_session.transform.remove_key("x-localemu"))
+
+    # TODO: temporary to migrate to new default transformers.
+    #   remove this after all exemptions are gone
+    exemptions = [
+        "tests/aws/services/acm",
+        "tests/aws/services/apigateway",
+        "tests/aws/services/cloudwatch",
+        "tests/aws/services/cloudformation",
+        "tests/aws/services/dynamodb",
+        "tests/aws/services/events",
+        "tests/aws/services/kinesis",
+        "tests/aws/services/kms",
+        "tests/aws/services/lambda_",
+        "tests/aws/services/logs",
+        "tests/aws/services/route53",
+        "tests/aws/services/route53resolver",
+        "tests/aws/services/s3",
+        "tests/aws/services/secretsmanager",
+        "tests/aws/services/ses",
+        "tests/aws/services/sns",
+        "tests/aws/services/stepfunctions",
+        "tests/aws/services/sqs",
+        "tests/aws/services/transcribe",
+        "tests/aws/scenario/bookstore",
+        "tests/aws/scenario/note_taking",
+        "tests/aws/scenario/lambda_destination",
+        "tests/aws/scenario/loan_broker",
+    ]
+    if any(e in request.fspath.dirname for e in exemptions):
+        _snapshot_session.add_transformer(SNAPSHOT_BASIC_TRANSFORMER, priority=2)
+    else:
+        _snapshot_session.add_transformer(SNAPSHOT_BASIC_TRANSFORMER_NEW, priority=2)
+
+    return _snapshot_session
+
+
+@pytest.hookimpl()
+def pytest_addhooks(pluginmanager):
+    try:
+        # This is only relevant when running Community Tests against Pro pipeline
+        from localemu.pro.core.testing.pytest.store import StoreSerializationCheckerPlugin
+
+        from localemu.testing.aws.util import is_aws_cloud
+
+        if not test_config.TEST_SKIP_LOCALEMU_START and not is_aws_cloud():
+            # this directly accesses LocalEmu state in memory, so it is not worth running in tests against external
+            # instances
+            pluginmanager.register(StoreSerializationCheckerPlugin(with_pickle=False))
+    except ImportError:
+        pass

@@ -1,0 +1,18 @@
+from localemu.services.cloudformation.resource_provider import (
+    CloudFormationResourceProviderPlugin,
+    ResourceProvider,
+)
+
+
+class IAMInstanceProfileProviderPlugin(CloudFormationResourceProviderPlugin):
+    name = "AWS::IAM::InstanceProfile"
+
+    def __init__(self):
+        self.factory: type[ResourceProvider] | None = None
+
+    def load(self):
+        from localemu.services.iam.resource_providers.aws_iam_instanceprofile import (
+            IAMInstanceProfileProvider,
+        )
+
+        self.factory = IAMInstanceProfileProvider

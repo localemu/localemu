@@ -1,0 +1,10 @@
+Parameters:
+  BucketName:
+    Type: String
+
+Resources:
+  BucketModule:
+    Type: LocalEmu::Testing::TestModule::MODULE
+    Properties:
+      BucketName:
+        Ref: BucketName

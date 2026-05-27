@@ -1,0 +1,821 @@
+"""Lambda models for internal use and persistence.
+The LambdaProviderPro in localemu imports this model and configures persistence.
+The actual function code is stored in S3 (see S3Code).
+"""
+
+import dataclasses
+import logging
+import os.path
+import re
+import shutil
+import tempfile
+import threading
+import time
+from abc import ABCMeta, abstractmethod
+from datetime import datetime
+from enum import StrEnum
+from pathlib import Path
+from typing import IO, Any, TypedDict
+
+import boto3
+from botocore.exceptions import ClientError, EndpointConnectionError
+
+# LocalEmu stores every Lambda function's code zip in a per-region internal
+# S3 bucket ``awslambda-{region}-tasks`` (see ``store_lambda_archive``).
+# When the persistence engine restores a Lambda after a LocalEmu restart,
+# reading the zip back via boto3 → localhost:4566 is a self-wrapping
+# round-trip: the data is already in this process, and the HTTP gateway
+# inside a Docker container may not even be routing yet. The fast path
+# in ``S3Code._download_archive_to_file`` reads the bytes directly from
+# the ephemeral S3 store for buckets matching this pattern.
+_INTERNAL_LAMBDA_BUCKET_RE = re.compile(r"^awslambda-.+-tasks$")
+
+from localemu import config
+from localemu.aws.api import CommonServiceException
+from localemu.aws.api.lambda_ import (
+    AllowedPublishers,
+    Architecture,
+    CapacityProviderArn,
+    CapacityProviderConfig,
+    CapacityProviderPermissionsConfig,
+    CapacityProviderScalingConfig,
+    CapacityProviderVpcConfig,
+    CodeSigningPolicies,
+    Cors,
+    DestinationConfig,
+    FunctionScalingConfig,
+    FunctionUrlAuthType,
+    InstanceRequirements,
+    InvocationType,
+    InvokeMode,
+    KMSKeyArn,
+    LastUpdateStatus,
+    LoggingConfig,
+    PackageType,
+    ProvisionedConcurrencyStatusEnum,
+    RecursiveLoop,
+    Runtime,
+    RuntimeVersionConfig,
+    SnapStartResponse,
+    State,
+    StateReasonCode,
+    Timestamp,
+    TracingMode,
+)
+from localemu.aws.connect import connect_to
+from localemu.constants import AWS_REGION_US_EAST_1, INTERNAL_AWS_SECRET_ACCESS_KEY
+from localemu.services.lambda_.api_utils import qualified_lambda_arn, unqualified_lambda_arn
+from localemu.utils.archives import unzip
+from localemu.utils.files import chmod_r
+from localemu.utils.strings import long_uid, short_uid
+
+LOG = logging.getLogger(__name__)
+
+
+# TODO: maybe we should make this more "transient" by always initializing to Pending and *not* persisting it?
+@dataclasses.dataclass(frozen=True)
+class VersionState:
+    state: State
+    code: StateReasonCode | None = None
+    reason: str | None = None
+
+
+@dataclasses.dataclass
+class Invocation:
+    payload: bytes
+    invoked_arn: str
+    client_context: str | None
+    invocation_type: InvocationType
+    invoke_time: datetime
+    # = invocation_id
+    request_id: str
+    trace_context: dict
+    user_agent: str | None = None
+
+
+class InitializationType(StrEnum):
+    on_demand = "on-demand"
+    provisioned_concurrency = "provisioned-concurrency"
+    lambda_managed_instances = "lambda-managed-instances"
+
+
+class ArchiveCode(metaclass=ABCMeta):
+    @abstractmethod
+    def generate_presigned_url(self, endpoint_url: str):
+        """
+        Generates a presigned url pointing to the code archive
+        """
+        pass
+
+    @abstractmethod
+    def is_hot_reloading(self):
+        """
+        Whether this code archive is for hot reloading.
+        This means it should mount the location from the host, and should instruct the runtimes to listen for changes
+
+        :return: True if this object represents hot reloading, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    def get_unzipped_code_location(self):
+        """
+        Get the location of the unzipped archive on disk
+        """
+        pass
+
+    @abstractmethod
+    def prepare_for_execution(self):
+        """
+        Unzips the code archive to the proper destination on disk, if not already present
+        """
+        pass
+
+    @abstractmethod
+    def destroy_cached(self):
+        """
+        Destroys the code object on disk, if it was saved on disk before
+        """
+        pass
+
+    @abstractmethod
+    def destroy(self):
+        """
+        Deletes the code object from S3 and the unzipped version from disk
+        """
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class S3Code(ArchiveCode):
+    """
+    Objects representing a code archive stored in an internal S3 bucket.
+
+    S3 Store:
+      Code archives represented by this method are stored in a bucket awslambda-{region_name}-tasks,
+      (e.g. awslambda-us-east-1-tasks), when correctly created using create_lambda_archive.
+      The "awslambda" prefix matches the behavior at real AWS.
+
+      This class will then provide different properties / methods to be operated on the stored code,
+      like the ability to create presigned-urls, checking the code hash etc.
+
+      A call to destroy() of this class will delete the code object from both the S3 store and the local cache
+    Unzipped Cache:
+      After a call to prepare_for_execution, an unzipped version of the represented code will be stored on disk,
+      ready to mount/copy.
+
+      It will be present at the location returned by get_unzipped_code_location,
+      namely /tmp/lambda/{bucket_name}/{id}/code
+
+      The cache on disk will be deleted after a call to destroy_cached (or destroy)
+    """
+
+    id: str
+    account_id: str
+    s3_bucket: str
+    s3_key: str
+    s3_object_version: str | None
+    code_sha256: str
+    code_size: int
+    _disk_lock: threading.RLock = dataclasses.field(default_factory=threading.RLock)
+
+    def _download_archive_to_file(self, target_file: IO) -> None:
+        """
+        Download the code archive into a given file.
+
+        Two paths:
+
+        * **Fast path.** When ``s3_bucket`` matches the LocalEmu-internal
+          ``awslambda-*-tasks`` pattern AND the live S3 provider is backed
+          by ``EphemeralS3ObjectStore`` AND the key is already present in
+          the store, read the bytes directly in-process. No boto3, no
+          HTTP, no dependency on the gateway being route-ready — this is
+          what makes Lambda persistence restore cleanly inside a Docker
+          container where the self-loopback to ``localhost:4566`` isn't
+          wired up yet.
+        * **HTTP fallback.** For user buckets, hot-reload buckets,
+          non-ephemeral S3 backends, or if the fast path can't find the
+          key, fall back to ``boto3.download_fileobj`` with a bounded
+          retry over transient connection failures
+          (``EndpointConnectionError`` / ``ConnectionError``). A genuine
+          404 / ClientError surfaces immediately — not masked.
+        """
+        if _try_read_archive_from_local_store(
+            bucket=self.s3_bucket,
+            key=self.s3_key,
+            version_id=self.s3_object_version,
+            target_file=target_file,
+        ):
+            return
+
+        s3_client = connect_to(
+            region_name=AWS_REGION_US_EAST_1,
+            aws_access_key_id=config.INTERNAL_RESOURCE_ACCOUNT,
+        ).s3
+        extra_args = {"VersionId": self.s3_object_version} if self.s3_object_version else {}
+        last_exc: Exception | None = None
+        # 5 attempts over ~7.5 s total: 0.5 + 1.0 + 1.5 + 2.0 + 2.5 backoff.
+        for attempt in range(5):
+            try:
+                target_file.seek(0)
+                target_file.truncate(0)
+                s3_client.download_fileobj(
+                    Bucket=self.s3_bucket,
+                    Key=self.s3_key,
+                    Fileobj=target_file,
+                    ExtraArgs=extra_args,
+                )
+                target_file.flush()
+                return
+            except (EndpointConnectionError, ConnectionError) as exc:
+                last_exc = exc
+                LOG.debug(
+                    "Lambda code download attempt %d/5 failed "
+                    "(endpoint not reachable yet): %s",
+                    attempt + 1, exc,
+                )
+                time.sleep(0.5 * (attempt + 1))
+        assert last_exc is not None  # only way to exit the loop
+        raise last_exc
+
+    def generate_presigned_url(self, endpoint_url: str) -> str:
+        """
+        Generates a presigned url pointing to the code archive
+        """
+        s3_client = boto3.client(
+            "s3",
+            region_name=AWS_REGION_US_EAST_1,
+            aws_access_key_id=config.INTERNAL_RESOURCE_ACCOUNT,
+            aws_secret_access_key=INTERNAL_AWS_SECRET_ACCESS_KEY,
+            endpoint_url=endpoint_url,
+        )
+        params = {"Bucket": self.s3_bucket, "Key": self.s3_key}
+        if self.s3_object_version:
+            params["VersionId"] = self.s3_object_version
+        return s3_client.generate_presigned_url("get_object", Params=params)
+
+    def is_hot_reloading(self) -> bool:
+        """
+        Whether this code archive is hot reloading
+
+        :return: True if it must it represents hot reloading, False otherwise
+        """
+        return False
+
+    def get_unzipped_code_location(self) -> Path:
+        """
+        Get the location of the unzipped archive on disk
+        """
+        return Path(f"{tempfile.gettempdir()}/lambda/{self.s3_bucket}/{self.id}/code")
+
+    def prepare_for_execution(self) -> None:
+        """
+        Unzips the code archive to the proper destination on disk, if not already present
+        """
+        target_path = self.get_unzipped_code_location()
+        with self._disk_lock:
+            if target_path.exists():
+                return
+            LOG.debug("Saving code %s to disk", self.id)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            # Use a temp directory for atomic operation to prevent partial reads
+            # if the process crashes or is killed during unzip.
+            # Create temp dir in same parent to ensure same filesystem for atomic rename.
+            with tempfile.TemporaryDirectory(dir=target_path.parent) as temp_dir:
+                temp_path = Path(temp_dir)
+
+                with tempfile.NamedTemporaryFile() as file:
+                    self._download_archive_to_file(file)
+                    unzip(file.name, str(temp_path))
+                    chmod_r(str(temp_path), 0o755)
+
+                # Atomic move/rename
+                temp_path.rename(target_path)
+
+    def destroy_cached(self) -> None:
+        """
+        Destroys the code object on disk, if it was saved on disk before
+        """
+        # delete parent folder to delete the whole code location
+        code_path = self.get_unzipped_code_location().parent
+        if not code_path.exists():
+            return
+        try:
+            shutil.rmtree(code_path)
+        except OSError as e:
+            LOG.debug(
+                "Could not cleanup function code path %s due to error %s while deleting file %s",
+                code_path,
+                e.strerror,
+                e.filename,
+            )
+
+    def destroy(self) -> None:
+        """
+        Deletes the code object from S3 and the unzipped version from disk
+        """
+        LOG.debug("Final code destruction for %s", self.id)
+        self.destroy_cached()
+        s3_client = connect_to(
+            region_name=AWS_REGION_US_EAST_1,
+            aws_access_key_id=config.INTERNAL_RESOURCE_ACCOUNT,
+        ).s3
+        kwargs = {"VersionId": self.s3_object_version} if self.s3_object_version else {}
+        try:
+            s3_client.delete_object(Bucket=self.s3_bucket, Key=self.s3_key, **kwargs)
+        except ClientError as e:
+            LOG.debug(
+                "Cannot delete lambda archive %s in bucket %s: %s", self.s3_key, self.s3_bucket, e
+            )
+
+
+def _try_read_archive_from_local_store(
+    *,
+    bucket: str,
+    key: str,
+    version_id: str | None,
+    target_file: IO,
+) -> bool:
+    """Read a Lambda code archive directly from the in-memory
+    ``EphemeralS3ObjectStore`` and write it to ``target_file``.
+
+    Returns ``True`` on success (caller must NOT run the HTTP path),
+    ``False`` for any failure — including "not applicable" (different
+    bucket or backend) — so the caller transparently falls back to
+    boto3. Must NOT raise: callers depend on the boolean contract.
+    """
+    if not _INTERNAL_LAMBDA_BUCKET_RE.match(bucket or ""):
+        return False
+
+    try:
+        from localemu.services.plugins import SERVICE_PLUGINS
+        from localemu.services.s3.storage.ephemeral import EphemeralS3ObjectStore
+    except Exception:
+        LOG.debug("Lambda fast-path: imports failed", exc_info=True)
+        return False
+
+    try:
+        svc = SERVICE_PLUGINS.get_service("s3")
+        provider = getattr(svc, "_provider", None) if svc is not None else None
+        backend = getattr(provider, "_storage_backend", None) if provider else None
+    except Exception:
+        LOG.debug("Lambda fast-path: could not reach S3 backend", exc_info=True)
+        return False
+
+    if not isinstance(backend, EphemeralS3ObjectStore):
+        return False
+
+    try:
+        from types import SimpleNamespace
+
+        # ``_key_from_s3_object`` only reads ``.key`` and ``.version_id``.
+        stub = SimpleNamespace(key=key, version_id=version_id)
+        key_hash = EphemeralS3ObjectStore._key_from_s3_object(stub)
+    except Exception:
+        LOG.debug("Lambda fast-path: key hash failed", exc_info=True)
+        return False
+
+    try:
+        bucket_fs = backend._filesystem.get(bucket)
+        if not bucket_fs:
+            return False
+        spooled = bucket_fs.get("keys", {}).get(key_hash)
+        if spooled is None:
+            return False
+        with spooled.position_lock:
+            previous = spooled.tell()
+            spooled.seek(0)
+            data = spooled.read()
+            spooled.seek(previous)
+    except Exception:
+        LOG.debug("Lambda fast-path: read from store failed", exc_info=True)
+        return False
+
+    try:
+        target_file.seek(0)
+        target_file.truncate(0)
+        target_file.write(data)
+        target_file.flush()
+    except Exception:
+        LOG.debug("Lambda fast-path: write to target failed", exc_info=True)
+        return False
+
+    LOG.debug(
+        "Lambda fast-path: read %d bytes of %s/%s directly from ephemeral store",
+        len(data), bucket, key,
+    )
+    return True
+
+
+@dataclasses.dataclass(frozen=True)
+class HotReloadingCode(ArchiveCode):
+    """
+    Objects representing code which is mounted from a given directory from the host, for hot reloading
+    """
+
+    host_path: str
+    code_sha256: str = "hot-reloading-hash-not-available"
+    code_size: int = 0
+
+    def generate_presigned_url(self, endpoint_url: str) -> str:
+        return f"file://{self.host_path}"
+
+    def get_unzipped_code_location(self) -> Path:
+        path = os.path.expandvars(self.host_path)
+        return Path(path)
+
+    def is_hot_reloading(self) -> bool:
+        """
+        Whether this code archive is for hot reloading.
+        This means it should mount the location from the host, and should instruct the runtimes to listen for changes
+
+        :return: True if it represents hot reloading, False otherwise
+        """
+        return True
+
+    def prepare_for_execution(self) -> None:
+        pass
+
+    def destroy_cached(self) -> None:
+        """
+        Destroys the code object on disk, if it was saved on disk before
+        """
+        pass
+
+    def destroy(self) -> None:
+        """
+        Deletes the code object from S3 and the unzipped version from disk
+        """
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageCode:
+    image_uri: str
+    repository_type: str
+    code_sha256: str
+
+    @property
+    def resolved_image_uri(self):
+        return f"{self.image_uri.rpartition(':')[0]}@sha256:{self.code_sha256}"
+
+
+@dataclasses.dataclass
+class DeadLetterConfig:
+    target_arn: str
+
+
+@dataclasses.dataclass
+class FileSystemConfig:
+    arn: str
+    local_mount_path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageConfig:
+    working_directory: str | None
+    command: list[str] | None = dataclasses.field(default_factory=list)
+    entrypoint: list[str] | None = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class VpcConfig:
+    vpc_id: str
+    security_group_ids: list[str] = dataclasses.field(default_factory=list)
+    subnet_ids: list[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class UpdateStatus:
+    status: LastUpdateStatus | None
+    code: str | None = None
+    reason: str | None = None
+
+
+@dataclasses.dataclass
+class LambdaEphemeralStorage:
+    size: int
+
+
+@dataclasses.dataclass
+class FunctionUrlConfig:
+    """
+    * HTTP(s)
+    * You can apply function URLs to any function alias, or to the $LATEST unpublished function version. You can't add a function URL to any other function version.
+    * Once you create a function URL, its URL endpoint never changes
+    """
+
+    function_arn: str  # fully qualified ARN
+    function_name: str  # resolved name
+    url_id: str  # Custom URL (via tag), or generated unique subdomain id  e.g. pfn5bdb2dl5mzkbn6eb2oi3xfe0nthdn
+    url: str  # full URL (e.g. "https://pfn5bdb2dl5mzkbn6eb2oi3xfe0nthdn.lambda-url.eu-west-3.on.aws/")
+    auth_type: FunctionUrlAuthType
+    creation_time: str  # time
+    cors: Cors | None
+    last_modified_time: str | None = (
+        None  # TODO: check if this is the creation time when initially creating
+    )
+    function_qualifier: str | None = "$LATEST"  # only $LATEST or alias name
+    invoke_mode: InvokeMode | None = None
+
+
+@dataclasses.dataclass
+class ProvisionedConcurrencyConfiguration:
+    provisioned_concurrent_executions: int
+    last_modified: str  # date
+
+
+@dataclasses.dataclass
+class ProvisionedConcurrencyState:
+    """transient items"""
+
+    allocated: int = 0
+    available: int = 0
+    status: ProvisionedConcurrencyStatusEnum = dataclasses.field(
+        default=ProvisionedConcurrencyStatusEnum.IN_PROGRESS
+    )
+    status_reason: str | None = None
+
+
+@dataclasses.dataclass
+class AliasRoutingConfig:
+    version_weights: dict[str, float]
+
+
+@dataclasses.dataclass(frozen=True)
+class VersionIdentifier:
+    function_name: str
+    qualifier: str
+    region: str
+    account: str
+
+    def qualified_arn(self):
+        return qualified_lambda_arn(
+            function_name=self.function_name,
+            qualifier=self.qualifier,
+            region=self.region,
+            account=self.account,
+        )
+
+    def unqualified_arn(self):
+        return unqualified_lambda_arn(
+            function_name=self.function_name,
+            region=self.region,
+            account=self.account,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class VersionAlias:
+    function_version: str
+    name: str
+    description: str | None
+    routing_configuration: AliasRoutingConfig | None = None
+    revision_id: str = dataclasses.field(init=False, default_factory=long_uid)
+
+
+@dataclasses.dataclass
+class ResourcePolicy:
+    Version: str
+    Id: str
+    Statement: list[dict[str, Any]]
+
+
+@dataclasses.dataclass
+class FunctionResourcePolicy:
+    policy: ResourcePolicy
+
+
+@dataclasses.dataclass
+class EventInvokeConfig:
+    function_name: str
+    qualifier: str
+
+    last_modified: str | None = dataclasses.field(compare=False)
+    destination_config: DestinationConfig | None = None
+    maximum_retry_attempts: int | None = None
+    maximum_event_age_in_seconds: int | None = None
+
+
+# Result Models
+@dataclasses.dataclass
+class InvocationResult:
+    request_id: str
+    payload: bytes | None
+    is_error: bool
+    logs: str | None
+    executed_version: str | None = None
+
+
+@dataclasses.dataclass
+class InvocationLogs:
+    request_id: str
+    logs: str
+
+
+class Credentials(TypedDict):
+    AccessKeyId: str
+    SecretAccessKey: str
+    SessionToken: str
+    Expiration: datetime
+
+
+class OtherServiceEndpoint:
+    def status_ready(self, executor_id: str) -> None:
+        """
+        Processes a status ready report by RAPID
+        :param executor_id: Executor ID this ready report is for
+        """
+        raise NotImplementedError()
+
+    def status_error(self, executor_id: str) -> None:
+        """
+        Processes a status error report by RAPID
+        :param executor_id: Executor ID this error report is for
+        """
+        raise NotImplementedError()
+
+
+@dataclasses.dataclass(frozen=True)
+class CodeSigningConfig:
+    csc_id: str
+    arn: str
+
+    allowed_publishers: AllowedPublishers
+    last_modified: str
+    policies: CodeSigningPolicies | None = None
+    description: str | None = None
+
+
+@dataclasses.dataclass
+class LayerPolicyStatement:
+    sid: str
+    action: str
+    principal: str
+    organization_id: str | None
+
+
+@dataclasses.dataclass
+class LayerPolicy:
+    revision_id: str = dataclasses.field(init=False, default_factory=long_uid)
+    id: str = "default"  # static
+    version: str = "2012-10-17"  # static
+    statements: dict[str, LayerPolicyStatement] = dataclasses.field(
+        default_factory=dict
+    )  # statement ID => statement
+
+
+@dataclasses.dataclass
+class LayerVersion:
+    layer_version_arn: str
+    layer_arn: str
+
+    version: int
+    # we need to use Union types as inheritance is not supported by serialization framework
+    code: S3Code | HotReloadingCode | None
+    license_info: str | None
+    compatible_runtimes: list[Runtime] | None
+    compatible_architectures: list[Architecture] | None
+    created: str  # date
+    description: str = ""
+
+    policy: LayerPolicy | None = None
+
+
+@dataclasses.dataclass
+class Layer:
+    arn: str
+    next_version: int = 1
+    next_version_lock: threading.RLock = dataclasses.field(default_factory=threading.RLock)
+    layer_versions: dict[str, LayerVersion] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class VersionFunctionConfiguration:
+    # fields
+    description: str
+    role: str
+    timeout: int
+    runtime: Runtime | None
+    memory_size: int
+    handler: str | None
+    package_type: PackageType
+    environment: dict[str, str] | None
+    architectures: list[Architecture]
+    # internal revision is updated when runtime restart is necessary
+    internal_revision: str
+    ephemeral_storage: LambdaEphemeralStorage
+    snap_start: SnapStartResponse | None
+
+    tracing_config_mode: TracingMode
+    # we need to use Union types as inheritance is not supported by serialization framework
+    code: S3Code | HotReloadingCode | None
+    last_modified: str  # ISO string
+    state: VersionState
+
+    image: ImageCode | None = None
+    image_config: ImageConfig | None = None
+    runtime_version_config: RuntimeVersionConfig | None = None
+    last_update: UpdateStatus | None = None
+    revision_id: str = dataclasses.field(init=False, default_factory=long_uid)
+    layers: list[LayerVersion] = dataclasses.field(default_factory=list)
+
+    dead_letter_arn: str | None = None
+
+    # kms_key_arn: str
+    # file_system_configs: FileSystemConfig
+    vpc_config: VpcConfig | None = None
+
+    logging_config: LoggingConfig = dataclasses.field(default_factory=dict)
+    capacity_provider_config: CapacityProviderConfig | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class FunctionVersion:
+    id: VersionIdentifier
+    config: VersionFunctionConfiguration
+
+    @property
+    def qualified_arn(self) -> str:
+        return self.id.qualified_arn()
+
+
+class DesiredCapacityProviderState(StrEnum):
+    Running = "Running"
+    Stopped = "Stopped"
+
+
+@dataclasses.dataclass
+class CapacityProvider:
+    CapacityProviderArn: CapacityProviderArn
+    # State is determined dynamically based on DesiredState
+    VpcConfig: CapacityProviderVpcConfig
+    PermissionsConfig: CapacityProviderPermissionsConfig
+    InstanceRequirements: InstanceRequirements
+    CapacityProviderScalingConfig: CapacityProviderScalingConfig
+    LastModified: Timestamp
+    KmsKeyArn: KMSKeyArn | None = None
+    # Tracks whether the capacity provider should be running or stopped.
+    # Set to Stopped when deletion is initiated; used to skip restoration on state load.
+    DesiredState: DesiredCapacityProviderState = DesiredCapacityProviderState.Running
+
+
+@dataclasses.dataclass
+class FunctionScalingState:
+    """Tracks both applied and requested scaling configs for async updates."""
+
+    applied: FunctionScalingConfig = dataclasses.field(default_factory=dict)
+    requested: FunctionScalingConfig | None = None
+
+
+@dataclasses.dataclass
+class Function:
+    function_name: str
+    code_signing_config_arn: str | None = None
+    aliases: dict[str, VersionAlias] = dataclasses.field(default_factory=dict)
+    versions: dict[str, FunctionVersion] = dataclasses.field(default_factory=dict)
+    function_url_configs: dict[str, FunctionUrlConfig] = dataclasses.field(
+        default_factory=dict
+    )  # key is $LATEST, version, or alias
+    permissions: dict[str, FunctionResourcePolicy] = dataclasses.field(
+        default_factory=dict
+    )  # key is $LATEST, version or alias
+    event_invoke_configs: dict[str, EventInvokeConfig] = dataclasses.field(
+        default_factory=dict
+    )  # key is $LATEST(?), version or alias
+    reserved_concurrent_executions: int | None = None
+    recursive_loop: RecursiveLoop = RecursiveLoop.Terminate
+    provisioned_concurrency_configs: dict[str, ProvisionedConcurrencyConfiguration] = (
+        dataclasses.field(default_factory=dict)
+    )
+    function_scaling_configs: dict[str, FunctionScalingState] = dataclasses.field(
+        default_factory=dict
+    )
+
+    lock: threading.RLock = dataclasses.field(default_factory=threading.RLock)
+    next_version: int = 1
+    instance_id: str = dataclasses.field(default_factory=short_uid, init=False)
+
+    def latest(self) -> FunctionVersion:
+        return self.versions["$LATEST"]
+
+
+class ValidationException(CommonServiceException):
+    def __init__(self, message: str):
+        super().__init__(code="ValidationException", status_code=400, message=message)
+
+
+class RequestEntityTooLargeException(CommonServiceException):
+    def __init__(self, message: str):
+        super().__init__(code="RequestEntityTooLargeException", status_code=413, message=message)
+
+
+# note: we might at some point want to generalize these limits across all services and fetch them from there
+
+
+@dataclasses.dataclass
+class AccountSettings:
+    total_code_size: int = config.LAMBDA_LIMITS_TOTAL_CODE_SIZE
+    code_size_zipped: int = config.LAMBDA_LIMITS_CODE_SIZE_ZIPPED
+    code_size_unzipped: int = config.LAMBDA_LIMITS_CODE_SIZE_UNZIPPED
+    concurrent_executions: int = config.LAMBDA_LIMITS_CONCURRENT_EXECUTIONS

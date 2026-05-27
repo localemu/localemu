@@ -1,0 +1,888 @@
+import datetime
+import json
+import logging
+import re
+import uuid
+from abc import ABC, abstractmethod
+from typing import Any
+from urllib.parse import urlencode
+
+import requests
+from botocore.client import BaseClient
+
+from localemu import config
+from localemu.aws.api.events import (
+    Arn,
+    InputTransformer,
+    RuleName,
+    Target,
+    TargetInputPath,
+)
+from localemu.aws.connect import connect_to
+from localemu.services.events.api_destination import add_api_destination_authorization
+from localemu.services.events.models import (
+    FormattedEvent,
+    TransformedEvent,
+    ValidationException,
+)
+from localemu.services.events.utils import (
+    event_time_to_time_string,
+    get_trace_header_encoded_region_account,
+    is_nested_in_string,
+    to_json_str,
+)
+from localemu.utils import collections
+from localemu.utils.aws.arns import (
+    extract_account_id_from_arn,
+    extract_region_from_arn,
+    extract_service_from_arn,
+    firehose_name,
+    parse_arn,
+    sqs_queue_url_for_arn,
+)
+from localemu.utils.aws.client_types import ServicePrincipal
+from localemu.utils.aws.message_forwarding import (
+    add_target_http_parameters,
+)
+from localemu.utils.json import extract_jsonpath
+from localemu.utils.strings import to_bytes
+from localemu.utils.time import now_utc
+from localemu.utils.xray.trace_header import TraceHeader
+
+LOG = logging.getLogger(__name__)
+
+# https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-transform-target-input.html#eb-transform-input-predefined
+AWS_PREDEFINED_PLACEHOLDERS_STRING_VALUES = {
+    "aws.events.rule-arn",
+    "aws.events.rule-name",
+    "aws.events.event.ingestion-time",
+}
+AWS_PREDEFINED_PLACEHOLDERS_JSON_VALUES = {"aws.events.event", "aws.events.event.json"}
+
+PREDEFINED_PLACEHOLDERS: set[str] = AWS_PREDEFINED_PLACEHOLDERS_STRING_VALUES.union(
+    AWS_PREDEFINED_PLACEHOLDERS_JSON_VALUES
+)
+
+TRANSFORMER_PLACEHOLDER_PATTERN = re.compile(r"<(.*?)>")
+TRACE_HEADER_KEY = "X-Amzn-Trace-Id"
+
+
+def transform_event_with_target_input_path(
+    input_path: TargetInputPath, event: FormattedEvent
+) -> TransformedEvent:
+    formatted_event = extract_jsonpath(event, input_path)
+    return formatted_event
+
+
+def get_template_replacements(
+    input_transformer: InputTransformer, event: FormattedEvent
+) -> dict[str, Any]:
+    """Extracts values from the event using the input paths map keys and places them in the input template dict."""
+    template_replacements = {}
+    transformer_path_map = input_transformer.get("InputPathsMap", {})
+    for placeholder, transformer_path in transformer_path_map.items():
+        if placeholder in PREDEFINED_PLACEHOLDERS:
+            continue
+        value = extract_jsonpath(event, transformer_path)
+        if not value:
+            value = ""  # default value is empty string
+        template_replacements[placeholder] = value
+    return template_replacements
+
+
+def replace_template_placeholders(template: str, replacements: dict[str, Any]) -> TransformedEvent:
+    """
+    Replaces placeholders in an EventBridge-style InputTemplate string.
+
+    :param template: The template string containing placeholders like ``<$.foo.bar>``.
+    :type template: str
+    :param replacements: A dictionary providing values to fill in.
+    :type replacements: dict
+    :returns: The transformed string with placeholders replaced by values from ``replacements``.
+    :rtype: str
+    """
+
+    ...
+    is_json_template = template.strip().startswith("{")
+
+    def replace_placeholder(match):
+        key = match.group(1)
+        value = replacements.get(key, "")  # handle non defined placeholders
+        if isinstance(value, datetime.datetime):
+            return event_time_to_time_string(value)
+        if isinstance(value, dict):
+            json_str = to_json_str(value).replace('\\"', '"')
+            if is_json_template:
+                return json_str
+            return json_str.replace('"', "")
+        if isinstance(value, list):
+            if is_json_template:
+                return json.dumps(value)
+            return f"[{','.join(value)}]"
+        if isinstance(value, bool):
+            return json.dumps(value)
+        if is_nested_in_string(template, match):
+            return value
+        if is_json_template:
+            return json.dumps(value)
+        return value
+
+    formatted_template = TRANSFORMER_PLACEHOLDER_PATTERN.sub(replace_placeholder, template).replace(
+        "\\n", "\n"
+    )
+
+    if is_json_template:
+        try:
+            loaded_json_template = json.loads(formatted_template)
+            return loaded_json_template
+        except json.JSONDecodeError:
+            LOG.info(
+                json.dumps(
+                    {
+                        "InfoCode": "InternalInfoEvents at transform_event",
+                        "InfoMessage": f"Replaced template is not valid json: {formatted_template}",
+                    }
+                )
+            )
+    else:
+        return formatted_template[1:-1]
+
+
+class TargetSender(ABC):
+    target: Target
+    rule_arn: Arn
+    rule_name: RuleName
+    service: str
+
+    region: str  # region of the event bus
+    account_id: str  # region of the event bus
+    target_region: str
+    target_account_id: str
+    _client: BaseClient | None
+
+    # Identity the sender assumes when calling AWS on behalf of its source.
+    # EventBridge Rules use "events"; EventBridge Scheduler reuses the same
+    # senders but must assume the role as "scheduler" so the role's trust
+    # policy validates correctly. Subclasses or callers can override by
+    # setting ``caller_service_principal`` on the instance after init.
+    caller_service_principal: str = "events"
+
+    def __init__(
+        self,
+        target: Target,
+        rule_arn: Arn,
+        rule_name: RuleName,
+        service: str,
+        region: str,
+        account_id: str,
+        caller_service_principal: str | None = None,
+    ):
+        self.target = target
+        self.rule_arn = rule_arn
+        self.rule_name = rule_name
+        self.service = service
+        self.region = region
+        self.account_id = account_id
+        if caller_service_principal is not None:
+            self.caller_service_principal = caller_service_principal
+
+        self.target_region = extract_region_from_arn(self.target["Arn"])
+        self.target_account_id = extract_account_id_from_arn(self.target["Arn"])
+
+        self._validate_input(target)
+        self._client: BaseClient | None = None
+
+    @property
+    def arn(self):
+        return self.target["Arn"]
+
+    @property
+    def target_id(self):
+        return self.target["Id"]
+
+    @property
+    def unique_id(self):
+        """Necessary to distinguish between targets with the same ARN but for different rules.
+        The unique_id is a combination of the rule ARN and the Target Id.
+        This is necessary since input path and input transformer can be different for the same target ARN,
+        attached to different rules."""
+        return f"{self.rule_arn}-{self.target_id}"
+
+    @property
+    def client(self):
+        """Lazy initialization of internal botoclient factory."""
+        if self._client is None:
+            self._client = self._initialize_client()
+        return self._client
+
+    @abstractmethod
+    def send_event(self, event: FormattedEvent | TransformedEvent, trace_header: TraceHeader):
+        pass
+
+    def process_event(self, event: FormattedEvent, trace_header: TraceHeader):
+        """Processes the event and send it to the target with retry and DLQ support."""
+        if input_ := self.target.get("Input"):
+            event = json.loads(input_)
+        if isinstance(event, dict):
+            event.pop("event-bus-name", None)
+        if not input_:
+            if input_path := self.target.get("InputPath"):
+                event = transform_event_with_target_input_path(input_path, event)
+            if input_transformer := self.target.get("InputTransformer"):
+                event = self.transform_event_with_target_input_transformer(input_transformer, event)
+        if not event:
+            LOG.info("No event to send to target %s", self.target.get("Id"))
+            return
+
+        # Retry logic with exponential backoff
+        retry_policy = self.target.get("RetryPolicy", {})
+        max_retries = retry_policy.get("MaximumRetryAttempts", 2)
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                self.send_event(event, trace_header)
+                return  # Success
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    import time
+                    backoff = min(2 ** attempt, 30)
+                    LOG.debug(
+                        "Target %s delivery attempt %d failed, retrying in %ds: %s",
+                        self.target.get("Id"), attempt + 1, backoff, e,
+                    )
+                    time.sleep(backoff)
+
+        # All retries exhausted - send to DLQ if configured
+        LOG.warning(
+            "Target %s delivery failed after %d attempts: %s",
+            self.target.get("Id"), max_retries + 1, last_error,
+        )
+        dlq_arn = self.target.get("DeadLetterConfig", {}).get("Arn")
+        if dlq_arn:
+            self._send_to_dlq(event, dlq_arn, last_error)
+
+    def _send_to_dlq(self, event, dlq_arn: str, error: Exception):
+        """Send failed event to dead letter queue (SQS)."""
+        try:
+            dlq_client = connect_to(
+                aws_access_key_id=self.target_account_id,
+                region_name=self.target_region,
+            ).sqs
+            queue_url = sqs_queue_url_for_arn(dlq_arn)
+            dlq_client.send_message(
+                QueueUrl=queue_url,
+                MessageBody=to_json_str(event),
+                MessageAttributes={
+                    "ERROR_CODE": {"StringValue": "TARGET_DELIVERY_FAILED", "DataType": "String"},
+                    "ERROR_MESSAGE": {"StringValue": str(error)[:256], "DataType": "String"},
+                    "RULE_ARN": {"StringValue": self.rule_arn, "DataType": "String"},
+                    "TARGET_ARN": {"StringValue": self.arn, "DataType": "String"},
+                },
+            )
+            LOG.info("Event sent to DLQ %s for target %s", dlq_arn, self.target.get("Id"))
+        except Exception as dlq_error:
+            LOG.error("Failed to send to DLQ %s: %s", dlq_arn, dlq_error)
+
+    def transform_event_with_target_input_transformer(
+        self, input_transformer: InputTransformer, event: FormattedEvent
+    ) -> TransformedEvent:
+        input_template = input_transformer["InputTemplate"]
+        template_replacements = get_template_replacements(input_transformer, event)
+        predefined_template_replacements = self._get_predefined_template_replacements(event)
+        template_replacements.update(predefined_template_replacements)
+
+        populated_template = replace_template_placeholders(input_template, template_replacements)
+
+        return populated_template
+
+    def _validate_input(self, target: Target):
+        """Provide a default implementation extended for each target based on specifications."""
+        # TODO add For Lambda and Amazon SNS resources, EventBridge relies on resource-based policies.
+        if "InputPath" in target and "InputTransformer" in target:
+            raise ValidationException(
+                f"Only one of Input, InputPath, or InputTransformer must be provided for target {target.get('Id')}."
+            )
+        if input_transformer := target.get("InputTransformer"):
+            self._validate_input_transformer(input_transformer)
+
+    def _initialize_client(self) -> BaseClient:
+        """Initializes internal boto client.
+        If a role from a target is provided, the client will be initialized with the assumed role.
+        If no role is provided, the client will be initialized with the account ID and region.
+        The service principal defaults to EventBridge ("events") but can be overridden via
+        ``caller_service_principal`` so EventBridge Scheduler (and future callers) assume
+        roles against the trust policy that actually names them."""
+        service_principal = ServicePrincipal(self.caller_service_principal)
+        role_arn = self.target.get("RoleArn")
+        if role_arn:  # required for cross account
+            # assumed role sessions expire after 6 hours in AWS, currently no expiration in LocalEmu
+            client_factory = connect_to.with_assumed_role(
+                role_arn=role_arn,
+                service_principal=service_principal,
+                region_name=self.region,
+            )
+        else:
+            client_factory = connect_to(aws_access_key_id=self.account_id, region_name=self.region)
+        client = client_factory.get_client(self.service)
+        client = client.request_metadata(
+            service_principal=service_principal, source_arn=self.rule_arn
+        )
+        self._register_client_hooks(client)
+        return client
+
+    def _validate_input_transformer(self, input_transformer: InputTransformer):
+        # TODO: cover via test
+        # if "InputTemplate" not in input_transformer:
+        #     raise ValueError("InputTemplate is required for InputTransformer")
+        input_template = input_transformer["InputTemplate"]
+        input_paths_map = input_transformer.get("InputPathsMap", {})
+        placeholders = TRANSFORMER_PLACEHOLDER_PATTERN.findall(input_template)
+        for placeholder in placeholders:
+            if placeholder not in input_paths_map and placeholder not in PREDEFINED_PLACEHOLDERS:
+                raise ValidationException(
+                    f"InputTemplate for target {self.target.get('Id')} contains invalid placeholder {placeholder}."
+                )
+
+    def _get_predefined_template_replacements(self, event: FormattedEvent) -> dict[str, Any]:
+        """Extracts predefined values from the event."""
+        predefined_template_replacements = {}
+        predefined_template_replacements["aws.events.rule-arn"] = self.rule_arn
+        predefined_template_replacements["aws.events.rule-name"] = self.rule_name
+        predefined_template_replacements["aws.events.event.ingestion-time"] = event["time"]
+        predefined_template_replacements["aws.events.event"] = {
+            "detailType" if k == "detail-type" else k: v  # detail-type is is returned as detailType
+            for k, v in event.items()
+            if k != "detail"  # detail is not part of .event placeholder
+        }
+        predefined_template_replacements["aws.events.event.json"] = event
+
+        return predefined_template_replacements
+
+    def _register_client_hooks(self, client: BaseClient):
+        """Register client hooks to inject trace header into requests."""
+
+        def handle_extract_params(params, context, **kwargs):
+            trace_header = params.pop("TraceHeader", None)
+            if trace_header is None:
+                return
+            context[TRACE_HEADER_KEY] = trace_header.to_header_str()
+
+        def handle_inject_headers(params, context, **kwargs):
+            if trace_header_str := context.pop(TRACE_HEADER_KEY, None):
+                params["headers"][TRACE_HEADER_KEY] = trace_header_str
+
+        client.meta.events.register(
+            f"provide-client-params.{self.service}.*", handle_extract_params
+        )
+        client.meta.events.register(f"before-call.{self.service}.*", handle_inject_headers)
+
+
+TargetSenderDict = dict[str, TargetSender]  # rule_arn-target_id as global unique id
+
+# Target Senders are ordered alphabetically by service name
+
+
+class ApiGatewayTargetSender(TargetSender):
+    """
+    ApiGatewayTargetSender is a TargetSender that sends events to an API Gateway target.
+    """
+
+    PROHIBITED_HEADERS = [
+        "authorization",
+        "connection",
+        "content-encoding",
+        "content-length",
+        "host",
+        "max-forwards",
+        "te",
+        "transfer-encoding",
+        "trailer",
+        "upgrade",
+        "via",
+        "www-authenticate",
+        "x-forwarded-for",
+    ]  # https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-api-gateway-target.html
+
+    ALLOWED_HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+
+    def send_event(self, event, trace_header):
+        # Parse the ARN to extract api_id, stage_name, http_method, and resource path
+        # Example ARN: arn:{partition}:execute-api:{region}:{account_id}:{api_id}/{stage_name}/{method}/{resource_path}
+        arn_parts = parse_arn(self.target["Arn"])
+        api_gateway_info = arn_parts["resource"]  # e.g., 'myapi/dev/POST/pets/*/*'
+        api_gateway_info_parts = api_gateway_info.split("/")
+
+        api_id = api_gateway_info_parts[0]
+        stage_name = api_gateway_info_parts[1]
+        http_method = api_gateway_info_parts[2].upper()
+        resource_path_parts = api_gateway_info_parts[3:]  # may contain wildcards
+
+        if http_method not in self.ALLOWED_HTTP_METHODS:
+            LOG.error("Unsupported HTTP method: %s", http_method)
+            return
+
+        # Replace wildcards in resource path with PathParameterValues
+        path_params_values = self.target.get("HttpParameters", {}).get("PathParameterValues", [])
+        resource_path_segments = []
+        path_param_index = 0
+        for part in resource_path_parts:
+            if part == "*":
+                if path_param_index < len(path_params_values):
+                    resource_path_segments.append(path_params_values[path_param_index])
+                    path_param_index += 1
+                else:
+                    # Use empty string if no path parameter is provided
+                    resource_path_segments.append("")
+            else:
+                resource_path_segments.append(part)
+        resource_path = "/".join(resource_path_segments)
+
+        # Ensure resource path starts and ends with '/'
+        resource_path = f"/{resource_path.strip('/')}/"
+
+        # Construct query string parameters
+        query_params = self.target.get("HttpParameters", {}).get("QueryStringParameters", {})
+        query_string = urlencode(query_params) if query_params else ""
+
+        # Construct headers
+        headers = self.target.get("HttpParameters", {}).get("HeaderParameters", {})
+        headers = {k: v for k, v in headers.items() if k.lower() not in self.PROHIBITED_HEADERS}
+        # Add Host header to ensure proper routing in LocalEmu
+
+        host = f"{api_id}.execute-api.localhost"
+        headers["Host"] = host
+
+        # Ensure Content-Type is set
+        headers.setdefault("Content-Type", "application/json")
+
+        # Construct the full URL
+        resource_path = f"/{resource_path.strip('/')}/"
+
+        # Construct the full URL using urljoin
+        from urllib.parse import urljoin
+
+        base_url = config.internal_service_url()
+        base_path = f"/{stage_name}"
+        full_path = urljoin(base_path + "/", resource_path.lstrip("/"))
+        url = urljoin(base_url + "/", full_path.lstrip("/"))
+
+        if query_string:
+            url += f"?{query_string}"
+
+        # Serialize the event, converting datetime objects to strings
+        event_json = json.dumps(event, default=str)
+
+        # Add trace header
+        headers[TRACE_HEADER_KEY] = trace_header.to_header_str()
+
+        # Send the HTTP request
+        response = requests.request(
+            method=http_method, url=url, headers=headers, data=event_json, timeout=5
+        )
+        if not response.ok:
+            LOG.warning(
+                "API Gateway target invocation failed with status code %s, response: %s",
+                response.status_code,
+                response.text,
+            )
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+        # TODO: cover via test
+        # if not collections.get_safe(target, "$.RoleArn"):
+        #     raise ValueError("RoleArn is required for ApiGateway target")
+
+    def _get_predefined_template_replacements(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Extracts predefined values from the event."""
+        predefined_template_replacements = {}
+        predefined_template_replacements["aws.events.rule-arn"] = self.rule_arn
+        predefined_template_replacements["aws.events.rule-name"] = self.rule_name
+        predefined_template_replacements["aws.events.event.ingestion-time"] = event.get("time", "")
+        predefined_template_replacements["aws.events.event"] = {
+            "detailType" if k == "detail-type" else k: v for k, v in event.items() if k != "detail"
+        }
+        predefined_template_replacements["aws.events.event.json"] = event
+
+        return predefined_template_replacements
+
+
+class AppSyncTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        # AppSync targets require GraphQL mutation execution
+        # For now, log the event - full implementation needs AppSync query execution
+        LOG.info("AppSync target %s received event (GraphQL execution not yet supported)", self.arn)
+
+
+class BatchTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        batch_params = self.target.get("BatchParameters", {})
+        job_definition = batch_params.get("JobDefinition", "")
+        job_name = batch_params.get("JobName", f"eb-{self.rule_name}-{uuid.uuid4().hex[:8]}")
+
+        submit_kwargs = {
+            "jobName": job_name,
+            "jobDefinition": job_definition,
+            "jobQueue": self.target["Arn"],
+        }
+        if array_props := batch_params.get("ArrayProperties"):
+            submit_kwargs["arrayProperties"] = array_props
+        if retry_strategy := batch_params.get("RetryStrategy"):
+            submit_kwargs["retryStrategy"] = retry_strategy
+
+        self.client.submit_job(**submit_kwargs)
+
+    def _validate_input(self, target: Target):
+        pass
+
+
+class ECSTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        ecs_params = self.target.get("EcsParameters", {})
+        task_def_arn = ecs_params.get("TaskDefinitionArn", "")
+        task_count = ecs_params.get("TaskCount", 1)
+        launch_type = ecs_params.get("LaunchType", "EC2")
+        network_config = ecs_params.get("NetworkConfiguration")
+
+        run_kwargs = {
+            "taskDefinition": task_def_arn,
+            "count": task_count,
+            "launchType": launch_type,
+        }
+        if network_config:
+            run_kwargs["networkConfiguration"] = network_config
+        if group := ecs_params.get("Group"):
+            run_kwargs["group"] = group
+        if platform_version := ecs_params.get("PlatformVersion"):
+            run_kwargs["platformVersion"] = platform_version
+
+        self.client.run_task(**run_kwargs)
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+
+
+class EventsTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        # TODO add validation and tests for eventbridge to eventbridge requires Detail, DetailType, and Source
+        # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/events/client/put_events.html
+        source = self._get_source(event)
+        detail_type = self._get_detail_type(event)
+        detail = event.get("detail", event)
+        resources = self._get_resources(event)
+        entries = [
+            {
+                "EventBusName": self.target["Arn"],  # use arn for target account and region
+                "Source": source,
+                "DetailType": detail_type,
+                "Detail": json.dumps(detail),
+                "Resources": resources,
+            }
+        ]
+        if encoded_original_id := get_trace_header_encoded_region_account(
+            event, self.region, self.account_id, self.target_region, self.target_account_id
+        ):
+            entries[0]["TraceHeader"] = encoded_original_id
+
+        self.client.put_events(Entries=entries, TraceHeader=trace_header)
+
+    def _get_source(self, event: FormattedEvent | TransformedEvent) -> str:
+        if isinstance(event, dict) and (source := event.get("source")):
+            return source
+        else:
+            return self.service or ""
+
+    def _get_detail_type(self, event: FormattedEvent | TransformedEvent) -> str:
+        if isinstance(event, dict) and (detail_type := event.get("detail-type")):
+            return detail_type
+        else:
+            return ""
+
+    def _get_resources(self, event: FormattedEvent | TransformedEvent) -> list[str]:
+        if isinstance(event, dict) and (resources := event.get("resources")):
+            return resources
+        else:
+            return []
+
+
+class EventsApiDestinationTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        """Send an event to an EventBridge API destination
+        See https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-api-destinations.html"""
+        target_arn = self.target["Arn"]
+        target_region = extract_region_from_arn(target_arn)
+        target_account_id = extract_account_id_from_arn(target_arn)
+        api_destination_name = target_arn.split(":")[-1].split("/")[1]
+
+        events_client = connect_to(
+            aws_access_key_id=target_account_id, region_name=target_region
+        ).events
+        destination = events_client.describe_api_destination(Name=api_destination_name)
+
+        # get destination endpoint details
+        method = destination.get("HttpMethod", "GET")
+        endpoint = destination.get("InvocationEndpoint")
+        state = destination.get("ApiDestinationState") or "ACTIVE"
+
+        LOG.debug(
+            'Calling EventBridge API destination (state "%s"): %s %s', state, method, endpoint
+        )
+        headers = {
+            # default headers AWS sends with every api destination call
+            "User-Agent": "Amazon/EventBridge/ApiDestinations",
+            "Content-Type": "application/json; charset=utf-8",
+            "Range": "bytes=0-1048575",
+            "Accept-Encoding": "gzip,deflate",
+            "Connection": "close",
+        }
+
+        endpoint = add_api_destination_authorization(destination, headers, event)
+        if http_parameters := self.target.get("HttpParameters"):
+            endpoint = add_target_http_parameters(http_parameters, endpoint, headers, event)
+
+        # add trace header
+        headers[TRACE_HEADER_KEY] = trace_header.to_header_str()
+
+        result = requests.request(
+            method=method, url=endpoint, data=json.dumps(event or {}), headers=headers
+        )
+        if result.status_code >= 400:
+            LOG.debug(
+                "Received code %s forwarding events: %s %s", result.status_code, method, endpoint
+            )
+            if result.status_code == 429 or 500 <= result.status_code <= 600:
+                pass  # TODO: retry logic (only retry on 429 and 5xx response status)
+
+
+class FirehoseTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        delivery_stream_name = firehose_name(self.target["Arn"])
+
+        self.client.put_record(
+            DeliveryStreamName=delivery_stream_name,
+            Record={"Data": to_bytes(to_json_str(event))},
+        )
+
+
+class KinesisTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        partition_key_path = collections.get_safe(
+            self.target,
+            "$.KinesisParameters.PartitionKeyPath",
+            default_value="$.id",
+        )
+        stream_name = self.target["Arn"].split("/")[-1]
+        partition_key = collections.get_safe(event, partition_key_path, event["id"])
+
+        self.client.put_record(
+            StreamName=stream_name,
+            Data=to_bytes(to_json_str(event)),
+            PartitionKey=partition_key,
+        )
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+        # TODO: cover via tests
+        # if not collections.get_safe(target, "$.RoleArn"):
+        #     raise ValueError("RoleArn is required for Kinesis target")
+        # if not collections.get_safe(target, "$.KinesisParameters.PartitionKeyPath"):
+        #     raise ValueError("KinesisParameters.PartitionKeyPath is required for Kinesis target")
+
+
+class LambdaTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        self.client.invoke(
+            FunctionName=self.target["Arn"],
+            Payload=to_bytes(to_json_str(event)),
+            InvocationType="Event",
+            TraceHeader=trace_header,
+        )
+
+
+class LogsTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        log_group_name = self.target["Arn"].split(":")[6]
+        log_stream_name = str(uuid.uuid4())  # Unique log stream name
+
+        self.client.create_log_stream(logGroupName=log_group_name, logStreamName=log_stream_name)
+        self.client.put_log_events(
+            logGroupName=log_group_name,
+            logStreamName=log_stream_name,
+            logEvents=[
+                {
+                    "timestamp": now_utc(millis=True),
+                    "message": to_json_str(event),
+                }
+            ],
+        )
+
+
+class RedshiftTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        redshift_params = self.target.get("RedshiftDataParameters", {})
+        self.service = "redshift-data"
+        self.client.execute_statement(
+            Database=redshift_params.get("Database", ""),
+            Sql=redshift_params.get("Sql", "SELECT 1"),
+            ClusterIdentifier=redshift_params.get("ClusterIdentifier"),
+            DbUser=redshift_params.get("DbUser"),
+            SecretArn=redshift_params.get("SecretArn"),
+            StatementName=redshift_params.get("StatementName"),
+            WithEvent=redshift_params.get("WithEvent", False),
+        )
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+
+
+class SagemakerTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        sagemaker_params = self.target.get("SageMakerPipelineParameters", {})
+        pipeline_params = sagemaker_params.get("PipelineParameterList", [])
+        self.client.start_pipeline_execution(
+            PipelineName=parse_arn(self.target["Arn"]).get("resource", "").split("/")[-1],
+            PipelineParameters=[
+                {"Name": p.get("Name", ""), "Value": p.get("Value", "")}
+                for p in pipeline_params
+            ],
+        )
+
+
+class SnsTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        self.client.publish(TopicArn=self.target["Arn"], Message=to_json_str(event))
+
+
+class SqsTargetSender(TargetSender):
+    def send_event(self, event, trace_header):
+        queue_url = sqs_queue_url_for_arn(self.target["Arn"])
+        msg_group_id = self.target.get("SqsParameters", {}).get("MessageGroupId", None)
+        kwargs = {"MessageGroupId": msg_group_id} if msg_group_id else {}
+
+        self.client.send_message(
+            QueueUrl=queue_url,
+            MessageBody=to_json_str(event),
+            **kwargs,
+        )
+
+
+class StatesTargetSender(TargetSender):
+    """Step Functions Target Sender"""
+
+    def send_event(self, event, trace_header):
+        self.service = "stepfunctions"
+
+        self.client.start_execution(
+            stateMachineArn=self.target["Arn"], name=event["id"], input=to_json_str(event)
+        )
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+        # TODO: cover via test
+        # if not collections.get_safe(target, "$.RoleArn"):
+        #     raise ValueError("RoleArn is required for StepFunctions target")
+
+
+class SystemsManagerSender(TargetSender):
+    """EC2 Run Command Target Sender"""
+
+    def send_event(self, event, trace_header):
+        run_cmd_params = self.target.get("RunCommandParameters", {})
+        run_cmd_targets = run_cmd_params.get("RunCommandTargets", [])
+
+        # Build SSM targets from RunCommandTargets
+        targets = []
+        for rct in run_cmd_targets:
+            targets.append({
+                "Key": rct.get("Key", ""),
+                "Values": rct.get("Values", []),
+            })
+
+        self.client.send_command(
+            DocumentName=parse_arn(self.target["Arn"]).get("resource", "").split("/")[-1],
+            Targets=targets,
+            Parameters={"event": [to_json_str(event)]},
+        )
+
+    def _validate_input(self, target: Target):
+        super()._validate_input(target)
+        # TODO: cover via test
+        # if not collections.get_safe(target, "$.RoleArn"):
+        #     raise ValueError(
+        #         "RoleArn is required for SystemManager target to invoke a EC2 run command"
+        #     )
+        # if not collections.get_safe(target, "$.RunCommandParameters.RunCommandTargets"):
+        #     raise ValueError(
+        #         "RunCommandParameters.RunCommandTargets is required for Systems Manager target"
+        #     )
+
+
+class TargetSenderFactory:
+    # supported targets: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-targets.html
+    target: Target
+    rule_arn: Arn
+    rule_name: RuleName
+    region: str
+    account_id: str
+
+    target_map = {
+        "apigateway": ApiGatewayTargetSender,
+        "appsync": AppSyncTargetSender,
+        "batch": BatchTargetSender,
+        "ecs": ECSTargetSender,
+        "events": EventsTargetSender,
+        "events_api_destination": EventsApiDestinationTargetSender,
+        "firehose": FirehoseTargetSender,
+        "kinesis": KinesisTargetSender,
+        "lambda": LambdaTargetSender,
+        "logs": LogsTargetSender,
+        "redshift": RedshiftTargetSender,
+        "sns": SnsTargetSender,
+        "sqs": SqsTargetSender,
+        "sagemaker": SagemakerTargetSender,
+        "ssm": SystemsManagerSender,
+        "states": StatesTargetSender,
+        "execute-api": ApiGatewayTargetSender,
+        # TODO custom endpoints via http target
+    }
+
+    def __init__(
+        self,
+        target: Target,
+        rule_arn: Arn,
+        rule_name: RuleName,
+        region: str,
+        account_id: str,
+        caller_service_principal: str | None = None,
+    ):
+        self.target = target
+        self.rule_arn = rule_arn
+        self.rule_name = rule_name
+        self.region = region
+        self.account_id = account_id
+        # Used so EventBridge Scheduler can re-use this factory while
+        # assuming the target role as ``scheduler.amazonaws.com``.
+        self.caller_service_principal = caller_service_principal
+
+    @classmethod
+    def register_target_sender(cls, service_name: str, sender_class: type[TargetSender]):
+        cls.target_map[service_name] = sender_class
+
+    def get_target_sender(self) -> TargetSender:
+        target_arn = self.target["Arn"]
+        service = extract_service_from_arn(target_arn)
+        if ":api-destination/" in target_arn or ":destination/" in target_arn:
+            service = "events_api_destination"
+        if service in self.target_map:
+            target_sender_class = self.target_map[service]
+        else:
+            raise Exception(f"Unsupported target for Service: {service}")
+        kwargs = {}
+        if self.caller_service_principal is not None:
+            kwargs["caller_service_principal"] = self.caller_service_principal
+        target_sender = target_sender_class(
+            self.target, self.rule_arn, self.rule_name, service, self.region, self.account_id,
+            **kwargs,
+        )
+        return target_sender

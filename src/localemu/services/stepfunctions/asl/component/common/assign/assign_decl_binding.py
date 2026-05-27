@@ -1,0 +1,19 @@
+from typing import Final
+
+from localemu.services.stepfunctions.asl.component.common.assign.assign_template_binding import (
+    AssignTemplateBinding,
+)
+from localemu.services.stepfunctions.asl.component.eval_component import EvalComponent
+from localemu.services.stepfunctions.asl.eval.environment import Environment
+
+
+class AssignDeclBinding(EvalComponent):
+    binding: Final[AssignTemplateBinding]
+
+    def __init__(self, binding: AssignTemplateBinding):
+        super().__init__()
+        self.binding = binding
+
+    def _eval_body(self, env: Environment) -> None:
+        env.stack.append({})
+        self.binding.eval(env=env)

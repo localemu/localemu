@@ -1,0 +1,771 @@
+import dataclasses
+import email.utils
+import json
+import logging
+import os
+import re
+import threading
+from collections import defaultdict
+from datetime import UTC, date, datetime, time
+from email.parser import Parser as EmailParser
+from typing import TYPE_CHECKING, Any
+
+from botocore.exceptions import ClientError
+from moto.ses import ses_backends
+from moto.ses.models import SESBackend
+
+from localemu import config
+from localemu.aws.api import RequestContext, handler
+from localemu.aws.api.core import CommonServiceException
+from localemu.aws.api.ses import (
+    Address,
+    AddressList,
+    AmazonResourceName,
+    CloneReceiptRuleSetResponse,
+    ConfigurationSetDoesNotExistException,
+    ConfigurationSetName,
+    CreateConfigurationSetEventDestinationResponse,
+    DeleteConfigurationSetEventDestinationResponse,
+    DeleteConfigurationSetResponse,
+    DeleteTemplateResponse,
+    Destination,
+    Enabled,
+    EventDestination,
+    EventDestinationDoesNotExistException,
+    EventDestinationName,
+    EventType,
+    GetIdentityVerificationAttributesResponse,
+    Identity,
+    IdentityList,
+    IdentityVerificationAttributes,
+    InvalidSNSDestinationException,
+    ListTemplatesResponse,
+    MaxItems,
+    Message,
+    MessageId,
+    MessageRejected,
+    MessageTagList,
+    NextToken,
+    NotificationType,
+    RawMessage,
+    ReceiptRuleSetName,
+    SendEmailResponse,
+    SendRawEmailResponse,
+    SendTemplatedEmailResponse,
+    SesApi,
+    SetIdentityHeadersInNotificationsEnabledResponse,
+    TemplateData,
+    TemplateName,
+    VerificationAttributes,
+    VerificationStatus,
+)
+from localemu.aws.connect import connect_to
+from localemu.constants import INTERNAL_AWS_SECRET_ACCESS_KEY
+from localemu.http import Resource, Response
+from localemu.services.moto import call_moto
+from localemu.services.plugins import ServiceLifecycleHook
+from localemu.services.ses.models import EmailType, SentEmail, SentEmailBody
+from localemu.state import StateVisitor
+from localemu.utils.aws import arns
+from localemu.utils.files import mkdir
+from localemu.utils.strings import long_uid, to_str
+from localemu.utils.time import timestamp, timestamp_millis
+
+if TYPE_CHECKING:
+    from mypy_boto3_sns import SNSClient
+
+LOGGER = logging.getLogger(__name__)
+
+# Keep record of all sent emails
+# These can be retrieved via a service endpoint.
+# A lock guards concurrent mutations/iteration against a common Python dict,
+# which does not guarantee thread-safe iteration under modification (SES-1).
+EMAILS: dict[MessageId, dict[str, Any]] = {}
+EMAILS_LOCK = threading.RLock()
+
+# Endpoint to access all the sent emails
+# (relative to LocalEmu internal HTTP resources base endpoint)
+EMAILS_ENDPOINT = "/_aws/ses"
+
+_EMAILS_ENDPOINT_REGISTERED = False
+
+REGEX_TAG_NAME = r"^[A-Za-z0-9_-]*$"
+REGEX_TAG_VALUE = r"^[A-Za-z0-9_\-.@]*$"
+
+ALLOWED_TAG_LEN = 255
+
+
+def save_for_retrospection(sent_email: SentEmail):
+    """
+    Save a message for retrospection.
+
+    The contents of the email is saved to filesystem. It can also be accessed via a service endpoint.
+    """
+    message_id = sent_email["Id"]
+    ses_dir = os.path.join(config.dirs.data or config.dirs.tmp, "ses")
+    mkdir(ses_dir)
+
+    path = os.path.join(ses_dir, message_id + ".json")
+
+    if not sent_email.get("Timestamp"):
+        sent_email["Timestamp"] = timestamp()
+
+    with EMAILS_LOCK:
+        EMAILS[message_id] = sent_email
+
+    def _serialize(obj):
+        """JSON serializer for timestamps."""
+        if isinstance(obj, (datetime, date, time)):
+            return obj.isoformat()
+        return obj.__dict__
+
+    with open(path, "w") as f:
+        f.write(json.dumps(sent_email, default=_serialize))
+
+    LOGGER.debug("Email saved at: %s", path)
+
+
+def recipients_from_destination(destination: Destination) -> list[str]:
+    """Get list of recipient email addresses from a Destination object."""
+    return (
+        destination.get("ToAddresses", [])
+        + destination.get("CcAddresses", [])
+        + destination.get("BccAddresses", [])
+    )
+
+
+def get_ses_backend(context: RequestContext) -> SESBackend:
+    return ses_backends[context.account_id][context.region]
+
+
+class SesServiceApiResource:
+    """Provides a REST API for retrospective access to emails sent via SES.
+
+    This is registered as a LocalEmu internal HTTP resource.
+
+    This endpoint accepts:
+    - GET param `id`: filter for `id` field in SES message
+    - GET param `email`: filter for `source` field in SES message, when `id` filter is specified then filters on both
+    """
+
+    def on_get(self, request):
+        filter_id = request.args.get("id")
+        filter_source = request.args.get("email")
+        messages = []
+
+        # Snapshot values under the lock to avoid RuntimeError on concurrent mutation.
+        with EMAILS_LOCK:
+            snapshot = list(EMAILS.values())
+
+        for msg in snapshot:
+            if filter_id in (msg.get("Id"), None, ""):
+                if filter_source in (msg.get("Source"), None, ""):
+                    messages.append(msg)
+
+        return {
+            "messages": messages,
+        }
+
+    def on_delete(self, request):
+        filter_id = request.args.get("id")
+        with EMAILS_LOCK:
+            if filter_id is not None:
+                # Use .pop with default to avoid KeyError on unknown ids (SES-2).
+                EMAILS.pop(filter_id, None)
+            else:
+                EMAILS.clear()
+        return Response(status=204)
+
+
+def register_ses_api_resource():
+    """Register the email retrospection endpoint as an internal LocalEmu endpoint."""
+    # Use a global to indicate whether the resource has already been registered
+    # This is cheaper than iterating over the registered routes in the Router object
+    global _EMAILS_ENDPOINT_REGISTERED
+
+    if not _EMAILS_ENDPOINT_REGISTERED:
+        from localemu.services.edge import ROUTER
+
+        ROUTER.add(Resource(EMAILS_ENDPOINT, SesServiceApiResource()))
+        _EMAILS_ENDPOINT_REGISTERED = True
+
+
+class SesProvider(SesApi, ServiceLifecycleHook):
+    def accept_state_visitor(self, visitor: StateVisitor):
+        visitor.visit(ses_backends)
+
+    #
+    # Lifecycle Hooks
+    #
+
+    def on_after_init(self):
+        self._apply_patches()
+
+        # Allow sent emails to be retrieved from the SES emails endpoint
+        register_ses_api_resource()
+
+    #
+    # Helpers
+    #
+
+    def get_source_from_raw(self, raw_data: str) -> str | None:
+        """Given a raw representation of an email, return the source/from field.
+
+        Uses the stdlib `email.parser` so we correctly handle folded headers,
+        RFC 5322 display-name syntax, case-insensitive matching and trailing
+        whitespace — unlike naive `"From:" in line` splitting (SES-4).
+        """
+        try:
+            parsed = EmailParser().parsestr(raw_data, headersonly=True)
+        except Exception:  # pragma: no cover - defensive, parser is extremely lenient
+            return None
+        from_header = parsed.get("From")
+        if not from_header:
+            return None
+        # `getaddresses` extracts the address from "Name <addr@host>" forms.
+        addresses = email.utils.getaddresses([from_header])
+        if addresses:
+            realname, addr = addresses[0]
+            if addr:
+                return addr
+        return from_header.strip() or None
+
+    def _apply_patches(self) -> None:
+        # Suppress Moto's validation of receipt rule actions. These validations use Moto's implementation of S3, Lambda
+        # and SQS, which fail because these services have been internalised in LocalEmu.
+        # Besides, AWS does not run the same validations as evidenced by our AWS-validated tests.
+        SESBackend._validate_receipt_rule_actions = lambda *_: None
+
+        # Ensure the extension attribute we store on SESBackend is always initialised
+        # on every new backend instance, rather than relying on ad-hoc `hasattr` checks
+        # at call sites (SES-3). Chain to the original __init__ to preserve Moto semantics.
+        original_init = SESBackend.__init__
+
+        def _patched_init(backend_self, *args, **kwargs):
+            original_init(backend_self, *args, **kwargs)
+            backend_self.identity_headers_in_notifications_enabled = {}
+
+        # Idempotently install the wrapper: avoid re-wrapping if _apply_patches runs again.
+        if not getattr(SESBackend.__init__, "_localemu_patched", False):
+            _patched_init._localemu_patched = True  # type: ignore[attr-defined]
+            SESBackend.__init__ = _patched_init  # type: ignore[method-assign]
+
+        # Back-fill for any SESBackend instances that may already have been constructed
+        # before this patch ran (e.g. during interpreter startup / test ordering).
+        for account_backends in ses_backends.values():
+            for region_backend in account_backends.values():
+                if not hasattr(region_backend, "identity_headers_in_notifications_enabled"):
+                    region_backend.identity_headers_in_notifications_enabled = {}
+
+    #
+    # Implementations for SES operations
+    #
+
+    @handler("CreateConfigurationSetEventDestination")
+    def create_configuration_set_event_destination(
+        self,
+        context: RequestContext,
+        configuration_set_name: ConfigurationSetName,
+        event_destination: EventDestination,
+        **kwargs,
+    ) -> CreateConfigurationSetEventDestinationResponse:
+        # send SES test event if an SNS topic is attached
+        sns_topic_arn = event_destination.get("SNSDestination", {}).get("TopicARN")
+        if sns_topic_arn is not None:
+            emitter = SNSEmitter(context)
+            emitter.emit_create_configuration_set_event_destination_test_message(sns_topic_arn)
+
+        # FIXME: Moto stores the Event Destinations as a single value when it should be a list
+        #  it only considers the last Event Destination created, when AWS is able to store multiple configurations
+        # only register the event destination if emitting the message worked
+        try:
+            result = call_moto(context)
+        except CommonServiceException as e:
+            if e.code == "ConfigurationSetDoesNotExist":
+                raise ConfigurationSetDoesNotExistException(
+                    f"Configuration set <{configuration_set_name}> does not exist."
+                )
+            else:
+                raise
+
+        return result
+
+    @handler("DeleteConfigurationSet")
+    def delete_configuration_set(
+        self, context: RequestContext, configuration_set_name: ConfigurationSetName, **kwargs
+    ) -> DeleteConfigurationSetResponse:
+        # not implemented in moto
+        # TODO: contribute upstream?
+        backend = get_ses_backend(context)
+        try:
+            backend.config_sets.pop(configuration_set_name)
+        except KeyError:
+            raise ConfigurationSetDoesNotExistException(
+                f"Configuration set <{configuration_set_name}> does not exist."
+            )
+
+        return DeleteConfigurationSetResponse()
+
+    @handler("DeleteConfigurationSetEventDestination")
+    def delete_configuration_set_event_destination(
+        self,
+        context: RequestContext,
+        configuration_set_name: ConfigurationSetName,
+        event_destination_name: EventDestinationName,
+        **kwargs,
+    ) -> DeleteConfigurationSetEventDestinationResponse:
+        # not implemented in moto
+        # TODO: contribute upstream?
+        backend = get_ses_backend(context)
+
+        # the configuration set must exist
+        if configuration_set_name not in backend.config_sets:
+            raise ConfigurationSetDoesNotExistException(
+                f"Configuration set <{configuration_set_name}> does not exist."
+            )
+
+        # the event destination must exist
+        if configuration_set_name not in backend.config_set_event_destination:
+            raise EventDestinationDoesNotExistException(
+                f"No EventDestination found for {configuration_set_name}"
+            )
+
+        if event_destination_name in backend.event_destinations:
+            backend.event_destinations.pop(event_destination_name)
+        else:
+            # FIXME: inconsistent state
+            LOGGER.warning("inconsistent state encountered in ses backend")
+
+        # FIXME: Moto stores the Event Destinations as a single value when it should be a list
+        #  it only considers the last Event Destination created, when AWS is able to store multiple configurations
+        #  don't pop the whole value which should be a list but is currently a dict
+        backend.config_set_event_destination.pop(configuration_set_name)
+
+        return DeleteConfigurationSetEventDestinationResponse()
+
+    @handler("ListTemplates")
+    def list_templates(
+        self,
+        context: RequestContext,
+        next_token: NextToken = None,
+        max_items: MaxItems = None,
+        **kwargs,
+    ) -> ListTemplatesResponse:
+        backend = get_ses_backend(context)
+        for template in backend.list_templates():
+            if isinstance(template["Timestamp"], (date, datetime)):
+                template["Timestamp"] = timestamp_millis(template["Timestamp"])
+        return call_moto(context)
+
+    @handler("DeleteTemplate")
+    def delete_template(
+        self, context: RequestContext, template_name: TemplateName, **kwargs
+    ) -> DeleteTemplateResponse:
+        backend = get_ses_backend(context)
+        if template_name in backend.templates:
+            del backend.templates[template_name]
+        return DeleteTemplateResponse()
+
+    @handler("GetIdentityVerificationAttributes")
+    def get_identity_verification_attributes(
+        self, context: RequestContext, identities: IdentityList, **kwargs
+    ) -> GetIdentityVerificationAttributesResponse:
+        attributes: VerificationAttributes = {}
+
+        for identity in identities:
+            if "@" in identity:
+                attributes[identity] = IdentityVerificationAttributes(
+                    VerificationStatus=VerificationStatus.Success,
+                )
+            else:
+                attributes[identity] = IdentityVerificationAttributes(
+                    VerificationStatus=VerificationStatus.Success,
+                    VerificationToken=long_uid(),
+                )
+
+        return GetIdentityVerificationAttributesResponse(
+            VerificationAttributes=attributes,
+        )
+
+    @handler("SendEmail")
+    def send_email(
+        self,
+        context: RequestContext,
+        source: Address,
+        destination: Destination,
+        message: Message,
+        reply_to_addresses: AddressList = None,
+        return_path: Address = None,
+        source_arn: AmazonResourceName = None,
+        return_path_arn: AmazonResourceName = None,
+        tags: MessageTagList = None,
+        configuration_set_name: ConfigurationSetName = None,
+        **kwargs,
+    ) -> SendEmailResponse:
+        if tags:
+            for tag in tags:
+                tag_name = tag.get("Name", "")
+                tag_value = tag.get("Value", "")
+                if tag_name == "":
+                    raise InvalidParameterValue("The tag name must be specified.")
+                if tag_value == "":
+                    raise InvalidParameterValue("The tag value must be specified.")
+                if len(tag_name) > 255:
+                    raise InvalidParameterValue("Tag name cannot exceed 255 characters.")
+                # The `ses:` prefix is for a special case and disregarded for validation
+                # see https://docs.aws.amazon.com/ses/latest/dg/monitor-using-event-publishing.html#event-publishing-fine-grained-feedback
+                if not re.match(REGEX_TAG_NAME, tag_name.removeprefix("ses:")):
+                    raise InvalidParameterValue(
+                        f"Invalid tag name <{tag_name}>: only alphanumeric ASCII characters, '_',  '-' are allowed.",
+                    )
+                if len(tag_value) > 255:
+                    raise InvalidParameterValue("Tag value cannot exceed 255 characters.")
+                if not re.match(REGEX_TAG_VALUE, tag_value):
+                    raise InvalidParameterValue(
+                        f"Invalid tag value <{tag_value}>: only alphanumeric ASCII characters, '_',  '-' , '.', '@' are allowed.",
+                    )
+
+        response = call_moto(context)
+
+        backend = get_ses_backend(context)
+
+        if event_destinations := backend.config_set_event_destination.get(configuration_set_name):
+            recipients = recipients_from_destination(destination)
+            payload = EventDestinationPayload(
+                message_id=response["MessageId"],
+                sender_email=source,
+                destination_addresses=recipients,
+                tags=tags,
+            )
+            notify_event_destinations(
+                context=context,
+                event_destinations=event_destinations,
+                payload=payload,
+                email_type=EmailType.EMAIL,
+            )
+
+        text_part = message["Body"].get("Text", {}).get("Data")
+        html_part = message["Body"].get("Html", {}).get("Data")
+
+        save_for_retrospection(
+            SentEmail(
+                Id=response["MessageId"],
+                Region=context.region,
+                Destination=destination,
+                Source=source,
+                Subject=message["Subject"].get("Data"),
+                Body=SentEmailBody(text_part=text_part, html_part=html_part),
+            )
+        )
+
+        return response
+
+    @handler("SendTemplatedEmail")
+    def send_templated_email(
+        self,
+        context: RequestContext,
+        source: Address,
+        destination: Destination,
+        template: TemplateName,
+        template_data: TemplateData,
+        reply_to_addresses: AddressList = None,
+        return_path: Address = None,
+        source_arn: AmazonResourceName = None,
+        return_path_arn: AmazonResourceName = None,
+        tags: MessageTagList = None,
+        configuration_set_name: ConfigurationSetName = None,
+        template_arn: AmazonResourceName = None,
+        **kwargs,
+    ) -> SendTemplatedEmailResponse:
+        response = call_moto(context)
+
+        backend = get_ses_backend(context)
+
+        if event_destinations := backend.config_set_event_destination.get(configuration_set_name):
+            recipients = recipients_from_destination(destination)
+            payload = EventDestinationPayload(
+                message_id=response["MessageId"],
+                sender_email=source,
+                destination_addresses=recipients,
+                tags=tags,
+            )
+            notify_event_destinations(
+                context=context,
+                event_destinations=event_destinations,
+                payload=payload,
+                email_type=EmailType.TEMPLATED,
+            )
+
+        save_for_retrospection(
+            SentEmail(
+                Id=response["MessageId"],
+                Region=context.region,
+                Source=source,
+                Template=template,
+                TemplateData=template_data,
+                Destination=destination,
+            )
+        )
+
+        return response
+
+    @handler("SendRawEmail")
+    def send_raw_email(
+        self,
+        context: RequestContext,
+        raw_message: RawMessage,
+        source: Address = None,
+        destinations: AddressList = None,
+        from_arn: AmazonResourceName = None,
+        source_arn: AmazonResourceName = None,
+        return_path_arn: AmazonResourceName = None,
+        tags: MessageTagList = None,
+        configuration_set_name: ConfigurationSetName = None,
+        **kwargs,
+    ) -> SendRawEmailResponse:
+        raw_data = to_str(raw_message["Data"])
+
+        if source is None or not source.strip():
+            LOGGER.debug("Raw email:\n%s\nEOT", raw_data)
+
+            source = self.get_source_from_raw(raw_data)
+            if not source:
+                LOGGER.warning("Source not specified. Rejecting message.")
+                raise MessageRejected()
+
+        # TODO: On AWS, `destinations` is ignored if the `To` field is set in the raw email.
+        destinations = destinations or []
+
+        backend = get_ses_backend(context)
+        message = backend.send_raw_email(source, destinations, raw_data)
+
+        if event_destinations := backend.config_set_event_destination.get(configuration_set_name):
+            payload = EventDestinationPayload(
+                message_id=message.id,
+                sender_email=source,
+                destination_addresses=destinations,
+                tags=tags,
+            )
+            notify_event_destinations(
+                context=context,
+                event_destinations=event_destinations,
+                payload=payload,
+                email_type=EmailType.RAW,
+            )
+
+        save_for_retrospection(
+            SentEmail(
+                Id=message.id,
+                Region=context.region,
+                Source=source or message.source,
+                RawData=raw_data,
+            )
+        )
+
+        return SendRawEmailResponse(MessageId=message.id)
+
+    @handler("CloneReceiptRuleSet")
+    def clone_receipt_rule_set(
+        self,
+        context: RequestContext,
+        rule_set_name: ReceiptRuleSetName,
+        original_rule_set_name: ReceiptRuleSetName,
+        **kwargs,
+    ) -> CloneReceiptRuleSetResponse:
+        backend = get_ses_backend(context)
+
+        backend.create_receipt_rule_set(rule_set_name)
+        original_rule_set = backend.describe_receipt_rule_set(original_rule_set_name)
+
+        after = None
+        for rule in original_rule_set.rules:
+            backend.create_receipt_rule(rule_set_name, rule, after)
+            after = rule["Name"]
+
+        return CloneReceiptRuleSetResponse()
+
+    @handler("SetIdentityHeadersInNotificationsEnabled")
+    def set_identity_headers_in_notifications_enabled(
+        self,
+        context: RequestContext,
+        identity: Identity,
+        notification_type: NotificationType,
+        enabled: Enabled,
+        **kwargs,
+    ) -> SetIdentityHeadersInNotificationsEnabledResponse:
+        """
+        Sets whether Amazon SES includes the original email headers in the Amazon SNS notifications
+        for a specified identity and notification type.
+        """
+        # Validate notification_type
+        if notification_type not in (
+            NotificationType.Bounce,
+            NotificationType.Complaint,
+            NotificationType.Delivery,
+        ):
+            raise InvalidParameterValue(
+                f"Invalid notification type: {notification_type}. "
+                "Valid values are: Bounce, Complaint, Delivery."
+            )
+
+        backend = get_ses_backend(context)
+        if identity not in backend.email_identities:
+            raise MessageRejected(f"Identity {identity} is not verified or does not exist.")
+
+        # The attribute is always initialised by our patched SESBackend.__init__ (SES-3),
+        # so we can store the setting directly without the historical hasattr guard.
+        backend.identity_headers_in_notifications_enabled.setdefault(identity, {})[
+            notification_type
+        ] = enabled
+        return SetIdentityHeadersInNotificationsEnabledResponse()
+
+
+@dataclasses.dataclass(frozen=True)
+class EventDestinationPayload:
+    message_id: str
+    sender_email: Address
+    destination_addresses: AddressList
+    tags: MessageTagList | None
+
+
+class SNSEmitter:
+    def __init__(
+        self,
+        context: RequestContext,
+    ):
+        self.context = context
+
+    def emit_create_configuration_set_event_destination_test_message(
+        self, sns_topic_arn: str
+    ) -> None:
+        client = self._client_for_topic(sns_topic_arn)
+        # topic must exist
+        try:
+            client.get_topic_attributes(TopicArn=sns_topic_arn)
+        except ClientError as exc:
+            if "NotFound" in exc.response["Error"]["Code"]:
+                raise InvalidSNSDestinationException(f"SNS topic <{sns_topic_arn}> not found.")
+            raise
+
+        client.publish(
+            TopicArn=sns_topic_arn,
+            Message="Successfully validated SNS topic for Amazon SES event publishing.",
+        )
+
+    def emit_send_event(
+        self, payload: EventDestinationPayload, sns_topic_arn: str, emit_source_arn: bool = True
+    ):
+        now = datetime.now(tz=UTC)
+
+        tags = defaultdict(list)
+        for every in payload.tags or []:
+            tags[every["Name"]].append(every["Value"])
+
+        event_payload = {
+            "eventType": "Send",
+            "mail": {
+                "timestamp": now.isoformat(),
+                "source": payload.sender_email,
+                "sendingAccountId": self.context.account_id,
+                "destination": payload.destination_addresses,
+                "messageId": payload.message_id,
+                "tags": tags,
+            },
+            "send": {},
+        }
+
+        if emit_source_arn:
+            event_payload["mail"]["sourceArn"] = (
+                f"arn:{self.context.partition}:ses:{self.context.region}:{self.context.account_id}:identity/{payload.sender_email}"
+            )
+
+        client = self._client_for_topic(sns_topic_arn)
+        try:
+            client.publish(
+                TopicArn=sns_topic_arn,
+                Message=json.dumps(event_payload),
+                Subject="Amazon SES Email Event Notification",
+            )
+        except ClientError:
+            LOGGER.error("sending SNS message", exc_info=LOGGER.isEnabledFor(logging.DEBUG))
+
+    def emit_delivery_event(self, payload: EventDestinationPayload, sns_topic_arn: str):
+        now = datetime.now(tz=UTC)
+
+        tags = defaultdict(list)
+        for every in payload.tags or []:
+            tags[every["Name"]].append(every["Value"])
+
+        event_payload = {
+            "eventType": "Delivery",
+            "mail": {
+                "timestamp": now.isoformat(),
+                "source": payload.sender_email,
+                "sourceArn": f"arn:{self.context.partition}:ses:{self.context.region}:{self.context.account_id}:identity/{payload.sender_email}",
+                "sendingAccountId": self.context.account_id,
+                "destination": payload.destination_addresses,
+                "messageId": payload.message_id,
+                "tags": tags,
+            },
+            "delivery": {
+                "recipients": payload.destination_addresses,
+                "timestamp": now.isoformat(),
+            },
+        }
+        client = self._client_for_topic(sns_topic_arn)
+        try:
+            client.publish(
+                TopicArn=sns_topic_arn,
+                Message=json.dumps(event_payload),
+                Subject="Amazon SES Email Event Notification",
+            )
+        except ClientError:
+            LOGGER.error("sending SNS message", exc_info=LOGGER.isEnabledFor(logging.DEBUG))
+
+    @staticmethod
+    def _client_for_topic(topic_arn: str) -> "SNSClient":
+        arn_parameters = arns.parse_arn(topic_arn)
+        region = arn_parameters["region"]
+        access_key_id = arn_parameters["account"]
+
+        return connect_to(
+            region_name=region,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=INTERNAL_AWS_SECRET_ACCESS_KEY,
+        ).sns
+
+
+def notify_event_destinations(
+    context: RequestContext,
+    # FIXME: Moto stores the Event Destinations as a single value when it should be a list
+    event_destinations: EventDestination | list[EventDestination],
+    payload: EventDestinationPayload,
+    email_type: EmailType,
+):
+    emitter = SNSEmitter(context)
+
+    if not isinstance(event_destinations, list):
+        event_destinations = [event_destinations]
+
+    for event_destination in event_destinations:
+        if not event_destination["Enabled"]:
+            continue
+
+        sns_destination_arn = event_destination.get("SNSDestination", {}).get("TopicARN")
+        if not sns_destination_arn:
+            continue
+
+        matching_event_types = event_destination.get("MatchingEventTypes") or []
+        if EventType.send in matching_event_types:
+            emitter.emit_send_event(
+                payload, sns_destination_arn, emit_source_arn=email_type != EmailType.TEMPLATED
+            )
+        if EventType.delivery in matching_event_types:
+            emitter.emit_delivery_event(payload, sns_destination_arn)
+
+
+class InvalidParameterValue(CommonServiceException):
+    def __init__(self, message=None):
+        super().__init__(
+            "InvalidParameterValue", status_code=400, message=message, sender_fault=True
+        )

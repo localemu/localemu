@@ -1,0 +1,105 @@
+"""Pytest plugin that spins up a single localemu instance in the current interpreter that is shared
+across the current test session.
+
+Use in your module as follows::
+
+    pytest_plugins = "localemu.testing.pytest.in_memory_localemu"
+
+    @pytest.hookimpl()
+    def pytest_configure(config):
+        config.option.start_localemu = True
+
+You can explicitly disable starting localemu by setting ``TEST_SKIP_LOCALEMU_START=1`` or
+``TEST_TARGET=AWS_CLOUD``."""
+
+import logging
+import os
+import threading
+
+import pytest
+from _pytest.config import PytestPluginManager
+from _pytest.config.argparsing import Parser
+from _pytest.main import Session
+
+import localemu.testing.config as test_config
+from localemu import config as localemu_config
+from localemu.constants import ENV_INTERNAL_TEST_RUN
+
+LOG = logging.getLogger(__name__)
+LOG.info("Pytest plugin for in-memory-localemu session loaded.")
+
+if localemu_config.is_collect_metrics_mode():
+    pytest_plugins = "localemu.testing.pytest.metric_collection"
+
+_started = threading.Event()
+
+
+def pytest_addoption(parser: Parser, pluginmanager: PytestPluginManager):
+    parser.addoption(
+        "--start-localemu",
+        action="store_true",
+        default=False,
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtestloop(session: Session):
+    # avoid starting up localemu if we only collect the tests (-co / --collect-only)
+    if session.config.option.collectonly:
+        return
+
+    if not session.config.option.start_localemu:
+        return
+
+    from localemu.testing.aws.util import is_aws_cloud
+
+    if test_config.TEST_SKIP_LOCALEMU_START:
+        LOG.info("TEST_SKIP_LOCALEMU_START is set, not starting localemu")
+        return
+
+    if is_aws_cloud():
+        if not test_config.TEST_FORCE_LOCALEMU_START:
+            LOG.info("Test running against aws, not starting localemu")
+            return
+        LOG.info("TEST_FORCE_LOCALEMU_START is set, a Localemu instance will be created.")
+
+    if is_aws_cloud():
+        localemu_config.DEFAULT_DELAY = 5
+        localemu_config.DEFAULT_MAX_ATTEMPTS = 60
+
+    # configure
+    os.environ[ENV_INTERNAL_TEST_RUN] = "1"
+    localemu_config.INCLUDE_STACK_TRACES_IN_HTTP_RESPONSE = True
+
+    from localemu.runtime import current
+
+    _started.set()
+    runtime = current.initialize_runtime()
+    # start runtime asynchronously
+    threading.Thread(target=runtime.run).start()
+
+    # wait for runtime to be ready
+    if not runtime.ready.wait(timeout=120):
+        raise TimeoutError("gave up waiting for runtime to be ready")
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session: Session):
+    # last pytest lifecycle hook (before pytest exits)
+    if not _started.is_set():
+        return
+
+    from localemu.runtime import get_current_runtime
+
+    try:
+        get_current_runtime()
+    except ValueError:
+        LOG.warning("Could not access the current runtime in a pytest sessionfinish hook.")
+        return
+
+    get_current_runtime().shutdown()
+    LOG.info("waiting for runtime to stop")
+
+    # wait for runtime to shut down
+    if not get_current_runtime().stopped.wait(timeout=20):
+        LOG.warning("gave up waiting for runtime to stop, returning anyway")

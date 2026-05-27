@@ -1,0 +1,32 @@
+from localemu.aws.api.lambda_ import EventSourceMappingConfiguration
+from localemu.services.lambda_.invocation.lambda_models import (
+    CapacityProvider,
+    CodeSigningConfig,
+    Function,
+    Layer,
+)
+from localemu.services.stores import AccountRegionBundle, BaseStore, LocalAttribute
+from localemu.utils.tagging import Tags
+
+
+class LambdaStore(BaseStore):
+    # maps function names to the respective Function
+    functions: dict[str, Function] = LocalAttribute(default=dict)
+
+    # maps EventSourceMapping UUIDs to the respective EventSourceMapping
+    event_source_mappings: dict[str, EventSourceMappingConfiguration] = LocalAttribute(default=dict)
+
+    # maps CodeSigningConfig ARNs to the respective CodeSigningConfig
+    code_signing_configs: dict[str, CodeSigningConfig] = LocalAttribute(default=dict)
+
+    # maps layer names to Layers
+    layers: dict[str, Layer] = LocalAttribute(default=dict)
+
+    # maps capacity provider names to respective CapacityProvider
+    capacity_providers: dict[str, CapacityProvider] = LocalAttribute(default=dict)
+
+    # maps resource ARNs for EventSourceMappings and CodeSigningConfiguration to tags
+    tags: Tags = LocalAttribute(default=Tags)
+
+
+lambda_stores = AccountRegionBundle("lambda", LambdaStore)

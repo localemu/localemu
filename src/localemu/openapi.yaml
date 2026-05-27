@@ -1,0 +1,1439 @@
+openapi: 3.1.0
+info:
+  contact:
+    email: info@localemu.cloud
+    name: LocalEmu Support
+    url: https://localemu.cloud/contact
+  summary: The LocalEmu REST API exposes functionality related to diagnostics, health
+    checks, plugins, initialisation hooks, service introspection, and more.
+  termsOfService: https://localemu.cloud/legal/tos
+  title: LocalEmu REST API
+  version: latest
+externalDocs:
+  description: LocalEmu Documentation
+  url: https://localemu.cloud/docs
+servers:
+  - url: http://{host}:{port}
+    variables:
+      port:
+        default: '4566'
+      host:
+        default: 'localhost'
+components:
+  parameters:
+    SesIdFilter:
+      description: Filter for the `id` field in SES message
+      in: query
+      name: id
+      required: false
+      schema:
+        type: string
+    SesEmailFilter:
+      description: Filter for the `source` field in SES message
+      in: query
+      name: email
+      required: false
+      schema:
+        type: string
+    SnsAccountId:
+      description: '`accountId` field of the resource'
+      in: query
+      name: accountId
+      required: false
+      schema:
+        default: '000000000000'
+        type: string
+    SnsEndpointArn:
+      description: '`endpointArn` field of the resource'
+      in: query
+      name: endpointArn
+      required: false
+      schema:
+        type: string
+    SnsPhoneNumber:
+      description: '`phoneNumber` field of the resource'
+      in: query
+      name: phoneNumber
+      required: false
+      schema:
+        type: string
+    SnsRegion:
+      description: '`region` field of the resource'
+      in: query
+      name: region
+      required: false
+      schema:
+        default: us-east-1
+        type: string
+  schemas:
+    InitScripts:
+      additionalProperties: false
+      properties:
+        completed:
+          additionalProperties: false
+          properties:
+            BOOT:
+              type: boolean
+            READY:
+              type: boolean
+            SHUTDOWN:
+              type: boolean
+            START:
+              type: boolean
+          required:
+            - BOOT
+            - START
+            - READY
+            - SHUTDOWN
+          type: object
+        scripts:
+          items:
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              stage:
+                type: string
+              state:
+                type: string
+            required:
+              - stage
+              - name
+              - state
+            type: object
+          type: array
+      required:
+        - completed
+        - scripts
+      type: object
+    InitScriptsStage:
+      additionalProperties: false
+      properties:
+        completed:
+          type: boolean
+        scripts:
+          items:
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              stage:
+                type: string
+              state:
+                type: string
+            required:
+              - stage
+              - name
+              - state
+            type: object
+          type: array
+      required:
+        - completed
+        - scripts
+      type: object
+    SESDestination:
+      type: object
+      description: Possible destination of a SES message
+      properties:
+        ToAddresses:
+          type: array
+          items:
+            type: string
+            format: email
+        CcAddresses:
+          type: array
+          items:
+            type: string
+            format: email
+        BccAddresses:
+          type: array
+          items:
+            type: string
+            format: email
+      additionalProperties: false
+    SesSentEmail:
+      additionalProperties: false
+      properties:
+        Body:
+          additionalProperties: false
+          properties:
+            html_part:
+              type: string
+            text_part:
+              type: string
+          required:
+            - text_part
+          type: object
+        Destination:
+          $ref: '#/components/schemas/SESDestination'
+        Id:
+          type: string
+        RawData:
+          type: string
+        Region:
+          type: string
+        Source:
+          type: string
+        Subject:
+          type: string
+        Template:
+          type: string
+        TemplateData:
+          type: string
+        Timestamp:
+          type: string
+      required:
+        - Id
+        - Region
+        - Timestamp
+        - Source
+      type: object
+    SessionInfo:
+      additionalProperties: false
+      properties:
+        edition:
+          type: string
+          enum:
+            - community
+          description: LocalEmu edition (always "community")
+        server_time_utc:
+          type: string
+        uptime:
+          type: integer
+          description: Seconds since LocalEmu started
+        version:
+          type: string
+      required:
+        - version
+        - edition
+        - server_time_utc
+        - uptime
+      type: object
+    SnsSubscriptionTokenError:
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+        subscription_arn:
+          type: string
+      required:
+        - error
+        - subscription_arn
+      type: object
+    SNSPlatformEndpointMessage:
+      type: object
+      description: Message sent to a platform endpoint via SNS
+      additionalProperties: false
+      properties:
+        TargetArn:
+          type: string
+        TopicArn:
+          type: string
+        Message:
+          type: string
+        MessageAttributes:
+          type: object
+        MessageStructure:
+          type: string
+        Subject:
+          type: [string, 'null']
+        MessageId:
+          type: string
+    SNSMessage:
+      type: object
+      description: Message sent via SNS
+      properties:
+        PhoneNumber:
+          type: string
+        TopicArn:
+          type: [string, 'null']
+        SubscriptionArn:
+          type: [string, 'null']
+        MessageId:
+          type: string
+        Message:
+          type: string
+        MessageAttributes:
+          type: object
+        MessageStructure:
+          type: [string, 'null']
+        Subject:
+          type: [string, 'null']
+    SNSPlatformEndpointMessages:
+      type: object
+      description: |
+        Messages sent to the platform endpoint retrieved via the retrospective endpoint.
+        The endpoint ARN is the key with a list of messages as value.
+      additionalProperties:
+        type: array
+        items:
+          $ref: '#/components/schemas/SNSPlatformEndpointMessage'
+    SMSMessages:
+      type: object
+      description: |
+        SMS messages retrieved via the retrospective endpoint.
+        The phone number is the key with a list of messages as value.
+      additionalProperties:
+        type: array
+        items:
+          $ref: '#/components/schemas/SNSMessage'
+    SNSPlatformEndpointResponse:
+      type: object
+      additionalProperties: false
+      description: Response payload for the /_aws/sns/platform-endpoint-messages endpoint
+      properties:
+        region:
+          type: string
+          description: "The AWS region, e.g., us-east-1"
+        platform_endpoint_messages:
+          $ref: '#/components/schemas/SNSPlatformEndpointMessages'
+      required:
+        - region
+        - platform_endpoint_messages
+    SNSSMSMessagesResponse:
+      type: object
+      additionalProperties: false
+      description: Response payload for the /_aws/sns/sms-messages endpoint
+      properties:
+        region:
+          type: string
+          description: "The AWS region, e.g., us-east-1"
+        sms_messages:
+          $ref: '#/components/schemas/SMSMessages'
+      required:
+        - region
+        - sms_messages
+    ReceiveMessageRequest:
+      type: object
+      description: https://github.com/boto/botocore/blob/develop/botocore/data/sqs/2012-11-05/service-2.json
+      required:
+        - QueueUrl
+      properties:
+        QueueUrl:
+          type: string
+          format: uri
+        AttributeNames:
+          type: array
+          items:
+            type: string
+        MessageSystemAttributeNames:
+          type: array
+          items:
+            type: string
+        MessageAttributeNames:
+          type: array
+          items:
+            type: string
+        MaxNumberOfMessages:
+          type: integer
+        VisibilityTimeout:
+          type: integer
+        WaitTimeSeconds:
+          type: integer
+        ReceiveRequestAttemptId:
+          type: string
+    ReceiveMessageResult:
+      type: object
+      description: https://github.com/boto/botocore/blob/develop/botocore/data/sqs/2012-11-05/service-2.json
+      properties:
+        Messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+    Message:
+      type: object
+      properties:
+        MessageId:
+          type: [string, 'null']
+        ReceiptHandle:
+          type: [string, 'null']
+        MD5OfBody:
+          type: [string, 'null']
+        Body:
+          type: [string, 'null']
+        Attributes:
+          type: object
+        MessageAttributes:
+          type: object
+    CloudWatchMetrics:
+      additionalProperties: false
+      properties:
+        metrics:
+          items:
+            additionalProperties: false
+            properties:
+              account:
+                description: Account ID
+                type: string
+              d:
+                description: Dimensions
+                items:
+                  additionalProperties: false
+                  properties:
+                    n:
+                      description: Dimension name
+                      type: string
+                    v:
+                      description: Dimension value
+                      oneOf:
+                        - type: string
+                        - type: integer
+                  required:
+                    - n
+                    - v
+                  type: object
+                type: array
+              n:
+                description: Metric name
+                type: string
+              ns:
+                description: Namespace
+                type: string
+              region:
+                description: Region name
+                type: string
+              t:
+                description: Timestamp
+                oneOf:
+                  - type: string
+                    format: date-time
+                  - type: number
+              v:
+                description: Metric value
+                oneOf:
+                  - type: string
+                  - type: integer
+            required:
+              - ns
+              - n
+              - v
+              - t
+              - d
+              - account
+              - region
+            type: object
+          type: array
+      required:
+        - metrics
+      type: object
+    ErrorResponse:
+      type: object
+      description: Standard error response returned by dashboard API endpoints
+      properties:
+        error:
+          type: [string, 'null']
+          description: Error message, or null if no error
+      required:
+        - error
+    DashboardOverview:
+      type: object
+      description: System overview returned by the dashboard API
+      properties:
+        version:
+          type: string
+        uptime_seconds:
+          type: integer
+        port:
+          type: integer
+        features:
+          type: object
+          properties:
+            persistence:
+              type: boolean
+            lambda_docker:
+              type: boolean
+            debug:
+              type: boolean
+        services:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              resources:
+                type: integer
+      required:
+        - version
+        - uptime_seconds
+        - services
+    DashboardResourceList:
+      type: object
+      description: Paginated resource list for a specific AWS service
+      properties:
+        service:
+          type: string
+        resources:
+          type: [array, 'null']
+          items:
+            type: object
+        error:
+          type: [string, 'null']
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - service
+        - resources
+        - error
+    DashboardCloudTrailEvents:
+      type: object
+      description: CloudTrail-formatted event history
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              eventTime:
+                type: string
+              eventSource:
+                type: string
+              eventName:
+                type: string
+              sourceIPAddress:
+                type: string
+              userAgent:
+                type: string
+              requestId:
+                type: string
+              awsRegion:
+                type: string
+              responseCode:
+                type: integer
+              accountId:
+                type: string
+              readOnly:
+                type: boolean
+              errorCode:
+                type: [string, 'null']
+        error:
+          type: [string, 'null']
+        total:
+          type: integer
+      required:
+        - events
+    DashboardActivityFeed:
+      type: object
+      description: Recent API activity feed
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+        error:
+          type: [string, 'null']
+        total:
+          type: integer
+      required:
+        - events
+paths:
+  /_aws/cloudwatch/metrics/raw:
+    get:
+      description: Retrieve CloudWatch metrics
+      operationId: get_cloudwatch_metrics
+      tags: [aws]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudWatchMetrics'
+          description: CloudWatch metrics
+  /_aws/dynamodb/expired:
+    delete:
+      description: Delete expired items from TTL-enabled DynamoDB tables
+      operationId: delete_ddb_expired_items
+      tags: [aws]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  ExpiredItems:
+                    description: Number of expired items that were deleted
+                    type: integer
+                required:
+                  - ExpiredItems
+                type: object
+          description: Operation was successful
+  /_aws/events/rules/{rule_arn}/trigger:
+    get:
+      description: Trigger a scheduled EventBridge rule
+      operationId: trigger_event_bridge_rule
+      tags: [aws]
+      parameters:
+        - description: EventBridge rule ARN
+          in: path
+          name: rule_arn
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: EventBridge rule was triggered
+        '404':
+          description: Not found
+  /_aws/lambda/init:
+    get:
+      description: Retrieve Lambda runtime init binary
+      operationId: get_lambda_init
+      tags: [aws]
+      responses:
+        '200':
+          content:
+            application/octet-stream: {}
+          description: Lambda runtime init binary
+  /_aws/lambda/runtimes:
+    get:
+      description: List available Lambda runtimes
+      operationId: get_lambda_runtimes
+      tags: [aws]
+      parameters:
+        - in: query
+          name: filter
+          required: false
+          schema:
+            default: supported
+            enum:
+              - all
+              - deprecated
+              - supported
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  Runtimes:
+                    items:
+                      type: string
+                    type: array
+                required:
+                  - Runtimes
+                type: object
+          description: Available Lambda runtimes
+  /_aws/ses:
+    delete:
+      description: Discard sent SES messages
+      operationId: discard_ses_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SesIdFilter'
+      responses:
+        '204':
+          description: Message was successfully discarded
+    get:
+      description: Retrieve sent SES messages
+      operationId: get_ses_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SesIdFilter'
+        - $ref: '#/components/parameters/SesEmailFilter'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  messages:
+                    items:
+                      $ref: '#/components/schemas/SesSentEmail'
+                    type: array
+                required:
+                  - messages
+                type: object
+          description: List of sent messages
+  /_aws/sns/platform-endpoint-messages:
+    delete:
+      description: Discard the messages published to a platform endpoint via SNS
+      operationId: discard_sns_endpoint_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SnsAccountId'
+        - $ref: '#/components/parameters/SnsRegion'
+        - $ref: '#/components/parameters/SnsEndpointArn'
+      responses:
+        '204':
+          description: Platform endpoint message was discarded
+    get:
+      description: Retrieve the messages sent to a platform endpoint via SNS
+      operationId: get_sns_endpoint_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SnsAccountId'
+        - $ref: '#/components/parameters/SnsRegion'
+        - $ref: '#/components/parameters/SnsEndpointArn'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SNSPlatformEndpointResponse"
+          description: SNS messages via retrospective access
+  /_aws/sns/sms-messages:
+    delete:
+      description: Discard SNS SMS messages
+      operationId: discard_sns_sms_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SnsAccountId'
+        - $ref: '#/components/parameters/SnsRegion'
+        - $ref: '#/components/parameters/SnsPhoneNumber'
+      responses:
+        '204':
+          description: SMS message was discarded
+    get:
+      description: Retrieve SNS SMS messages
+      operationId: get_sns_sms_messages
+      tags: [aws]
+      parameters:
+        - $ref: '#/components/parameters/SnsAccountId'
+        - $ref: '#/components/parameters/SnsRegion'
+        - $ref: '#/components/parameters/SnsPhoneNumber'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SNSSMSMessagesResponse"
+          description: SNS messages via retrospective access
+  /_aws/sns/subscription-tokens/{subscription_arn}:
+    get:
+      description: Retrieve SNS subscription token for confirmation
+      operationId: get_sns_subscription_token
+      tags: [aws]
+      parameters:
+        - description: '`subscriptionArn` resource of subscription token'
+          in: path
+          name: subscription_arn
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  subscription_arn:
+                    type: string
+                  subscription_token:
+                    type: string
+                required:
+                  - subscription_token
+                  - subscription_arn
+                type: object
+          description: Subscription token
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnsSubscriptionTokenError'
+          description: Bad request
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnsSubscriptionTokenError'
+          description: Not found
+  /_aws/sqs/messages:
+    get:
+      description: List SQS queue messages without side effects
+      operationId: list_all_sqs_messages
+      tags: [aws]
+      parameters:
+        - description: SQS queue URL
+          in: query
+          name: QueueUrl
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            text/xml:
+              schema:
+                $ref: '#/components/schemas/ReceiveMessageResult'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiveMessageResult'
+          description: SQS queue messages
+        '400':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Bad request
+        '404':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Not found
+    post:
+      summary: Retrieves one or more messages from the specified queue.
+      description: |
+        This API receives messages from an SQS queue.
+        https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html#API_ReceiveMessage_ResponseSyntax
+      operationId: receive_message
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReceiveMessageRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiveMessageRequest'
+      responses:
+        '200':
+          content:
+            text/xml: {}
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiveMessageResult'
+          description: SQS queue messages
+        '400':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Bad request
+        '404':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Not found
+  /_aws/sqs/messages/{region}/{account_id}/{queue_name}:
+    get:
+      description: List SQS messages without side effects
+      operationId: list_sqs_messages
+      tags: [aws]
+      parameters:
+        - description: SQS queue region
+          in: path
+          name: region
+          required: true
+          schema:
+            type: string
+        - description: SQS queue account ID
+          in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+        - description: SQS queue name
+          in: path
+          name: queue_name
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            text/xml: {}
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiveMessageResult'
+          description: SQS queue messages
+        '400':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Bad request
+        '404':
+          content:
+            text/xml: {}
+            application/json: {}
+          description: Not found
+  /_localemu/config:
+    get:
+      description: Get current LocalEmu configuration
+      operationId: get_config
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Current LocalEmu configuration
+        '404':
+          description: Not found
+    post:
+      description: Configuration option to update with new value
+      operationId: update_config_option
+      tags: [localemu]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                value:
+                  type:
+                    - number
+                    - string
+                variable:
+                  pattern: ^[_a-zA-Z0-9]+$
+                  type: string
+              required:
+                - variable
+                - value
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  value:
+                    type:
+                      - number
+                      - string
+                  variable:
+                    type: string
+                required:
+                  - variable
+                  - value
+                type: object
+          description: Configuration option is updated
+        '400':
+          content:
+            application/json: {}
+          description: Bad request
+        '404':
+          description: Not found
+  /_localemu/diagnose:
+    get:
+      description: Get diagnostics report
+      operationId: get_diagnostics
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                  docker-dependent-image-hashes:
+                    type: object
+                  docker-dependent-image-hosts:
+                    type: object
+                  docker-inspect:
+                    type: object
+                  file-tree:
+                    type: object
+                  important-endpoints:
+                    type: object
+                  info:
+                    $ref: '#/components/schemas/SessionInfo'
+                  logs:
+                    additionalProperties: false
+                    properties:
+                      docker:
+                        type: string
+                    required:
+                      - docker
+                    type: object
+                  services:
+                    type: object
+                  usage:
+                    type: object
+                  version:
+                    additionalProperties: false
+                    properties:
+                      host:
+                        additionalProperties: false
+                        properties:
+                          kernel:
+                            type: string
+                        required:
+                          - kernel
+                        type: object
+                      image-version:
+                        additionalProperties: false
+                        properties:
+                          created:
+                            type: string
+                          id:
+                            type: string
+                          sha256:
+                            type: string
+                          tag:
+                            type: string
+                        required:
+                          - id
+                          - sha256
+                          - tag
+                          - created
+                        type: object
+                      localemu-version:
+                        additionalProperties: false
+                        properties:
+                          build-date:
+                            type:
+                              - string
+                              - 'null'
+                          build-git-hash:
+                            type:
+                              - string
+                              - 'null'
+                          build-version:
+                            type:
+                              - string
+                              - 'null'
+                        required:
+                          - build-date
+                          - build-git-hash
+                          - build-version
+                        type: object
+                    required:
+                      - image-version
+                      - localemu-version
+                      - host
+                    type: object
+                required:
+                  - version
+                  - info
+                  - services
+                  - config
+                  - docker-inspect
+                  - docker-dependent-image-hosts
+                  - file-tree
+                  - important-endpoints
+                  - logs
+                  - usage
+                type: object
+          description: Diagnostics report
+  /_localemu/health:
+    get:
+      description: Get available LocalEmu features and AWS services
+      operationId: get_features_and_services
+      tags: [localemu]
+      parameters:
+        - allowEmptyValue: true
+          in: query
+          name: reload
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  edition:
+                    enum:
+                      - community
+                    type: string
+                    description: LocalEmu edition (always "community")
+                  features:
+                    type: object
+                  services:
+                    type: object
+                    description: >
+                      Map of service name to state. Valid states: "available" (loaded, ready),
+                      "running" (actively processing), "starting" (initializing),
+                      "error" (failed to start), "disabled" (not enabled).
+                    additionalProperties:
+                      type: string
+                      enum:
+                        - available
+                        - running
+                        - starting
+                        - error
+                        - disabled
+                  uptime:
+                    type: integer
+                    description: Seconds since LocalEmu started
+                  version:
+                    type: string
+                required:
+                  - edition
+                  - services
+                  - version
+                type: object
+          description: Available LocalEmu features and AWS services
+    head:
+      tags: [localemu]
+      operationId: health
+      responses:
+        '200':
+          content:
+            text/plain: {}
+          description: ''
+    post:
+      description: Restart or terminate LocalEmu session
+      operationId: manage_session
+      tags: [localemu]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                action:
+                  enum:
+                    - restart
+                    - kill
+                  type: string
+              required:
+                - action
+              type: object
+        description: Action to perform
+        required: true
+      responses:
+        '200':
+          content:
+            text/plain: {}
+          description: Action was successful
+        '400':
+          content:
+            text/plain: {}
+          description: Bad request
+    put:
+      description: Store arbitrary data to in-memory state
+      operationId: store_data
+      tags: [localemu]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        description: Data to save
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  status:
+                    type: string
+                required:
+                  - status
+                type: object
+          description: Data was saved
+  /_localemu/info:
+    get:
+      description: Get information about the current LocalEmu session
+      operationId: get_session_info
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInfo'
+          description: Information about the current LocalEmu session
+  /_localemu/init:
+    get:
+      description: Get information about init scripts
+      operationId: get_init_script_info
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitScripts'
+          description: Information about init scripts
+  /_localemu/init/{stage}:
+    get:
+      description: Get information about init scripts in a specific stage
+      operationId: get_init_script_info_stage
+      tags: [localemu]
+      parameters:
+        - in: path
+          name: stage
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitScriptsStage'
+          description: Information about init scripts in a specific stage
+        '404':
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Stage not found
+  /_localemu/plugins:
+    get:
+      description: ''
+      operationId: get_plugins
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json: {}
+          description: ''
+  /_localemu/usage:
+    get:
+      description: ''
+      operationId: get_usage
+      tags: [localemu]
+      responses:
+        '200':
+          content:
+            application/json: {}
+          description: ''
+  /_localemu/dashboard:
+    get:
+      description: Serve the main dashboard HTML page
+      operationId: get_dashboard
+      tags: [dashboard]
+      responses:
+        '200':
+          content:
+            text/html: {}
+          description: Dashboard HTML page
+        '404':
+          content:
+            text/html: {}
+          description: Dashboard not found
+  /_localemu/api/overview:
+    get:
+      description: Get system overview including version, uptime, features, and per-service resource counts
+      operationId: get_dashboard_overview
+      tags: [dashboard]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverview'
+          description: System overview
+  /_localemu/api/resources/{service}:
+    get:
+      description: List resources for a specific AWS service with pagination
+      operationId: list_dashboard_resources
+      tags: [dashboard]
+      parameters:
+        - in: path
+          name: service
+          required: true
+          schema:
+            type: string
+          description: AWS service name (e.g., s3, lambda, dynamodb)
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Number of resources to skip
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 200
+          description: Maximum number of resources to return (1-1000)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResourceList'
+          description: Paginated resource list
+  /_localemu/api/resources/logs/{log_group}:
+    get:
+      description: Get log events for a specific CloudWatch log group
+      operationId: get_dashboard_log_events
+      tags: [dashboard]
+      parameters:
+        - in: path
+          name: log_group
+          required: true
+          schema:
+            type: string
+          description: Log group name (without leading slash)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  log_group:
+                    type: string
+                  events:
+                    type: [array, 'null']
+                    items:
+                      type: object
+                  error:
+                    type: [string, 'null']
+          description: Log events
+  /_localemu/api/resources/s3/{bucket}:
+    get:
+      description: List objects in a specific S3 bucket with pagination
+      operationId: list_dashboard_s3_objects
+      tags: [dashboard]
+      parameters:
+        - in: path
+          name: bucket
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 200
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bucket:
+                    type: string
+                  objects:
+                    type: [array, 'null']
+                    items:
+                      type: object
+                  error:
+                    type: [string, 'null']
+                  total:
+                    type: integer
+          description: S3 objects
+  /_localemu/api/resources/dynamodb/{table}:
+    get:
+      description: List items in a DynamoDB table
+      operationId: list_dashboard_dynamodb_items
+      tags: [dashboard]
+      parameters:
+        - in: path
+          name: table
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of items to return (1-1000)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  table:
+                    type: string
+                  items:
+                    type: [array, 'null']
+                  error:
+                    type: [string, 'null']
+                  total:
+                    type: integer
+          description: DynamoDB items
+  /_localemu/api/cloudtrail:
+    get:
+      description: Get CloudTrail-formatted event history with pagination and service filtering
+      operationId: get_dashboard_cloudtrail
+      tags: [dashboard]
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of events to return
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: service
+          required: false
+          schema:
+            type: string
+          description: Filter events by service name
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardCloudTrailEvents'
+          description: CloudTrail events
+  /_localemu/api/cloudtrail/{request_id}:
+    get:
+      description: Get full detail for a single CloudTrail event by request ID
+      operationId: get_dashboard_cloudtrail_detail
+      tags: [dashboard]
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+          description: CloudTrail event detail
+        '404':
+          content:
+            application/json: {}
+          description: Event not found
+  /_localemu/api/activity:
+    get:
+      description: Get recent API activity feed with pagination
+      operationId: get_dashboard_activity
+      tags: [dashboard]
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardActivityFeed'
+          description: Activity feed

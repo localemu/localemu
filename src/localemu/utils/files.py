@@ -1,0 +1,376 @@
+import configparser
+import logging
+import os
+import shutil
+import stat
+import tempfile
+from pathlib import Path
+from typing import Any, AnyStr, Literal, overload
+
+LOG = logging.getLogger(__name__)
+TMP_FILES: list[str] = []
+
+
+@overload
+def parse_config_file(file_or_str: str, single_section: Literal[True]) -> dict[str, str]: ...
+
+
+@overload
+def parse_config_file(
+    file_or_str: str, single_section: Literal[False]
+) -> dict[str, dict[str, str]]: ...
+
+
+def parse_config_file(
+    file_or_str: str, single_section: bool = True
+) -> dict[str, str] | dict[str, dict[str, str]]:
+    """Parse the given properties config file/string and return a dict of section->key->value.
+    If the config contains a single section, and 'single_section' is True, returns"""
+
+    config = configparser.RawConfigParser()
+
+    if os.path.exists(file_or_str):
+        file_or_str = load_file(file_or_str)  # type: ignore[assignment]
+
+    try:
+        config.read_string(file_or_str)
+    except configparser.MissingSectionHeaderError:
+        file_or_str = f"[default]\n{file_or_str}"
+        config.read_string(file_or_str)
+
+    sections = list(config.sections())
+
+    result = {sec: dict(config.items(sec)) for sec in sections}
+    if len(sections) == 1 and single_section:
+        return result[sections[0]]
+
+    return result
+
+
+def get_user_cache_dir() -> Path:
+    """
+    Returns the path of the user's cache dir (e.g., ~/.cache on Linux, or ~/Library/Caches on Mac).
+
+    :return: a Path pointing to the platform-specific cache dir of the user
+    """
+    from localemu.utils.platform import is_linux, is_mac_os, is_windows
+
+    if is_windows():
+        return Path(os.path.expandvars(r"%LOCALAPPDATA%\cache"))
+    if is_mac_os():
+        return Path.home() / "Library" / "Caches"
+    if is_linux():
+        string_path = os.environ.get("XDG_CACHE_HOME")
+        if string_path and os.path.isabs(string_path):
+            return Path(string_path)
+    # Use the common place to store caches in Linux as a default
+    return Path.home() / ".cache"
+
+
+def cache_dir() -> Path:
+    """
+    Returns the cache dir for localemu (e.g., ~/.cache/localemu)
+
+    :return: a Path pointing to the localemu cache dir
+    """
+    return get_user_cache_dir() / "localemu"
+
+
+def save_file(
+    file: str | os.PathLike[AnyStr],
+    content: str | bytes,
+    append: bool = False,
+    permissions: int | None = None,
+) -> None:
+    mode = "a" if append else "w+"
+    if not isinstance(content, str):
+        mode = mode + "b"
+
+    def _opener(path: str, flags: int) -> int:
+        return os.open(path, flags, permissions)  # type: ignore[arg-type]
+
+    # make sure that the parent dir exists
+    mkdir(os.path.dirname(file))
+    # store file contents
+    with open(file, mode, opener=_opener if permissions else None) as f:
+        f.write(content)
+        f.flush()
+
+
+@overload
+def load_file(
+    file_path: str | os.PathLike[AnyStr],
+    default: None = None,
+    mode: None = None,
+    strict: bool = False,
+) -> str | None: ...
+
+
+@overload
+def load_file(
+    file_path: str | os.PathLike[AnyStr],
+    default: str,
+    mode: None = None,
+    strict: bool = False,
+) -> str | None: ...
+
+
+@overload
+def load_file(
+    file_path: str | os.PathLike[AnyStr],
+    default: bytes,
+    mode: Literal["rb"],
+    strict: bool = False,
+) -> bytes | None: ...
+
+
+def load_file(
+    file_path: str | os.PathLike[AnyStr],
+    default: str | bytes | None = None,
+    mode: str | None = None,
+    strict: bool = False,
+) -> str | bytes | None:
+    """
+    Return file contents
+
+    :param file_path: path of the file
+    :param default: if strict=False then return this value if the file does not exist
+    :param mode: mode to open the file with (e.g. `r`, `rw`)
+    :param strict: raise an error if the file path is not a file
+    :return: the file contents
+    """
+    if not os.path.isfile(file_path):
+        if strict:
+            raise FileNotFoundError(file_path)
+        else:
+            return default
+    if not mode:
+        mode = "r"
+    with open(file_path, mode) as f:
+        result = f.read()
+    return result
+
+
+def get_or_create_file(
+    file_path: os.PathLike[AnyStr],
+    content: str | bytes | None = None,
+    permissions: int | None = None,
+) -> str | bytes | None:
+    if os.path.exists(file_path):
+        return load_file(file_path)
+    content = "{}" if content is None else content
+    try:
+        save_file(file_path, content, permissions=permissions)
+        return content
+    except Exception:
+        pass
+    return None
+
+
+def replace_in_file(search: str, replace: str, file_path: os.PathLike[AnyStr]) -> None:
+    """Replace all occurrences of `search` with `replace` in the given file (overwrites in place!)"""
+    content = load_file(file_path) or ""
+    content_new = content.replace(search, replace)
+    if content != content_new:
+        save_file(file_path, content_new)
+
+
+def mkdir(folder: str | bytes | os.PathLike[AnyStr]) -> None:
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+
+
+def is_empty_dir(directory: str, ignore_hidden: bool = False) -> bool:
+    """Return whether the given directory contains any entries (files/folders), including hidden
+    entries whose name starts with a dot (.), unless ignore_hidden=True is passed."""
+    if not os.path.isdir(directory):
+        raise Exception(f"Path is not a directory: {directory}")
+    entries = os.listdir(directory)
+    if ignore_hidden:
+        entries = [e for e in entries if not e.startswith(".")]
+    return not bool(entries)
+
+
+def ensure_readable(file_path: str, default_perms: int | None = None) -> None:
+    if default_perms is None:
+        default_perms = 0o644
+    try:
+        with open(file_path, "rb"):
+            pass
+    except Exception:
+        LOG.info("Updating permissions as file is currently not readable: %s", file_path)
+        os.chmod(file_path, default_perms)
+
+
+def chown_r(path: str, user: str) -> None:
+    """Recursive chown on the given file/directory path."""
+    # keep these imports here for Windows compatibility
+    import grp
+    import pwd
+
+    uid = pwd.getpwnam(user).pw_uid
+    gid = grp.getgrnam(user).gr_gid
+    os.chown(path, uid, gid)
+    for root, dirs, files in os.walk(path):
+        for dirname in dirs:
+            os.chown(os.path.join(root, dirname), uid, gid)
+        for filename in files:
+            os.chown(os.path.join(root, filename), uid, gid)
+
+
+def chmod_r(path: str, mode: int) -> None:
+    """
+    Recursive chmod
+    :param path: path to file or directory
+    :param mode: permission mask as octal integer value
+    """
+    if not os.path.exists(path):
+        return
+    idempotent_chmod(path, mode)
+    for root, dirnames, filenames in os.walk(path):
+        for dirname in dirnames:
+            idempotent_chmod(os.path.join(root, dirname), mode)
+        for filename in filenames:
+            idempotent_chmod(os.path.join(root, filename), mode)
+
+
+def idempotent_chmod(path: str, mode: int) -> None:
+    """
+    Perform idempotent chmod on the given file path (non-recursively). The function attempts to call `os.chmod`, and
+    will catch and only re-raise exceptions (e.g., PermissionError) if the file does not have the given mode already.
+    :param path: path to file
+    :param mode: permission mask as octal integer value
+    """
+    try:
+        os.chmod(path, mode)
+    except Exception:
+        try:
+            existing_mode = os.stat(path)
+        except FileNotFoundError:
+            # file deleted in the meantime, or otherwise not accessible (socket)
+            return
+        if mode in (existing_mode.st_mode, stat.S_IMODE(existing_mode.st_mode)):
+            # file already has the desired permissions -> return
+            return
+        raise
+
+
+def rm_rf(path: str) -> None:
+    """
+    Recursively removes a file or directory
+    """
+    from localemu.utils.platform import is_debian
+    from localemu.utils.run import run
+
+    if not path or not os.path.exists(path):
+        return
+    # Running the native command can be an order of magnitude faster in Alpine on Travis-CI
+    if is_debian():
+        try:
+            return run(f'rm -rf "{path}"')  # type: ignore[return-value]
+        except Exception:
+            pass
+    # Make sure all files are writeable and dirs executable to remove
+    try:
+        chmod_r(path, 0o777)
+    except PermissionError:
+        pass  # todo log
+    # check if the file is either a normal file, or, e.g., a fifo
+    exists_but_non_dir = os.path.exists(path) and not os.path.isdir(path)
+    if os.path.isfile(path) or exists_but_non_dir:
+        os.remove(path)
+    else:
+        shutil.rmtree(path)
+
+
+def cp_r(
+    src: str, dst: str, rm_dest_on_conflict: bool = False, ignore_copystat_errors: bool = False
+) -> None | str:
+    """Recursively copies file/directory"""
+    # attention: this patch is not threadsafe
+    copystat_orig = shutil.copystat
+    if ignore_copystat_errors:
+
+        def _copystat(*args: Any, **kwargs: Any) -> None:
+            try:
+                return copystat_orig(*args, **kwargs)
+            except Exception:
+                pass
+
+        shutil.copystat = _copystat
+    try:
+        if os.path.isfile(src):
+            if os.path.isdir(dst):
+                dst = os.path.join(dst, os.path.basename(src))
+            return shutil.copyfile(src, dst)
+        try:
+            return shutil.copytree(src, dst, dirs_exist_ok=True)
+        except FileExistsError:
+            if rm_dest_on_conflict:
+                rm_rf(dst)
+                return shutil.copytree(src, dst, dirs_exist_ok=True)
+            raise
+    except Exception as e:
+
+        def _info(_path: str) -> str:
+            return f"{_path} (file={os.path.isfile(_path)}, symlink={os.path.islink(_path)})"
+
+        LOG.debug("Error copying files from %s to %s", _info(src), _info(dst), e)
+        raise
+    finally:
+        shutil.copystat = copystat_orig
+
+
+def disk_usage(path: str) -> int:
+    """Return the disk usage of the given file or directory."""
+
+    if not os.path.exists(path):
+        return 0
+
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip if it is symbolic link
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+    return total_size
+
+
+def file_exists_not_empty(path: str) -> bool:
+    """Return whether the given file or directory exists and is non-empty (i.e., >0 bytes content)"""
+    return bool(path) and disk_usage(path) > 0
+
+
+def cleanup_tmp_files() -> None:
+    for tmp in TMP_FILES:
+        try:
+            rm_rf(tmp)
+        except Exception:
+            pass  # file likely doesn't exist, or permission denied
+    del TMP_FILES[:]
+
+
+def new_tmp_file(suffix: str | None = None, dir: str | None = None) -> str:
+    """Return a path to a new temporary file."""
+    tmp_file, tmp_path = tempfile.mkstemp(suffix=suffix, dir=dir)
+    os.close(tmp_file)
+    TMP_FILES.append(tmp_path)
+    return tmp_path
+
+
+def new_tmp_dir(dir: str | None = None, mode: int = 0o777) -> str:
+    """
+    Create a new temporary directory with the specified permissions. The directory is added to the tracked temporary
+    files.
+    :param dir: parent directory for the temporary directory to be created. Systems's default otherwise.
+    :param mode: file permission for the directory (default: 0o777)
+    :return: the absolute path of the created directory
+    """
+    folder = tempfile.mkdtemp(dir=dir)
+    TMP_FILES.append(folder)
+    idempotent_chmod(folder, mode=mode)
+    return folder

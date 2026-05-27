@@ -1,0 +1,29 @@
+{
+  "tests/aws/services/s3/test_s3_preconditions.py::TestS3CopySourcePreconditions::test_s3_copy_object_if_source_modified_since_versioned": {
+    "last_validated_date": "2026-02-23T11:37:06+00:00",
+    "durations_in_seconds": {
+      "setup": 0.53,
+      "call": 1.02,
+      "teardown": 1.51,
+      "total": 3.06
+    }
+  },
+  "tests/aws/services/s3/test_s3_preconditions.py::TestS3CopySourcePreconditions::test_s3_copy_object_if_source_unmodified_since_versioned": {
+    "last_validated_date": "2026-02-23T11:37:09+00:00",
+    "durations_in_seconds": {
+      "setup": 0.53,
+      "call": 0.93,
+      "teardown": 1.48,
+      "total": 2.94
+    }
+  },
+  "tests/aws/services/s3/test_s3_preconditions.py::TestS3CopySourcePreconditions::test_s3_copy_object_preconditions": {
+    "last_validated_date": "2026-02-23T11:37:03+00:00",
+    "durations_in_seconds": {
+      "setup": 1.1,
+      "call": 4.4,
+      "teardown": 1.02,
+      "total": 6.52
+    }
+  }
+}

@@ -1,0 +1,410 @@
+{
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_base_lambda_service_task_mock_success": {
+    "recorded-date": "03-12-2025, 00:34:13",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "Payload": "function output",
+          "SdkHttpMetadata": {
+            "HttpStatusCode": 200
+          }
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_dynamodb_service_task_mock_success[base]": {
+    "recorded-date": "03-12-2025, 00:34:14",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "SdkHttpMetadata": {
+            "HttpStatusCode": 200
+          }
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_dynamodb_service_task_mock_success[io]": {
+    "recorded-date": "03-12-2025, 00:34:14",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "TableName": "<table_name>",
+          "Item": {
+            "data": {
+              "S": "HelloWorld"
+            },
+            "id": {
+              "S": "id1"
+            }
+          },
+          "putItemOutput": {
+            "SdkHttpMetadata": {
+              "HttpStatusCode": 200
+            }
+          }
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_dynamodb_service_task_mock_success[io_output_path]": {
+    "recorded-date": "03-12-2025, 00:34:14",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "SdkHttpMetadata": {
+            "HttpStatusCode": 200
+          }
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_put_events_mock_success": {
+    "recorded-date": "03-12-2025, 00:34:14",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "Entries": [
+            {
+              "EventId": "<uuid:1>"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_send_sqs_message_success": {
+    "recorded-date": "03-12-2025, 00:34:14",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "MD5OfMessageBody": "<md5_of_message_body>",
+          "MessageId": "<uuid:1>"
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_sfn_start_execution_success": {
+    "recorded-date": "03-12-2025, 00:34:15",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "targetExecutionResult": {
+            "ExecutionArn": "arn:<partition>:states:<region>:111111111111:execution:TargetStateMachine:TestStartTarget",
+            "StartDate": "start-date"
+          }
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_base_lambda_service_task_mock_is_not_json_string": {
+    "recorded-date": "03-12-2025, 00:34:13",
+    "recorded-content": {
+      "validation-exception": {
+        "Error": {
+          "Code": "ValidationException",
+          "Message": "Mocked result must be valid JSON"
+        },
+        "message": "Mocked result must be valid JSON",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_base_parallel_state_mock_success[INFO]": {
+    "recorded-date": "24-02-2026, 22:49:12",
+    "recorded-content": {
+      "test_case_response": {
+        "output": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_base_parallel_state_mock_success[DEBUG]": {
+    "recorded-date": "24-02-2026, 22:49:12",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "afterResultPath": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "afterResultSelector": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "input": {
+            "key": "value"
+          }
+        },
+        "output": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_base_parallel_state_mock_success[TRACE]": {
+    "recorded-date": "24-02-2026, 22:49:12",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "afterResultPath": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "afterResultSelector": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "input": {
+            "key": "value"
+          }
+        },
+        "output": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_parallel_state_mock_success[INFO]": {
+    "recorded-date": "24-02-2026, 22:49:12",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_parallel_state_mock_success[DEBUG]": {
+    "recorded-date": "24-02-2026, 22:49:13",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "afterResultPath": {
+            "parallelInput": {
+              "data": "input_value"
+            },
+            "parallelResult": [
+              {
+                "branch1": "result"
+              },
+              {
+                "branch2": "result"
+              }
+            ]
+          },
+          "afterResultSelector": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "input": {
+            "parallelInput": {
+              "data": "input_value"
+            }
+          }
+        },
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_parallel_state_mock_success[TRACE]": {
+    "recorded-date": "24-02-2026, 22:49:13",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "afterResultPath": {
+            "parallelInput": {
+              "data": "input_value"
+            },
+            "parallelResult": [
+              {
+                "branch1": "result"
+              },
+              {
+                "branch2": "result"
+              }
+            ]
+          },
+          "afterResultSelector": "[{\"branch1\": \"result\"}, {\"branch2\": \"result\"}]",
+          "input": {
+            "parallelInput": {
+              "data": "input_value"
+            }
+          }
+        },
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_jsonata_parallel_state_mock_success[INFO]": {
+    "recorded-date": "27-02-2026, 09:29:56",
+    "recorded-content": {
+      "test_case_response": {
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_jsonata_parallel_state_mock_success[DEBUG]": {
+    "recorded-date": "27-02-2026, 09:29:57",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "input": {
+            "parallelInput": {
+              "data": "input_value"
+            }
+          }
+        },
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/stepfunctions/v2/test_state/test_test_state_mock_scenarios.py::TestStateMockScenarios::test_io_jsonata_parallel_state_mock_success[TRACE]": {
+    "recorded-date": "27-02-2026, 09:29:57",
+    "recorded-content": {
+      "test_case_response": {
+        "inspectionData": {
+          "input": {
+            "parallelInput": {
+              "data": "input_value"
+            }
+          }
+        },
+        "output": {
+          "parallelInput": {
+            "data": "input_value"
+          },
+          "parallelResult": [
+            {
+              "branch1": "result"
+            },
+            {
+              "branch2": "result"
+            }
+          ]
+        },
+        "status": "SUCCEEDED",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  }
+}

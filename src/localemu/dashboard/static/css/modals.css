@@ -1,0 +1,156 @@
+/* Generic action modal + the existing export modal. */
+
+#action-modal-backdrop,
+#export-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 12, 17, 0.55);
+  z-index: 1500;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 60px;
+  overflow-y: auto;
+}
+#action-modal-backdrop.open,
+#export-modal-backdrop.open { display: flex; }
+
+.action-modal,
+#export-modal {
+  background: var(--base02);
+  border: 1px solid var(--base01);
+  border-radius: 6px;
+  padding: 18px 20px;
+  min-width: 460px;
+  max-width: 720px;
+  width: calc(100% - 32px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.action-modal h2,
+#export-modal h2 {
+  font-size: 14px;
+  color: var(--base1);
+  margin-bottom: 4px;
+}
+.action-modal .subtitle {
+  font-size: 11px;
+  color: var(--base01);
+  margin-bottom: 14px;
+}
+
+.action-modal label,
+#export-modal label {
+  display: block;
+  font-size: 11px;
+  color: var(--base01);
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.action-modal input[type="text"],
+.action-modal input[type="number"],
+.action-modal select,
+.action-modal textarea,
+#export-modal input[type="text"] {
+  width: 100%;
+  background: var(--base03);
+  border: 1px solid var(--base01);
+  color: var(--base0);
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+.action-modal input:focus,
+.action-modal select:focus,
+.action-modal textarea:focus,
+#export-modal input:focus { border-color: var(--teal); }
+.action-modal textarea {
+  min-height: 110px;
+  resize: vertical;
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+.action-modal .row { display: flex; gap: 10px; align-items: flex-start; }
+.action-modal .row > * { flex: 1; }
+
+.action-modal-actions,
+#export-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.action-modal-actions button,
+#export-modal-actions button {
+  background: var(--base02);
+  border: 1px solid var(--base01);
+  color: var(--base0);
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.action-modal-actions button.primary,
+#export-modal-actions button.primary {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+.action-modal-actions button:disabled,
+#export-modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-modal-error,
+#export-error {
+  margin-top: 10px;
+  color: var(--red);
+  font-size: 12px;
+  min-height: 1em;
+}
+.action-modal-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--base03);
+  border-left: 3px solid var(--teal);
+  border-radius: 3px;
+  font-size: 12px;
+}
+.action-modal-result pre {
+  margin: 4px 0 0;
+  font-family: inherit;
+  color: var(--base1);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 280px;
+  overflow: auto;
+}
+.action-modal-result .ok-line {
+  color: var(--green);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.action-modal-result .fail-line {
+  color: var(--yellow);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#export-modal fieldset {
+  border: 1px solid var(--base01);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+#export-modal legend { font-size: 12px; color: var(--base1); padding: 0 4px; }
+#export-token-row { display: none; margin-top: 8px; }
+#export-token-row.visible { display: block; }
+#export-spinner { display: none; font-size: 12px; color: var(--base1); margin-top: 8px; }
+#export-spinner.visible { display: block; }

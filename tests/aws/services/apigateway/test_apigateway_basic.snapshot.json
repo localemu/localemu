@@ -1,0 +1,262 @@
+{
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestAPIGateway::test_apigw_test_invoke_method_api": {
+    "recorded-date": "19-08-2025, 17:04:50",
+    "recorded-content": {
+      "test_invoke_method_response": {
+        "body": {
+          "statusCode": 200,
+          "body": "\"response from localemu lambda: {}\"",
+          "isBase64Encoded": false,
+          "headers": {}
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Amzn-Trace-Id": "<x-amz-trace-id:1>"
+        },
+        "latency": "<latency>",
+        "log": {
+          "line00": "Execution log for request <request-id-1>",
+          "line01": "DDD MMM dd hh:mm:ss UTC yyyy : Starting execution for request: <request-id-1>",
+          "line02": "DDD MMM dd hh:mm:ss UTC yyyy : HTTP Method: GET, Resource Path: /foo",
+          "line03": "DDD MMM dd hh:mm:ss UTC yyyy : Method request path: {}",
+          "line04": "DDD MMM dd hh:mm:ss UTC yyyy : Method request query string: {}",
+          "line05": "DDD MMM dd hh:mm:ss UTC yyyy : Method request headers: {}",
+          "line06": "DDD MMM dd hh:mm:ss UTC yyyy : Method request body before transformations: ",
+          "line07": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request URI: https://<endpoint_url>/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name>/invocations",
+          "line08": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request headers: {x-amzn-lambda-integration-tag=<request-id-1>, Authorization=<authorization-header>, X-Amz-Date=<date>, x-amzn-apigateway-api-id=<rest-api-id>, Accept=application/json, User-Agent=AmazonAPIGateway_<rest-api-id>, X-Amz-Security-Token=<token> [TRUNCATED]",
+          "line09": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request body after transformations: ",
+          "line10": "DDD MMM dd hh:mm:ss UTC yyyy : Sending request to https://lambda.<region>.amazonaws.com/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name>/invocations",
+          "line11": "DDD MMM dd hh:mm:ss UTC yyyy : Received response. Status: 200, Integration latency: <latency> ms",
+          "line12": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint response headers: {Date=Day, dd MMM yyyy hh:mm:ss GMT, Content-Type=application/json, Content-Length=104, Connection=keep-alive, x-amzn-RequestId=<request-id-lambda>, x-amzn-Remapped-Content-Length=0, X-Amz-Executed-Version=$LATEST, X-Amzn-Trace-Id=<x-amz-trace-id:1>}",
+          "line13": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint response body before transformations: {\"statusCode\":200,\"body\":\"\\\"response from localemu lambda: {}\\\"\",\"isBase64Encoded\":false,\"headers\":{}}",
+          "line14": "DDD MMM dd hh:mm:ss UTC yyyy : Method response body after transformations: {\"statusCode\":200,\"body\":\"\\\"response from localemu lambda: {}\\\"\",\"isBase64Encoded\":false,\"headers\":{}}",
+          "line15": "DDD MMM dd hh:mm:ss UTC yyyy : Method response headers: {X-Amzn-Trace-Id=<x-amz-trace-id:1>, Content-Type=application/json}",
+          "line16": "DDD MMM dd hh:mm:ss UTC yyyy : Successfully completed execution",
+          "line17": "DDD MMM dd hh:mm:ss UTC yyyy : Method completed with status: 200",
+          "line18": ""
+        },
+        "multiValueHeaders": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "X-Amzn-Trace-Id": [
+            "<x-amz-trace-id:1>"
+          ]
+        },
+        "status": 200,
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "test_invoke_method_response_with_body": {
+        "body": {
+          "statusCode": 200,
+          "body": "\"response from localemu lambda: {\\\"test\\\":\\\"val123\\\"}\"",
+          "isBase64Encoded": false,
+          "headers": {}
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Amzn-Trace-Id": "<x-amz-trace-id:2>"
+        },
+        "latency": "<latency>",
+        "log": {
+          "line00": "Execution log for request <request-id-2>",
+          "line01": "DDD MMM dd hh:mm:ss UTC yyyy : Starting execution for request: <request-id-2>",
+          "line02": "DDD MMM dd hh:mm:ss UTC yyyy : HTTP Method: GET, Resource Path: /foo",
+          "line03": "DDD MMM dd hh:mm:ss UTC yyyy : Method request path: {}",
+          "line04": "DDD MMM dd hh:mm:ss UTC yyyy : Method request query string: {queryTest=value}",
+          "line05": "DDD MMM dd hh:mm:ss UTC yyyy : Method request headers: {content-type=application/json}",
+          "line06": "DDD MMM dd hh:mm:ss UTC yyyy : Method request body before transformations: {\"test\": \"val123\"}",
+          "line07": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request URI: https://<endpoint_url>/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name>/invocations",
+          "line08": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request headers: {x-amzn-lambda-integration-tag=<request-id-2>, Authorization=<authorization-header>, X-Amz-Date=<date>, x-amzn-apigateway-api-id=<rest-api-id>, Accept=application/json, User-Agent=AmazonAPIGateway_<rest-api-id>, X-Amz-Security-Token=<token> [TRUNCATED]",
+          "line09": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint request body after transformations: {\"test\": \"val123\"}",
+          "line10": "DDD MMM dd hh:mm:ss UTC yyyy : Sending request to https://lambda.<region>.amazonaws.com/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name>/invocations",
+          "line11": "DDD MMM dd hh:mm:ss UTC yyyy : Received response. Status: 200, Integration latency: <latency> ms",
+          "line12": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint response headers: {Date=Day, dd MMM yyyy hh:mm:ss GMT, Content-Type=application/json, Content-Length=131, Connection=keep-alive, x-amzn-RequestId=<request-id-lambda>, x-amzn-Remapped-Content-Length=0, X-Amz-Executed-Version=$LATEST, X-Amzn-Trace-Id=<x-amz-trace-id:2>}",
+          "line13": "DDD MMM dd hh:mm:ss UTC yyyy : Endpoint response body before transformations: {\"statusCode\":200,\"body\":\"\\\"response from localemu lambda: {\\\\\\\"test\\\\\\\":\\\\\\\"val123\\\\\\\"}\\\"\",\"isBase64Encoded\":false,\"headers\":{}}",
+          "line14": "DDD MMM dd hh:mm:ss UTC yyyy : Method response body after transformations: {\"statusCode\":200,\"body\":\"\\\"response from localemu lambda: {\\\\\\\"test\\\\\\\":\\\\\\\"val123\\\\\\\"}\\\"\",\"isBase64Encoded\":false,\"headers\":{}}",
+          "line15": "DDD MMM dd hh:mm:ss UTC yyyy : Method response headers: {X-Amzn-Trace-Id=<x-amz-trace-id:2>, Content-Type=application/json}",
+          "line16": "DDD MMM dd hh:mm:ss UTC yyyy : Successfully completed execution",
+          "line17": "DDD MMM dd hh:mm:ss UTC yyyy : Method completed with status: 200",
+          "line18": ""
+        },
+        "multiValueHeaders": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "X-Amzn-Trace-Id": [
+            "<x-amz-trace-id:2>"
+          ]
+        },
+        "status": 200,
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestAPIGateway::test_update_rest_api_deployment": {
+    "recorded-date": "12-04-2024, 21:24:49",
+    "recorded-content": {
+      "after-update": {
+        "createdDate": "datetime",
+        "description": "new-description",
+        "id": "<id:1>",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestAPIGateway::test_apigateway_with_custom_authorization_method": {
+    "recorded-date": "12-04-2024, 22:31:50",
+    "recorded-content": {
+      "api-id": {
+        "api_id": "<api_id:1>"
+      },
+      "authorizer": {
+        "authType": "custom",
+        "authorizerUri": "<authorizer-uri:1>",
+        "id": "<id:1>",
+        "identitySource": "method.request.header.Auth",
+        "name": "lambda_authorizer",
+        "type": "TOKEN",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 201
+        }
+      },
+      "put-method-response": {
+        "apiKeyRequired": true,
+        "authorizationType": "CUSTOM",
+        "authorizerId": "<id:1>",
+        "httpMethod": "GET",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 201
+        }
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestAPIGateway::test_api_gateway_mock_integration": {
+    "recorded-date": "29-05-2024, 20:06:17",
+    "recorded-content": {
+      "mocked-response": {
+        "echo": "foobar",
+        "response": "mocked"
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_MATCH-UrlType.PATH_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:09:54",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_MATCH-UrlType.PATH_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:10:00",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_MATCH-UrlType.HOST_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:10:09",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_MATCH-UrlType.HOST_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:10:20",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[NEVER-UrlType.PATH_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:10:28",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[NEVER-UrlType.PATH_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:10:42",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[NEVER-UrlType.HOST_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:10:53",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[NEVER-UrlType.HOST_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:11:00",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_TEMPLATES-UrlType.PATH_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:11:09",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_TEMPLATES-UrlType.PATH_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:11:14",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_TEMPLATES-UrlType.HOST_BASED-GET]": {
+    "recorded-date": "30-05-2024, 00:11:22",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  },
+  "tests/aws/services/apigateway/test_apigateway_basic.py::TestIntegrations::test_mock_integration_response[WHEN_NO_TEMPLATES-UrlType.HOST_BASED-POST]": {
+    "recorded-date": "30-05-2024, 00:11:32",
+    "recorded-content": {
+      "mock-response": {
+        "id": 42,
+        "statusCode": 200
+      }
+    }
+  }
+}
