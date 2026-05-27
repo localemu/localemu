@@ -27,7 +27,7 @@ dependencies = [
     "requests>=2.20.0",
     "semver>=2.10",
 ]
-dynamic = ["entry-points"]
+dynamic = ["entry-points", "readme"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",

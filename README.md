@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/localemu-logo.png" alt="LocalEmu" width="120">
+  <img src="https://raw.githubusercontent.com/localemu/localemu/main/docs/localemu-logo.png" alt="LocalEmu" width="120">
 </p>
 
 <h1 align="center">LocalEmu</h1>
@@ -12,13 +12,13 @@
   <a href="https://pypi.org/project/localemu/"><img alt="PyPI" src="https://img.shields.io/pypi/v/localemu?color=blue"></a>
   <a href="https://pypi.org/project/localemu/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/localemu"></a>
   <a href="https://hub.docker.com/r/localemu/localemu"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/localemu/localemu"></a>
-  <a href="./LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
+  <a href="https://github.com/localemu/localemu/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
 </p>
 
 <p align="center">
   <img alt="Emulates AWS" src="https://img.shields.io/badge/emulates-AWS-FF9900?logo=amazonwebservices&logoColor=white">
   <img alt="AWS services" src="https://img.shields.io/badge/AWS%20services-132-1f6feb">
-  <a href="./CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
+  <a href="https://github.com/localemu/localemu/blob/main/CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
   <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
   <a href="https://github.com/localemu/localemu/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/localemu/localemu?color=yellow"></a>
 </p>
