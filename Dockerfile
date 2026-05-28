@@ -5,7 +5,7 @@ FROM python:3.13.12-slim-trixie@sha256:8bc60ca09afaa8ea0d6d1220bde073bacfedd66a4
 ARG TARGETARCH
 
 # Install runtime OS package dependencies
-RUN --mount=type=cache,target=/var/cache/apt \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
         apt-get install -y --no-install-recommends \
             ca-certificates curl gnupg git make openssl tar pixz zip unzip \
@@ -83,12 +83,12 @@ FROM base AS builder
 ARG TARGETARCH
 
 # Install build dependencies (gcc/g++ needed for native extensions)
-RUN --mount=type=cache,target=/var/cache/apt \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
         apt-get install -y --no-install-recommends gcc g++
 
 # Create virtualenv and upgrade build tools
-RUN --mount=type=cache,target=/root/.cache \
+RUN --mount=type=cache,target=/root/.cache,sharing=locked \
     python -m venv .venv && . .venv/bin/activate && \
     pip3 install --upgrade pip wheel setuptools setuptools_scm
 
@@ -98,7 +98,7 @@ COPY pyproject.toml plux.ini ./
 # Pre-install runtime dependencies (cached unless pyproject.toml changes).
 # setuptools-scm needs a version hint because .git is not available in Docker.
 ARG LOCALEMU_BUILD_VERSION=0.1.dev0
-RUN --mount=type=cache,target=/root/.cache \
+RUN --mount=type=cache,target=/root/.cache,sharing=locked \
     . .venv/bin/activate && \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LOCALEMU=${LOCALEMU_BUILD_VERSION} \
     pip3 install --dry-run .[runtime] 2>/dev/null; \
@@ -122,7 +122,7 @@ COPY --chown=localemu:localemu pyproject.toml plux.ini Makefile ./
 COPY --chown=localemu:localemu src/ /opt/code/localemu/src
 
 # Install LocalEmu from source (single source of truth: pyproject.toml)
-RUN --mount=type=cache,target=/root/.cache \
+RUN --mount=type=cache,target=/root/.cache,sharing=locked \
     . .venv/bin/activate && \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LOCALEMU=${LOCALEMU_BUILD_VERSION} \
     pip install -e .[runtime]
