@@ -27,6 +27,10 @@
   Run AWS services locally. No account. No token. No sign-up.
 </p>
 
+<p align="center">
+  <img src="docs/demo.gif" alt="LocalEmu demo: real AWS CLI against localhost:4566" width="100%">
+</p>
+
 ---
 
 ## What is LocalEmu?
@@ -60,6 +64,10 @@ localemu start --port 4567
 # Stop
 localemu stop
 ```
+
+<p align="center">
+  <img src="docs/start.gif" alt="localemu start: boot banner and ready state" width="100%">
+</p>
 
 ## Use
 
