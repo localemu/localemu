@@ -325,6 +325,10 @@ aws dynamodb list-tables
 aws lambda list-functions
 ```
 
+<p align="center">
+  <img src="docs/awscli-demo.gif" alt="Standard AWS CLI against LocalEmu via env vars: DynamoDB and Lambda" width="100%">
+</p>
+
 ```bash
 # Option B: create a host-side awsemu alias
 alias awsemu='aws --endpoint-url=http://localhost:4566 --region us-east-1'
