@@ -308,6 +308,32 @@ def get_identity_policies(caller: CallerIdentity) -> list[dict]:
     return [p for p in policies if p]  # Filter out None
 
 
+def _extract_boundary_arn(value) -> str | None:
+    """Return a managed-policy ARN from whatever shape moto stores the
+    permission boundary in.
+
+    Moto's IAM User / Role expose **two** boundary surfaces:
+
+    * ``permissions_boundary_arn``: a plain string ARN (the internal
+      attribute set by ``put_role_permissions_boundary`` / the user
+      equivalent).
+    * ``permissions_boundary``: a ``@property`` that returns a dict
+      shaped like the AWS API response,
+      ``{"PermissionsBoundaryArn": "...", "PermissionsBoundaryType": "Policy"}``.
+
+    Passing the dict to ``_get_managed_policy_doc`` would silently miss
+    every boundary (the dict is not a valid key in ``backend.managed_policies``).
+    Accept both shapes here.
+    """
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, dict):
+        return value.get("PermissionsBoundaryArn") or value.get("PolicyArn") or None
+    return None
+
+
 def get_permission_boundary(caller: CallerIdentity) -> dict | None:
     """Get the permission boundary policy for a caller (if any)."""
     try:
@@ -317,9 +343,13 @@ def get_permission_boundary(caller: CallerIdentity) -> dict | None:
 
         if caller.principal_type == "User" and caller.username:
             user = backend.users.get(caller.username)
-            boundary = getattr(user, "permissions_boundary", None) if user else None
-            if boundary:
-                return _get_managed_policy_doc(backend, boundary)
+            if user is not None:
+                raw = getattr(user, "permissions_boundary_arn", None) or getattr(
+                    user, "permissions_boundary", None
+                )
+                arn = _extract_boundary_arn(raw)
+                if arn:
+                    return _get_managed_policy_doc(backend, arn)
 
         elif caller.principal_type == "AssumedRole" and caller.role_name:
             role = None
@@ -327,9 +357,13 @@ def get_permission_boundary(caller: CallerIdentity) -> dict | None:
                 if r.name == caller.role_name:
                     role = r
                     break
-            boundary = getattr(role, "permissions_boundary", None) if role else None
-            if boundary:
-                return _get_managed_policy_doc(backend, boundary)
+            if role is not None:
+                raw = getattr(role, "permissions_boundary_arn", None) or getattr(
+                    role, "permissions_boundary", None
+                )
+                arn = _extract_boundary_arn(raw)
+                if arn:
+                    return _get_managed_policy_doc(backend, arn)
     except Exception as e:
         LOG.debug("Failed to get permission boundary for %s: %s", caller.arn, e)
 
@@ -395,11 +429,26 @@ def get_session_policies(caller: CallerIdentity) -> list[dict]:
 
 
 def _get_managed_policy_doc(backend, policy_arn: str) -> dict | None:
-    """Retrieve the document of a managed policy from Moto."""
+    """Retrieve the document of a managed policy's default version from Moto.
+
+    Mirrors what ``iam get-policy`` + ``iam get-policy-version`` return for
+    the public API: the document of the version whose ``version_id`` matches
+    the policy's ``default_version_id``.
+    """
     try:
         policy = backend.managed_policies.get(policy_arn)
-        if policy and policy.default_version:
-            return _parse_policy(policy.default_version.document)
+        if policy is None:
+            return None
+        default_id = getattr(policy, "default_version_id", None)
+        for version in getattr(policy, "versions", None) or ():
+            if getattr(version, "version_id", None) == default_id:
+                return _parse_policy(version.document)
+        # Defensive: if no version matches the recorded default, fall back to
+        # the most recent version (matches moto's internal behavior when the
+        # default id is stale).
+        versions = getattr(policy, "versions", None) or ()
+        if versions:
+            return _parse_policy(versions[-1].document)
     except Exception as e:
         LOG.debug("Failed to get managed policy doc for %s: %s", policy_arn, e)
     return None
