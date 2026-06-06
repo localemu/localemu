@@ -741,3 +741,40 @@ class SsmProvider(SsmApi, ABC):
             "DetailType": "Parameter Store Change",
         }
         events.put_events(Entries=[event])
+
+    # ----- Patch Manager read APIs -----
+    # AWS-correct empty stubs for read-only patch state queries. moto does
+    # not implement these and returns ``InternalFailure``; security
+    # scanners then log ``CHECK_FAILED``. Real AWS silently drops unknown
+    # instance IDs and returns ``{InstancePatchStates: []}`` for a brand
+    # new account, so an empty list is the truthful default.
+    #
+    # Synthesized per-instance patch state from a registered baseline +
+    # patch group is a separate feature tracked for 1.2.
+
+    @handler("DescribeInstancePatchStates", expand=False)
+    def describe_instance_patch_states(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        return {"InstancePatchStates": [], "NextToken": None}
+
+    @handler("DescribeInstancePatchStatesForPatchGroup", expand=False)
+    def describe_instance_patch_states_for_patch_group(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        return {"InstancePatchStates": [], "NextToken": None}
+
+    @handler("GetPatchBaseline", expand=False)
+    def get_patch_baseline(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        """Surface a typed ``DoesNotExistException`` (not the moto-internal
+        ``InternalFailure``). moto already implements CreatePatchBaseline
+        and DescribePatchBaselines for the inventory side; the per-id
+        lookup is the gap and emitting a typed error matches AWS for any
+        unknown baseline id."""
+        baseline_id = request.get("BaselineId") or ""
+        raise CommonServiceException(
+            "DoesNotExistException",
+            f"Patch baseline {baseline_id!r} does not exist.",
+        )

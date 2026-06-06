@@ -34,6 +34,13 @@ NATIVE_STORES = {
     # bucket-access check silently allows direct S3 hits that should be
     # denied. See services/cloudfront/models.py for the schema.
     "cloudfront":      ("localemu.services.cloudfront.models", "cloudfront_stores"),
+    # Per-account-region EC2 settings (Snapshot Block Public Access,
+    # Serial Console Access; later: VPC Block Public Access + exclusions,
+    # EC2 Instance Connect Endpoints). See services/ec2/account_settings.py.
+    "ec2_account_settings": ("localemu.services.ec2.account_settings", "ec2_account_settings_stores"),
+    # AWS Backup overlay (selections + protected-resource index that moto
+    # doesn't model). See services/backup/models.py.
+    "backup_overlay": ("localemu.services.backup.models", "backup_stores"),
 }
 
 # Moto backends — every instantiated moto backend is serialized via dill.dumps(backend).
@@ -57,7 +64,7 @@ MOTO_SERVICES = [
 # Hard dependencies: Lambda -> S3 (code), CloudFormation -> everything.
 LOAD_ORDER = [
     # Tier 0: no dependencies
-    ["iam", "sts", "kms"],
+    ["iam", "sts", "kms", "ec2_account_settings", "backup_overlay"],
     # Tier 1: depends on IAM/KMS only
     ["s3", "sqs", "sns", "dynamodb", "dynamodbstreams", "kinesis",
      "secretsmanager", "ssm", "route53", "route53resolver"],

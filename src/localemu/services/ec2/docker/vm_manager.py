@@ -378,6 +378,87 @@ fi
 """
 
 
+# ----- No-SSH entrypoint (used when run-instances did NOT pass --key-name) -----
+# Runs the same IMDS DNAT install as the SSH entrypoint, then drops into a
+# sleep loop so the container stays alive. Without this, instances launched
+# without a key (the AWS CLI default) would never install the link-local
+# 169.254.169.254 -> sidecar DNAT, leaving real AWS SDKs and curl getting
+# "Connection refused" at the canonical IMDS address (BUG-003).
+#
+# The iptables block is intentionally a copy of the one in
+# SSHD_ENTRYPOINT_SCRIPT. Both are asserted by the unit tests below to
+# contain the same OUTPUT-DNAT + POSTROUTING-MASQUERADE pair so the two
+# paths cannot silently diverge.
+NO_SSH_ENTRYPOINT_SCRIPT = r"""#!/bin/sh
+# Don't ``set -e`` -- tolerate transient failures and keep the container alive.
+
+# ----- IMDS DNAT (link-local 169.254.169.254 -> sidecar IP) -----
+if ! command -v iptables >/dev/null 2>&1; then
+    if command -v apk >/dev/null 2>&1; then
+        apk add --no-cache iptables >/dev/null 2>&1 || true
+    fi
+fi
+if command -v iptables >/dev/null 2>&1; then
+    _imds_target=""
+    _imds_port="80"
+    if [ -n "${LOCALEMU_IMDS_SIDECAR_IP:-}" ]; then
+        _imds_target="$LOCALEMU_IMDS_SIDECAR_IP"
+    elif [ -n "${LOCALEMU_IMDS_HOST_FALLBACK:-}" ]; then
+        _gw=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1}' | head -1)
+        if [ -n "$_gw" ]; then
+            _imds_target="$_gw"
+            _imds_port="${LOCALEMU_IMDS_HOST_FALLBACK_PORT:-80}"
+        fi
+    fi
+    if [ -n "$_imds_target" ]; then
+        iptables -t nat -C OUTPUT -d 169.254.169.254/32 -p tcp --dport 80 \
+            -j DNAT --to-destination "$_imds_target:$_imds_port" 2>/dev/null || \
+        iptables -t nat -A OUTPUT -d 169.254.169.254/32 -p tcp --dport 80 \
+            -j DNAT --to-destination "$_imds_target:$_imds_port" 2>/dev/null || true
+        # POSTROUTING MASQUERADE matches the just-rewritten dst so the
+        # kernel picks a valid src IP from the egress interface.
+        iptables -t nat -C POSTROUTING -d "$_imds_target/32" -p tcp --dport "$_imds_port" \
+            -j MASQUERADE 2>/dev/null || \
+        iptables -t nat -A POSTROUTING -d "$_imds_target/32" -p tcp --dport "$_imds_port" \
+            -j MASQUERADE 2>/dev/null || true
+        # Surface the outcome to docker logs so a missing DNAT is observable
+        # from outside the container without having to exec in.
+        if iptables -t nat -C OUTPUT -d 169.254.169.254/32 -p tcp --dport 80 \
+           -j DNAT --to-destination "$_imds_target:$_imds_port" 2>/dev/null; then
+            echo "[localemu-imds] DNAT installed: 169.254.169.254:80 -> $_imds_target:$_imds_port" >&2
+        else
+            echo "[localemu-imds] DNAT install FAILED (target=$_imds_target port=$_imds_port)" >&2
+        fi
+    fi
+fi
+
+echo "[localemu] no SSH key provided -- IMDS DNAT installed, container staying alive" >&2
+
+# ----- VPC Block Public Access (drops IGW ingress / egress on eth0 when active) -----
+if command -v iptables >/dev/null 2>&1 \
+    && [ "${LOCALEMU_VPC_BPA_EXCLUDED:-false}" != "true" ]; then
+    _bpa_mode="${LOCALEMU_VPC_BPA_MODE:-off}"
+    if [ "$_bpa_mode" = "block-ingress" ] || [ "$_bpa_mode" = "block-bidirectional" ]; then
+        iptables -N LOCALEMU_VPC_BPA_IN 2>/dev/null || iptables -F LOCALEMU_VPC_BPA_IN
+        iptables -A LOCALEMU_VPC_BPA_IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+        iptables -A LOCALEMU_VPC_BPA_IN -i eth0 -j DROP
+        iptables -C INPUT -j LOCALEMU_VPC_BPA_IN 2>/dev/null \
+            || iptables -I INPUT 1 -j LOCALEMU_VPC_BPA_IN
+        if [ "$_bpa_mode" = "block-bidirectional" ]; then
+            iptables -N LOCALEMU_VPC_BPA_OUT 2>/dev/null || iptables -F LOCALEMU_VPC_BPA_OUT
+            iptables -A LOCALEMU_VPC_BPA_OUT -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+            iptables -A LOCALEMU_VPC_BPA_OUT -o eth0 -j DROP
+            iptables -C OUTPUT -j LOCALEMU_VPC_BPA_OUT 2>/dev/null \
+                || iptables -I OUTPUT 1 -j LOCALEMU_VPC_BPA_OUT
+        fi
+        echo "[localemu-vpc-bpa] applied mode=$_bpa_mode on eth0" >&2
+    fi
+fi
+
+exec sh -c 'while true; do sleep 3600; done'
+"""
+
+
 @dataclass
 class Ec2ContainerInfo:
     """Tracks a running EC2 Docker container."""
@@ -628,15 +709,39 @@ class DockerVmManager:
             env_vars["LOCALEMU_IMDS_HOST_FALLBACK"] = "1"
             env_vars["LOCALEMU_IMDS_HOST_FALLBACK_PORT"] = str(imds_host_fallback_port)
 
+        # VPC Block Public Access: read the per-account-region state and
+        # whether this instance's subnet / VPC has an active exclusion. The
+        # entrypoint scripts install iptables DROP rules on eth0 when
+        # mode != "off" and the instance is not excluded.
+        try:
+            from localemu.services.ec2.account_settings import (
+                get_vpc_bpa_mode,
+                is_instance_excluded_from_vpc_bpa,
+            )
+
+            _bpa_region = region or "us-east-1"
+            _bpa_mode = get_vpc_bpa_mode(account_id, _bpa_region)
+            env_vars["LOCALEMU_VPC_BPA_MODE"] = _bpa_mode
+            if _bpa_mode != "off":
+                excluded = is_instance_excluded_from_vpc_bpa(
+                    account_id, _bpa_region, vpc_id, subnet_id
+                )
+                env_vars["LOCALEMU_VPC_BPA_EXCLUDED"] = "true" if excluded else "false"
+        except Exception as e:
+            # Best-effort: never fail RunInstances on a metadata read.
+            LOG.debug("VPC BPA env-var resolution skipped: %s", e)
+
         # Build container configuration
         ports = PortMappings()
         ports.add(docker_ssh_port, 22)
 
-        # When a public key is available, run sshd; otherwise fall back to sleep loop
+        # The link-local IMDS DNAT (169.254.169.254 -> sidecar) is installed
+        # by BOTH entrypoint scripts so it runs regardless of whether the
+        # instance was launched with --key-name. Closes BUG-003.
         if public_key:
             container_command = ["sh", "-c", SSHD_ENTRYPOINT_SCRIPT]
         else:
-            container_command = ["sh", "-c", "while true; do sleep 3600; done"]
+            container_command = ["sh", "-c", NO_SSH_ENTRYPOINT_SCRIPT]
 
         # Primary network is the shared port-publishing bridge so Docker
         # actually publishes ``-p`` bindings (VPC networks are

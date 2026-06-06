@@ -3350,6 +3350,617 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         ]
         return GetSecurityGroupsForVpcResult(SecurityGroupForVpcs=sgs, NextToken=None)
 
+    # ----- EC2 account-level settings (Snapshot BPA + Serial Console) -----
+    # Both default to AWS's brand-new-account state (unblocked / disabled).
+    # State is persisted in the ec2_account_settings store so PERSISTENCE=1
+    # survives restarts. ``ModifySnapshotAttribute`` is overridden so that,
+    # when Snapshot BPA is enabled, public-share requests on snapshots are
+    # rejected with ``OperationNotPermitted``, matching AWS behavior.
+
+    @handler("GetSnapshotBlockPublicAccessState", expand=False)
+    def get_snapshot_block_public_access_state(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        return {
+            "State": store.snapshot_bpa_state,
+            "ManagedBy": store.snapshot_bpa_managed_by,
+        }
+
+    @handler("EnableSnapshotBlockPublicAccess", expand=False)
+    def enable_snapshot_block_public_access(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        state = request.get("State")
+        # AWS docs: the only accepted enable states are block-all-sharing
+        # and block-new-sharing. "unblocked" is rejected even though it
+        # appears in the enum on the boto stub (boto/boto3#3942).
+        if state not in ("block-all-sharing", "block-new-sharing"):
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "Invalid value for State. Allowed values are "
+                "'block-all-sharing' and 'block-new-sharing'.",
+            )
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        store.snapshot_bpa_state = state
+        return {"State": state}
+
+    @handler("DisableSnapshotBlockPublicAccess", expand=False)
+    def disable_snapshot_block_public_access(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        store.snapshot_bpa_state = "unblocked"
+        return {"State": "unblocked"}
+
+    @handler("GetSerialConsoleAccessStatus", expand=False)
+    def get_serial_console_access_status(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        return {
+            "SerialConsoleAccessEnabled": store.serial_console_enabled,
+            "ManagedBy": store.serial_console_managed_by,
+        }
+
+    @handler("EnableSerialConsoleAccess", expand=False)
+    def enable_serial_console_access(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        store.serial_console_enabled = True
+        return {"SerialConsoleAccessEnabled": True}
+
+    @handler("DisableSerialConsoleAccess", expand=False)
+    def disable_serial_console_access(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        store = ec2_account_settings_stores[context.account_id][
+            context.region or "us-east-1"
+        ]
+        store.serial_console_enabled = False
+        return {"SerialConsoleAccessEnabled": False}
+
+    @handler("ModifySnapshotAttribute", expand=False)
+    def modify_snapshot_attribute(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        """Snapshot Block Public Access enforcement.
+
+        When the per-account-region Snapshot BPA state is
+        ``block-all-sharing`` or ``block-new-sharing``, any call that
+        attempts to grant public sharing on a snapshot is rejected with
+        ``OperationNotPermitted``. AWS supports two request shapes:
+
+        * Modern: ``CreateVolumePermission={"Add":[{"Group":"all"}]}``
+        * Legacy: ``Attribute=createVolumePermission`` +
+          ``OperationType=add`` + ``UserIds=["all"]``
+
+        Both forms are recognized here. Non-public permission changes are
+        unaffected and are delegated to moto.
+        """
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        is_public_add = False
+        cvp = request.get("CreateVolumePermission") or {}
+        if any(
+            (u or {}).get("Group") == "all" for u in (cvp.get("Add") or [])
+        ):
+            is_public_add = True
+        if (
+            request.get("Attribute") == "createVolumePermission"
+            and request.get("OperationType") == "add"
+            and "all" in (request.get("UserIds") or [])
+        ):
+            is_public_add = True
+        if is_public_add:
+            store = ec2_account_settings_stores[context.account_id][
+                context.region or "us-east-1"
+            ]
+            if store.snapshot_bpa_state in (
+                "block-all-sharing",
+                "block-new-sharing",
+            ):
+                raise CommonServiceException(
+                    "OperationNotPermitted",
+                    "Public sharing of EBS snapshots is blocked for this "
+                    "account-region by Snapshot Block Public Access.",
+                )
+        return call_moto(context)
+
+    # ----- VPC Block Public Access: options + exclusions (metadata) -----
+    # The iptables data-plane enforcement lives in
+    # services/ec2/docker/sg_iptables.py and consults the per-region state
+    # written here at rule-build time. Default for a brand-new account:
+    # ``InternetGatewayBlockMode=off``, ``State=default-state``,
+    # ``ExclusionsAllowed=allowed``, no exclusions.
+
+    _VPC_BPA_BLOCK_MODES = ("off", "block-bidirectional", "block-ingress")
+    _EXCLUSION_MODES = ("allow-bidirectional", "allow-egress")
+    _EXCLUSION_QUOTA_PER_REGION = 50
+
+    @staticmethod
+    def _gen_vpc_bpa_exclusion_id() -> str:
+        import secrets
+
+        return "vpcbpa-excl-" + "".join(
+            secrets.choice("0123456789abcdef") for _ in range(17)
+        )
+
+    @staticmethod
+    def _vpc_bpa_resource_arn(
+        account_id: str,
+        region: str,
+        subnet_id: str | None,
+        vpc_id: str | None,
+    ) -> str:
+        if subnet_id:
+            return f"arn:aws:ec2:{region}:{account_id}:subnet/{subnet_id}"
+        if vpc_id:
+            return f"arn:aws:ec2:{region}:{account_id}:vpc/{vpc_id}"
+        return ""
+
+    @staticmethod
+    def _vpc_bpa_extract_tags(tag_specs: list | None) -> list:
+        out: list = []
+        for spec in tag_specs or []:
+            for tag in spec.get("Tags") or []:
+                out.append({"Key": tag.get("Key"), "Value": tag.get("Value")})
+        return out
+
+    @staticmethod
+    def _vpc_bpa_filter_match(record: dict, filters: list | None) -> bool:
+        """AWS supports filters: resource-arn,
+        internet-gateway-exclusion-mode, state, tag-key, tag-value,
+        and ``tag:<key>=<value>``. ANDed across filters, ORed within
+        a filter's values."""
+        if not filters:
+            return True
+        for f in filters:
+            name = f.get("Name") or ""
+            values = f.get("Values") or []
+            if name == "resource-arn":
+                if record.get("ResourceArn") not in values:
+                    return False
+            elif name == "internet-gateway-exclusion-mode":
+                if record.get("InternetGatewayExclusionMode") not in values:
+                    return False
+            elif name == "state":
+                if record.get("State") not in values:
+                    return False
+            elif name == "tag-key":
+                keys = {t.get("Key") for t in record.get("TagSet") or []}
+                if not (keys & set(values)):
+                    return False
+            elif name == "tag-value":
+                vals = {t.get("Value") for t in record.get("TagSet") or []}
+                if not (vals & set(values)):
+                    return False
+            elif name.startswith("tag:"):
+                key = name[4:]
+                matched = any(
+                    t.get("Key") == key and t.get("Value") in values
+                    for t in record.get("TagSet") or []
+                )
+                if not matched:
+                    return False
+            # Unknown filter names: silently ignored, matching the lenient
+            # behavior of describe-* APIs in AWS for unrecognized filters.
+        return True
+
+    @handler("DescribeVpcBlockPublicAccessOptions", expand=False)
+    def describe_vpc_block_public_access_options(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        options = {
+            "AwsAccountId": context.account_id,
+            "AwsRegion": region,
+            "InternetGatewayBlockMode": store.vpc_bpa_internet_gateway_block_mode,
+            "State": store.vpc_bpa_state,
+            "ExclusionsAllowed": store.vpc_bpa_exclusions_allowed,
+            "ManagedBy": store.vpc_bpa_managed_by,
+        }
+        if store.vpc_bpa_last_update_timestamp is not None:
+            options["LastUpdateTimestamp"] = datetime.fromtimestamp(
+                store.vpc_bpa_last_update_timestamp, UTC
+            )
+        return {"VpcBlockPublicAccessOptions": options}
+
+    @handler("ModifyVpcBlockPublicAccessOptions", expand=False)
+    def modify_vpc_block_public_access_options(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        mode = request.get("InternetGatewayBlockMode")
+        if mode not in self._VPC_BPA_BLOCK_MODES:
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "Invalid value for InternetGatewayBlockMode. Allowed values: "
+                f"{', '.join(self._VPC_BPA_BLOCK_MODES)}.",
+            )
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        store.vpc_bpa_internet_gateway_block_mode = mode
+        # AWS transitions update-in-progress -> update-complete; we complete
+        # synchronously since metadata changes don't take wall time here.
+        store.vpc_bpa_state = "update-complete"
+        store.vpc_bpa_last_update_timestamp = time.time()
+        return self.describe_vpc_block_public_access_options(context, {})
+
+    @handler("CreateVpcBlockPublicAccessExclusion", expand=False)
+    def create_vpc_block_public_access_exclusion(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        mode = request.get("InternetGatewayExclusionMode")
+        subnet_id = request.get("SubnetId")
+        vpc_id = request.get("VpcId")
+        tag_specs = request.get("TagSpecifications") or []
+
+        if mode not in self._EXCLUSION_MODES:
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "Invalid value for InternetGatewayExclusionMode. Allowed values: "
+                f"{', '.join(self._EXCLUSION_MODES)}.",
+            )
+        # AWS requires exactly one of SubnetId / VpcId. Both-or-neither
+        # rejected with InvalidParameterCombination.
+        if bool(subnet_id) == bool(vpc_id):
+            raise CommonServiceException(
+                "InvalidParameterCombination",
+                "Exactly one of SubnetId or VpcId must be provided.",
+            )
+
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        if len(store.vpc_bpa_exclusions) >= self._EXCLUSION_QUOTA_PER_REGION:
+            raise CommonServiceException(
+                "ResourceLimitExceeded",
+                "VPC Block Public Access exclusion quota exceeded "
+                f"(limit: {self._EXCLUSION_QUOTA_PER_REGION} per region).",
+            )
+
+        eid = self._gen_vpc_bpa_exclusion_id()
+        now_dt = datetime.fromtimestamp(time.time(), UTC)
+        arn = self._vpc_bpa_resource_arn(
+            context.account_id, region, subnet_id, vpc_id
+        )
+        record = {
+            "ExclusionId": eid,
+            "InternetGatewayExclusionMode": mode,
+            "ResourceArn": arn,
+            "State": "create-complete",
+            "Reason": "",
+            "CreationTimestamp": now_dt,
+            "LastUpdateTimestamp": now_dt,
+            "TagSet": self._vpc_bpa_extract_tags(tag_specs),
+        }
+        store.vpc_bpa_exclusions[eid] = record
+        return {"VpcBlockPublicAccessExclusion": record}
+
+    @handler("ModifyVpcBlockPublicAccessExclusion", expand=False)
+    def modify_vpc_block_public_access_exclusion(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        eid = request.get("ExclusionId")
+        mode = request.get("InternetGatewayExclusionMode")
+        if mode not in self._EXCLUSION_MODES:
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "Invalid value for InternetGatewayExclusionMode. Allowed values: "
+                f"{', '.join(self._EXCLUSION_MODES)}.",
+            )
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        record = store.vpc_bpa_exclusions.get(eid)
+        if record is None:
+            raise CommonServiceException(
+                "InvalidVpcBlockPublicAccessExclusionId.NotFound",
+                f"The exclusion '{eid}' does not exist.",
+            )
+        record["InternetGatewayExclusionMode"] = mode
+        record["State"] = "update-complete"
+        record["LastUpdateTimestamp"] = datetime.fromtimestamp(time.time(), UTC)
+        return {"VpcBlockPublicAccessExclusion": record}
+
+    @handler("DeleteVpcBlockPublicAccessExclusion", expand=False)
+    def delete_vpc_block_public_access_exclusion(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        eid = request.get("ExclusionId")
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        record = store.vpc_bpa_exclusions.pop(eid, None)
+        if record is None:
+            raise CommonServiceException(
+                "InvalidVpcBlockPublicAccessExclusionId.NotFound",
+                f"The exclusion '{eid}' does not exist.",
+            )
+        # AWS keeps the exclusion observable briefly via Describe with
+        # State=delete-complete; we synchronously pop here and emit the
+        # terminal record so the immediate response is faithful.
+        now_dt = datetime.fromtimestamp(time.time(), UTC)
+        record["State"] = "delete-complete"
+        record["DeletionTimestamp"] = now_dt
+        record["LastUpdateTimestamp"] = now_dt
+        return {"VpcBlockPublicAccessExclusion": record}
+
+    @handler("DescribeVpcBlockPublicAccessExclusions", expand=False)
+    def describe_vpc_block_public_access_exclusions(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        explicit_ids = (
+            request.get("ExclusionIds") or request.get("ExclusionId") or []
+        )
+        filters = request.get("Filters") or []
+        max_results = request.get("MaxResults") or 1000
+        if not (5 <= max_results <= 1000):
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "MaxResults must be between 5 and 1000 inclusive.",
+            )
+        records = []
+        for eid, rec in store.vpc_bpa_exclusions.items():
+            if explicit_ids and eid not in explicit_ids:
+                continue
+            if not self._vpc_bpa_filter_match(rec, filters):
+                continue
+            records.append(rec)
+        records = records[:max_results]
+        return {"VpcBlockPublicAccessExclusions": records}
+
+    # ----- EC2 Instance Connect Endpoints (EICE) -----
+    # Metadata-only: the endpoint is recorded, can be described, modified
+    # via tags, and deleted, but the SSH-over-API tunnel itself is not
+    # emulated. This is enough for read-only security scanners and IaC
+    # providers (CloudFormation / Terraform) that just need the endpoint
+    # to exist with realistic shape.
+
+    _EICE_IP_TYPES = ("ipv4", "dualstack", "ipv6")
+
+    @staticmethod
+    def _gen_eice_id() -> str:
+        import secrets
+
+        return "eice-" + "".join(
+            secrets.choice("0123456789abcdef") for _ in range(17)
+        )
+
+    @staticmethod
+    def _eice_filter_match(record: dict, filters: list | None) -> bool:
+        if not filters:
+            return True
+        for f in filters:
+            name = f.get("Name") or ""
+            values = f.get("Values") or []
+            if name == "instance-connect-endpoint-id":
+                if record.get("InstanceConnectEndpointId") not in values:
+                    return False
+            elif name == "state":
+                if record.get("State") not in values:
+                    return False
+            elif name == "subnet-id":
+                if record.get("SubnetId") not in values:
+                    return False
+            elif name == "vpc-id":
+                if record.get("VpcId") not in values:
+                    return False
+            elif name == "tag-key":
+                keys = {t.get("Key") for t in record.get("Tags") or []}
+                if not (keys & set(values)):
+                    return False
+            elif name.startswith("tag:"):
+                key = name[4:]
+                if not any(
+                    t.get("Key") == key and t.get("Value") in values
+                    for t in record.get("Tags") or []
+                ):
+                    return False
+        return True
+
+    @handler("CreateInstanceConnectEndpoint", expand=False)
+    def create_instance_connect_endpoint(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        subnet_id = request.get("SubnetId")
+        if not subnet_id:
+            raise CommonServiceException(
+                "MissingParameter",
+                "SubnetId is required for CreateInstanceConnectEndpoint.",
+            )
+        ip_address_type = request.get("IpAddressType") or "ipv4"
+        if ip_address_type not in self._EICE_IP_TYPES:
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "Invalid IpAddressType. Allowed values: "
+                f"{', '.join(self._EICE_IP_TYPES)}.",
+            )
+        preserve_client_ip = bool(request.get("PreserveClientIp", False))
+        if preserve_client_ip and ip_address_type != "ipv4":
+            raise CommonServiceException(
+                "InvalidParameterCombination",
+                "PreserveClientIp=true requires IpAddressType=ipv4.",
+            )
+        sg_ids = request.get("SecurityGroupIds") or request.get("SecurityGroupId") or []
+        tag_specs = request.get("TagSpecifications") or []
+
+        # Best-effort VPC lookup via moto so the response carries VpcId.
+        vpc_id = ""
+        try:
+            backend = get_ec2_backend(context.account_id, context.region or "us-east-1")
+            subnet = next(
+                (s for s in backend.subnets.values() if s.id == subnet_id),
+                None,
+            )
+            if subnet is not None:
+                vpc_id = subnet.vpc_id or ""
+        except Exception:
+            pass
+
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        eid = self._gen_eice_id()
+        now_dt = datetime.fromtimestamp(time.time(), UTC)
+        arn = (
+            f"arn:aws:ec2:{region}:{context.account_id}"
+            f":instance-connect-endpoint/{eid}"
+        )
+        record = {
+            "InstanceConnectEndpointId": eid,
+            "InstanceConnectEndpointArn": arn,
+            "SubnetId": subnet_id,
+            "VpcId": vpc_id,
+            "AvailabilityZone": f"{region}a",
+            "State": "create-complete",
+            "StateMessage": "",
+            "DnsName": f"{eid}.{region}.ec2-instance-connect-endpoint.aws",
+            "FipsDnsName": (
+                f"{eid}-fips.{region}.ec2-instance-connect-endpoint.aws"
+            ),
+            "NetworkInterfaceIds": [],
+            "SecurityGroupIds": list(sg_ids),
+            "IpAddressType": ip_address_type,
+            "PreserveClientIp": preserve_client_ip,
+            "OwnerId": context.account_id,
+            "CreatedAt": now_dt,
+            "Tags": [
+                {"Key": tag.get("Key"), "Value": tag.get("Value")}
+                for spec in tag_specs
+                for tag in (spec.get("Tags") or [])
+            ],
+        }
+        store.instance_connect_endpoints[eid] = record
+        return {
+            "InstanceConnectEndpoint": record,
+            "ClientToken": request.get("ClientToken", ""),
+        }
+
+    @handler("DeleteInstanceConnectEndpoint", expand=False)
+    def delete_instance_connect_endpoint(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+        import time
+
+        eid = request.get("InstanceConnectEndpointId")
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        record = store.instance_connect_endpoints.pop(eid, None)
+        if record is None:
+            raise CommonServiceException(
+                "InvalidInstanceConnectEndpointId.NotFound",
+                f"The instance connect endpoint '{eid}' does not exist.",
+            )
+        record["State"] = "delete-complete"
+        record["StateMessage"] = ""
+        record["DeletedAt"] = datetime.fromtimestamp(time.time(), UTC)
+        return {"InstanceConnectEndpoint": record}
+
+    @handler("DescribeInstanceConnectEndpoints", expand=False)
+    def describe_instance_connect_endpoints(
+        self, context: RequestContext, request: dict
+    ) -> dict:
+        from localemu.services.ec2.account_settings import (
+            ec2_account_settings_stores,
+        )
+
+        region = context.region or "us-east-1"
+        store = ec2_account_settings_stores[context.account_id][region]
+        explicit_ids = (
+            request.get("InstanceConnectEndpointIds")
+            or request.get("InstanceConnectEndpointId")
+            or []
+        )
+        filters = request.get("Filters") or []
+        max_results = request.get("MaxResults") or 50
+        if not (1 <= max_results <= 50):
+            raise CommonServiceException(
+                "InvalidParameterValue",
+                "MaxResults must be between 1 and 50 inclusive.",
+            )
+        records = []
+        for eid, rec in store.instance_connect_endpoints.items():
+            if explicit_ids and eid not in explicit_ids:
+                continue
+            if not self._eice_filter_match(rec, filters):
+                continue
+            records.append(rec)
+        records = records[:max_results]
+        return {"InstanceConnectEndpoints": records}
+
 
 @patch(SubnetBackend.modify_subnet_attribute)
 def modify_subnet_attribute(fn, self, subnet_id, attr_name, attr_value):

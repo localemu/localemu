@@ -481,6 +481,12 @@ def efs():
 
 @aws_provider()
 def backup():
+    # Overlay moto with the missing read APIs that scanners hit
+    # (``DescribeProtectedResource``, ``ListProtectedResources``) plus
+    # ``CreateBackupSelection``. See ``services/backup/patches.py``.
+    from localemu.services.backup.patches import apply_patches as _apply_backup_patches
+
+    _apply_backup_patches()
     return _moto_service("backup")
 
 
