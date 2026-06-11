@@ -549,7 +549,7 @@
     }
   },
   "tests/aws/scenario/bookstore/test_bookstore.py::TestBookstoreApplication::test_opensearch_crud": {
-    "recorded-date": "12-09-2025, 09:51:48",
+    "recorded-date": "07-06-2026, 16:14:50",
     "recorded-content": {
       "describe_domains": {
         "DomainStatusList": [
@@ -962,57 +962,19 @@
         }
       },
       "get_compatible_versions": {
-        "CompatibleVersions": [
-          {
-            "SourceVersion": "OpenSearch_3.1",
-            "TargetVersions": []
-          }
-        ],
-        "ResponseMetadata": {
-          "HTTPHeaders": {},
-          "HTTPStatusCode": 200
-        }
+        "CompatibleVersions": []
       },
       "list_versions": {
         "Versions": [
-          "OpenSearch_3.1",
-          "OpenSearch_2.19",
-          "OpenSearch_2.17",
-          "OpenSearch_2.15",
-          "OpenSearch_2.13",
           "OpenSearch_2.11",
           "OpenSearch_2.9",
           "OpenSearch_2.7",
           "OpenSearch_2.5",
-          "OpenSearch_2.3",
           "OpenSearch_1.3",
-          "OpenSearch_1.2",
-          "OpenSearch_1.1",
-          "OpenSearch_1.0",
           "Elasticsearch_7.10",
           "Elasticsearch_7.9",
-          "Elasticsearch_7.8",
-          "Elasticsearch_7.7",
-          "Elasticsearch_7.4",
-          "Elasticsearch_7.1",
-          "Elasticsearch_6.8",
-          "Elasticsearch_6.7",
-          "Elasticsearch_6.5",
-          "Elasticsearch_6.4",
-          "Elasticsearch_6.3",
-          "Elasticsearch_6.2",
-          "Elasticsearch_6.0",
-          "Elasticsearch_5.6",
-          "Elasticsearch_5.5",
-          "Elasticsearch_5.3",
-          "Elasticsearch_5.1",
-          "Elasticsearch_2.3",
-          "Elasticsearch_1.5"
-        ],
-        "ResponseMetadata": {
-          "HTTPHeaders": {},
-          "HTTPStatusCode": 200
-        }
+          "Elasticsearch_7.7"
+        ]
       }
     }
   }

@@ -15,6 +15,8 @@ Evaluation order:
 import logging
 from enum import Enum
 
+from localemu.utils.aws.policy import iter_policy_statements
+
 from .action_matcher import matches_action
 from .condition_evaluator import matches_conditions
 from .identity import CallerIdentity, get_identity_policies, get_permission_boundary, get_session_policies
@@ -71,7 +73,7 @@ class PolicyEvaluator:
             all_policies.append(permission_boundary)
 
         for policy in all_policies:
-            for statement in policy.get("Statement", []):
+            for statement in iter_policy_statements(policy):
                 if statement.get("Effect") != "Deny":
                     continue
                 if not matches_action(statement, action):
@@ -108,7 +110,7 @@ class PolicyEvaluator:
         # The `_matches_principal` call here enforces the resource-policy
         # grammar: statements missing Principal do NOT auto-grant.
         if resource_policy:
-            for statement in resource_policy.get("Statement", []):
+            for statement in iter_policy_statements(resource_policy):
                 if statement.get("Effect") != "Allow":
                     continue
                 if not _matches_principal(statement, caller):
@@ -128,7 +130,7 @@ class PolicyEvaluator:
         # Step 3: Check identity-based policies for Allow
         identity_allow = False
         for policy in identity_policies:
-            for statement in policy.get("Statement", []):
+            for statement in iter_policy_statements(policy):
                 if statement.get("Effect") != "Allow":
                     continue
                 if not matches_action(statement, action):
@@ -152,7 +154,7 @@ class PolicyEvaluator:
         # Step 4: Check permission boundary (if present)
         if permission_boundary:
             boundary_allow = False
-            for statement in permission_boundary.get("Statement", []):
+            for statement in iter_policy_statements(permission_boundary):
                 if statement.get("Effect") != "Allow":
                     continue
                 if not matches_action(statement, action):
@@ -176,7 +178,7 @@ class PolicyEvaluator:
             if session_policies:
                 session_allow = False
                 for policy in session_policies:
-                    for statement in policy.get("Statement", []):
+                    for statement in iter_policy_statements(policy):
                         if statement.get("Effect") != "Allow":
                             continue
                         if not matches_action(statement, action):

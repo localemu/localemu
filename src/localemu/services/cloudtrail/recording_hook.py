@@ -169,7 +169,7 @@ def cloudtrail_activity_handler(chain, context, response):
 
         request_id = str(getattr(context, "request_id", "") or "")
 
-        # PARITY-03/07/08: trail logging state and event-selector filtering.
+        # Trail logging state and event-selector filtering.
         should_record = True
         try:
             import moto.backends as moto_backends

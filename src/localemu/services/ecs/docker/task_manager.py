@@ -60,7 +60,7 @@ class EcsTaskInfo:
     task_definition_arn: str
     containers: list[EcsContainerInfo] = field(default_factory=list)
     status: str = "RUNNING"
-    # PARITY-04: Timing fields
+    # Timing fields
     created_at: float | None = None
     started_at: float | None = None
     stopped_at: float | None = None
@@ -79,7 +79,7 @@ class DockerTaskManager:
         self._recover_orphaned_containers()
 
     def _recover_orphaned_containers(self) -> None:
-        """Scan for labeled ECS containers left from a previous run (BUG-11 equivalent)."""
+        """Scan for labeled ECS containers left from a previous run (equivalent)."""
         try:
             containers = DOCKER_CLIENT.list_containers(
                 filter=["label=localemu.service=ecs"],
@@ -122,7 +122,7 @@ class DockerTaskManager:
 
         Format: localemu-ecs-{cluster_short}-{task_id_prefix}-{container_name}
 
-        BUG-11: Use 12-char prefix instead of 8 to reduce collision probability.
+        Use 12-char prefix instead of 8 to reduce collision probability.
         """
         cluster_short = cluster.split("/")[-1] if "/" in cluster else cluster
         # Truncate cluster name to keep Docker name reasonable
@@ -174,7 +174,7 @@ class DockerTaskManager:
             task_arn: The task ARN assigned by Moto.
             count: Number of task copies to launch.
             overrides: Optional container overrides from the RunTask request.
-            launch_type: EC2 or FARGATE (PARITY-02).
+            launch_type: EC2 or FARGATE.
             Region: AWS region for env vars .
 
         Returns:
@@ -192,7 +192,7 @@ class DockerTaskManager:
                 if name:
                     container_overrides[name] = co
 
-        # PARITY-03: Extract network mode from task definition
+        # Extract network mode from task definition
         network_mode = task_definition.get("networkMode", "bridge")
 
         # Task role for IAM — RunTask's ``overrides.taskRoleArn`` wins over
@@ -201,7 +201,7 @@ class DockerTaskManager:
             "taskRoleArn"
         )
 
-        # PARITY-07: Extract volume definitions for mounting
+        # Extract volume definitions for mounting
         td_volumes = task_definition.get("volumes", [])
         # Build a map of volume name -> host path or Docker volume name
         volume_map: dict[str, str] = {}
@@ -219,7 +219,7 @@ class DockerTaskManager:
         results: list[EcsTaskInfo] = []
 
         for i in range(count):
-            # BUG-05: Generate unique task ID for each count iteration
+            # Generate unique task ID for each count iteration
             # When count > 1, Moto creates one task ARN but we need unique IDs
             if i == 0:
                 task_id = task_arn.split("/")[-1] if "/" in task_arn else str(uuid.uuid4())
@@ -235,7 +235,7 @@ class DockerTaskManager:
                 task_id=task_id,
                 cluster_name=cluster_name,
                 task_definition_arn=task_definition.get("taskDefinitionArn", ""),
-                # PARITY-04: Track creation time
+                # Track creation time
                 created_at=time.time(),
             )
 
@@ -375,7 +375,7 @@ class DockerTaskManager:
 
                 docker_name = self._container_name(cluster_name, task_id, c_name)
 
-                # PARITY-07: Build volume mappings from mountPoints
+                # Build volume mappings from mountPoints
                 volumes = VolumeMappings()
                 for mp in cdef.get("mountPoints", []):
                     if isinstance(mp, dict):
@@ -384,13 +384,13 @@ class DockerTaskManager:
                         if src_vol and container_path and src_vol in volume_map:
                             host_path = volume_map[src_vol]
                             read_only = mp.get("readOnly", False)
-                            # ISSUE-01: Use BindMount so the read-only flag is honored
+                            # Use BindMount so the read-only flag is honored
                             # by the Docker SDK. The legacy tuple form ignored the mode.
                             volumes.append(
                                 BindMount(host_path, container_path, read_only=read_only)
                             )
 
-                # PARITY-03: Determine Docker network mode
+                # Determine Docker network mode
                 docker_network = None
                 if network_mode == "host":
                     docker_network = "host"
@@ -416,7 +416,7 @@ class DockerTaskManager:
                     except (ValueError, TypeError):
                         pass
 
-                # PARITY-06: Build Docker health check flags from task definition.
+                # Build Docker health check flags from task definition.
                 # ECS accepts ["CMD", "exit 0"] or ["CMD-SHELL", "exit 0"] per
                 # RegisterTaskDefinition's ``containerDefinitions.healthCheck``
                 # contract; we translate both to ``docker create --health-*``
@@ -513,7 +513,7 @@ class DockerTaskManager:
                     try:
                         DOCKER_CLIENT.start_container(docker_name)
                     except Exception as start_err:
-                        # BUG-08: Container start failure — remove the created container
+                        # Container start failure — remove the created container
                         LOG.warning(
                             "Failed to start ECS container %s, removing: %s",
                             docker_name, start_err,
@@ -564,7 +564,7 @@ class DockerTaskManager:
                     )
                     task_info.containers.append(container_info)
 
-                    # PARITY-04: Track started time
+                    # Track started time
                     task_info.started_at = time.time()
 
                     port_info = (
@@ -743,7 +743,7 @@ class DockerTaskManager:
             container.status = "STOPPED"
 
         task_info.status = "STOPPED"
-        # PARITY-04: Track stop time
+        # Track stop time
         task_info.stopped_at = time.time()
         # #79: drop cached task-role credentials so the creds server
         # returns 404 for a stopped task (AWS semantics: creds revoked).

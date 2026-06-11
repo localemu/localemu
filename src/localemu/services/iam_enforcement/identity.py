@@ -157,7 +157,7 @@ def resolve_caller(
                     except Exception as exp_err:
                         LOG.debug("Failed to check expiration for %s: %s", access_key_id[:8], exp_err)
 
-                    # Load session tags: first from sts_stores (BUG-03 fix),
+                    # Load session tags: first from sts_stores,
                     # then from Moto's assumed_role object, then from IAM role tags
                     tags = {}
 

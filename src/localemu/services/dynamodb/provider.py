@@ -294,7 +294,7 @@ class EventForwarder:
                 hash_keys = list(
                     filter(lambda key: key["KeyType"] == "HASH", table_def.get("KeySchema", []))
                 )
-                # BUG-19 fix: guard against empty hash_keys
+                # guard against empty hash_keys
                 if hash_keys:
                     kinesis_partition_key = md5(f"{table_name}{hash_keys[0]['AttributeName']}")
                 else:
@@ -322,7 +322,7 @@ class EventForwarder:
     def is_kinesis_stream_exists(cls, stream_arn):
         """Check if a Kinesis stream exists.
 
-        BUG-15: Uses pagination to handle accounts with more than 100 streams.
+        Uses pagination to handle accounts with more than 100 streams.
         """
         account_id = extract_account_id_from_arn(stream_arn)
         region_name = extract_region_from_arn(stream_arn)
@@ -333,7 +333,7 @@ class EventForwarder:
             region_name=region_name,
         ).kinesis
         stream_name_from_arn = stream_arn.split("/", 1)[1]
-        # BUG-15: Paginate through all streams instead of only checking the first page
+        # Paginate through all streams instead of only checking the first page
         has_more = True
         exclusive_start = None
         while has_more:
@@ -536,7 +536,7 @@ def delete_expired_items() -> int:
                 attribute_name = ttl_spec.get("AttributeName")
                 current_time = int(time.time())  # UTC epoch seconds
                 try:
-                    # Paginate scan to handle tables > 1MB (BUG-02 fix)
+                    # Paginate scan to handle tables > 1MB
                     items_to_delete = []
                     last_key = None
                     while True:
@@ -654,7 +654,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
 
     def on_before_state_reset(self):
         rm_rf(self.tmp_asset_directory)
-        # BUG-04: Clear cached KMS keys so they are re-created after a state reset.
+        # Clear cached KMS keys so they are re-created after a state reset.
         # Without this, stale key IDs referencing deleted KMS keys would persist.
         with MANAGED_KMS_KEYS_LOCK:
             MANAGED_KMS_KEYS.clear()
@@ -864,7 +864,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
         store = get_store(context.account_id, context.region)
         store.TABLE_TAGS.pop(table_arn, None)
         store.REPLICAS.pop(table_name, None)
-        # Clean all store entries for deleted table (BUG-05 fix)
+        # Clean all store entries for deleted table
         store.table_definitions.pop(table_name, None)
         store.ttl_specifications.pop(table_name, None)
         store.streaming_destinations.pop(table_name, None)
@@ -1055,7 +1055,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
     ) -> ListTablesOutput:
         response = self.forward_request(context)
 
-        # Add replicated tables (BUG-07 fix: respect pagination)
+        # Add replicated tables (respect pagination)
         replicas = get_store(context.account_id, context.region).REPLICAS
         for replicated_table, replications in replicas.items():
             for replica_region, replica_description in replications.items():
@@ -1540,7 +1540,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
     def execute_transaction(
         self, context: RequestContext, execute_transaction_input: ExecuteTransactionInput
     ) -> ExecuteTransactionOutput:
-        # BUG-14: Create stream records for execute_transaction (same pattern as execute_statement)
+        # Create stream records for execute_transaction (same pattern as execute_statement)
         transact_statements = execute_transaction_input.get("TransactStatements", [])
 
         # Collect existing items for all tables involved in the transaction
@@ -1660,7 +1660,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
             .TABLE_TAGS.get(resource_arn, {})
             .items()
         ]
-        # BUG-08 fix: respect next_token pagination
+        # respect next_token pagination
         offset = 0
         if next_token:
             try:
@@ -1757,7 +1757,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
         region_name: RegionName = None,
         **kwargs,
     ) -> ListGlobalTablesOutput:
-        # BUG-09 fix: proper pagination support
+        # proper pagination support
         all_tables = sorted(
             [
                 select_attributes(tab, ["GlobalTableName", "ReplicationGroup"])
@@ -2245,7 +2245,7 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
         return_consumed_capacity: ReturnConsumedCapacity = None,
         **kwargs,
     ) -> BatchExecuteStatementOutput:
-        # BUG-14: Create stream records for batch_execute_statement
+        # Create stream records for batch_execute_statement
         table_existing_items: dict[str, list] = {}
         table_stream_types: dict[str, TableStreamType] = {}
         for stmt_entry in (statements or []):

@@ -329,7 +329,7 @@ class CloudTrailEventStore:
 
     def record(self, event: CloudTrailEvent) -> None:
         """Record a new event. Called from the response handler hook."""
-        # ISSUE-02: threshold check + counter reset must happen atomically
+        # threshold check + counter reset must happen atomically
         # inside the lock to prevent multiple threads from simultaneously
         # crossing the threshold and triggering concurrent save_to_disk calls.
         should_save = False

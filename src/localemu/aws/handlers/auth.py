@@ -160,3 +160,13 @@ class AccountIdEnricher(Handler):
 
         # Make Moto use the same Account ID as LocalEmu
         context.request.headers.add("x-moto-account-id", context.account_id)
+
+        # Register the account in the central registry the first time we
+        # see it. Idempotent for known accounts; cheap dict lookup otherwise.
+        # Failures here must never break the request chain — the registry
+        # is a discoverability aid, not a correctness gate.
+        try:
+            from localemu.accounts import get_registry
+            get_registry().ensure(context.account_id)
+        except Exception as e:
+            LOG.debug("Account registry ensure() skipped: %s", e)

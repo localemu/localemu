@@ -1,12 +1,15 @@
-"""Unit tests for operation -> IAM-action mapping (BUG-002).
+"""Unit tests for the operation -> IAM-action translation map.
 
-Before the fix, ``map_action`` had no Lambda entries, so the engine asked
-for ``lambda:Invoke`` (the wire operation name) instead of the AWS-correct
-IAM action ``lambda:InvokeFunction``. A policy granting the correct action
-got a 403; the workaround was to grant the non-AWS-standard ``lambda:Invoke``
-spelling that would never work in real AWS.
+AWS deliberately uses non-1:1 mappings between API operations and IAM
+actions: ``lambda:Invoke`` (the wire op) is authorized as
+``lambda:InvokeFunction`` ; S3's multipart suite collapses to
+``s3:PutObject`` ; SQS / SNS batch ops drop the ``Batch`` suffix ;
+S3Control access-point ops live in the ``s3:`` namespace. Without the
+translation map, a policy granting the AWS-correct IAM action gets a
+403 because the enforcer is checking against a non-existent permission
+like ``lambda:Invoke`` or ``s3control:CreateAccessPoint``.
 
-These tests cover every row of ``ACTION_MAP`` that we care about plus the
+These tests cover every row of ``ACTION_MAP`` we care about plus the
 default 1:1 fallback.
 """
 
@@ -20,7 +23,7 @@ from localemu.services.iam_enforcement.service_action_map import ACTION_MAP, map
 @pytest.mark.parametrize(
     "service, operation, expected",
     [
-        # ---- BUG-002: Lambda Invoke family ----
+        # ---- Lambda Invoke family (wire op vs IAM action) ----
         ("lambda", "Invoke", ["lambda:InvokeFunction"]),
         ("lambda", "InvokeWithResponseStream", ["lambda:InvokeFunction"]),
         ("lambda", "InvokeAsync", ["lambda:InvokeFunction"]),
@@ -76,6 +79,35 @@ from localemu.services.iam_enforcement.service_action_map import ACTION_MAP, map
             ],
         ),
         ("dynamodb", "TransactGetItems", ["dynamodb:GetItem"]),
+        # ---- S3Control AP ops use the s3: namespace ----
+        ("s3control", "CreateAccessPoint",       ["s3:CreateAccessPoint"]),
+        ("s3control", "GetAccessPoint",          ["s3:GetAccessPoint"]),
+        ("s3control", "ListAccessPoints",        ["s3:ListAccessPoints"]),
+        ("s3control", "DeleteAccessPoint",       ["s3:DeleteAccessPoint"]),
+        ("s3control", "PutAccessPointPolicy",    ["s3:PutAccessPointPolicy"]),
+        ("s3control", "GetAccessPointPolicy",    ["s3:GetAccessPointPolicy"]),
+        ("s3control", "DeleteAccessPointPolicy", ["s3:DeleteAccessPointPolicy"]),
+        ("s3control", "GetAccessPointPolicyStatus",
+            ["s3:GetAccessPointPolicyStatus"]),
+        # MRAP
+        ("s3control", "CreateMultiRegionAccessPoint",
+            ["s3:CreateMultiRegionAccessPoint"]),
+        ("s3control", "GetMultiRegionAccessPoint",
+            ["s3:GetMultiRegionAccessPoint"]),
+        ("s3control", "ListMultiRegionAccessPoints",
+            ["s3:ListMultiRegionAccessPoints"]),
+        # Object Lambda APs
+        ("s3control", "CreateAccessPointForObjectLambda",
+            ["s3:CreateAccessPointForObjectLambda"]),
+        ("s3control", "GetAccessPointForObjectLambda",
+            ["s3:GetAccessPointForObjectLambda"]),
+        # Account-level PAB
+        ("s3control", "GetPublicAccessBlock",   ["s3:GetAccountPublicAccessBlock"]),
+        ("s3control", "PutPublicAccessBlock",   ["s3:PutAccountPublicAccessBlock"]),
+        ("s3control", "DeletePublicAccessBlock", ["s3:PutAccountPublicAccessBlock"]),
+        # Storage Lens
+        ("s3control", "PutStorageLensConfiguration",
+            ["s3:PutStorageLensConfiguration"]),
         # ---- Default fallback: unknown service/operation maps 1:1 ----
         ("foobar", "DoSomething", ["foobar:DoSomething"]),
         ("ec2", "DescribeInstances", ["ec2:DescribeInstances"]),
@@ -88,13 +120,27 @@ def test_map_action(service: str, operation: str, expected: list[str]) -> None:
     assert map_action(service, operation) == expected
 
 
-def test_bug_002_lambda_invoke_returns_invoke_function_not_invoke() -> None:
-    """The BUG-002 regression assertion: lambda:Invoke (wire op) MUST map to
-    lambda:InvokeFunction (the real AWS IAM action), NOT to lambda:Invoke
-    (which is not a real IAM action and would never work in real AWS)."""
+def test_lambda_invoke_wire_op_maps_to_invoke_function_iam_action() -> None:
+    """``lambda:Invoke`` is the wire-protocol operation name ; the real
+    AWS IAM action is ``lambda:InvokeFunction``. The translator must
+    return the IAM action, never the wire op (which is not a real
+    permission and would never authorize on real AWS).
+    """
     actions = map_action("lambda", "Invoke")
     assert actions == ["lambda:InvokeFunction"]
     assert "lambda:Invoke" not in actions
+
+
+def test_s3control_create_access_point_uses_s3_namespace_iam_action() -> None:
+    """The s3control service uses the ``s3:`` namespace for its IAM
+    actions per AWS docs. ``CreateAccessPoint`` must authorize against
+    ``s3:CreateAccessPoint``, never ``s3control:CreateAccessPoint``
+    (which is not a real permission and would never authorize on real
+    AWS).
+    """
+    actions = map_action("s3control", "CreateAccessPoint")
+    assert actions == ["s3:CreateAccessPoint"]
+    assert "s3control:CreateAccessPoint" not in actions
 
 
 def test_action_map_has_minimum_expected_rows() -> None:

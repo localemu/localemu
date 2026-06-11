@@ -3,7 +3,7 @@
 Manages real k3s Kubernetes clusters via k3d for EKS CreateCluster calls.
 Each EKS cluster maps to a k3d cluster running a real Kubernetes control plane.
 
-BUG-09: TOCTOU port race is a known limitation. Between get_free_tcp_port()
+TOCTOU port race is a known limitation. Between get_free_tcp_port()
 and k3d's actual bind, another process could claim the port. This is an
 accepted trade-off for local emulation.
 """
@@ -24,7 +24,7 @@ LOG = logging.getLogger(__name__)
 K3D_CLUSTER_PREFIX = "localemu-eks"
 K3D_CREATE_TIMEOUT = 180  # seconds
 
-# PARITY-06: Map EKS Kubernetes versions to k3s image tags.
+# Map EKS Kubernetes versions to k3s image tags.
 # Not all EKS versions have direct k3s equivalents. When an exact match
 # is not available, we use the closest available k3s image.
 # The k3s image tags follow the format: rancher/k3s:v<version>-k3s1
@@ -136,24 +136,24 @@ class K3dClusterManager:
     Each EKS cluster name maps to one k3d cluster running a real k3s
     Kubernetes control plane.
 
-    BUG-03: Clusters are keyed by (account_id, region, name) tuple to support
+    Clusters are keyed by (account_id, region, name) tuple to support
     multi-account and multi-region isolation.
     """
 
     def __init__(self):
-        # BUG-03: Key by (account, region, name) instead of just name
+        # Key by (account, region, name) instead of just name
         self._clusters: dict[tuple[str, str, str], ClusterInfo] = {}
         self._lock = threading.Lock()
         self._k3d_verified = False
 
     def _cluster_key(self, name: str, account_id: str = "", region: str = "") -> tuple[str, str, str]:
-        """Build a composite key for multi-account/region support (BUG-03)."""
+        """Build a composite key for multi-account/region support."""
         return (account_id or "default", region or "us-east-1", name)
 
     def _k3d_cluster_name(self, eks_name: str, account_id: str = "", region: str = "") -> str:
         """Map EKS cluster name to k3d cluster name.
 
-        BUG-03: Include account/region in k3d name for uniqueness.
+        Include account/region in k3d name for uniqueness.
         """
         # Keep it short but unique
         suffix = ""
@@ -166,12 +166,12 @@ class K3dClusterManager:
     def _verify_k3d(self) -> None:
         """Check that k3d is installed and reachable. Raises RuntimeError if not.
 
-        ISSUE-04: the lock is held for the full probe (including subprocess.run)
+        the lock is held for the full probe (including subprocess.run)
         so that two concurrent callers cannot both shell out to ``k3d version``
         when _k3d_verified is still False. The probe is cheap (10s timeout,
         executed at most once per process) so holding the lock is acceptable.
         """
-        with self._lock:  # BUG-07 fix: protect _k3d_verified read/write
+        with self._lock:  # protect _k3d_verified read/write
             if self._k3d_verified:
                 return
             try:
@@ -207,8 +207,8 @@ class K3dClusterManager:
 
         :param name: the EKS cluster name
         :param kubernetes_version: optional Kubernetes version (e.g. "1.29")
-        :param account_id: AWS account ID for multi-account support (BUG-03)
-        :param region: AWS region for multi-region support (BUG-03)
+        :param account_id: AWS account ID for multi-account support
+        :param region: AWS region for multi-region support
         :returns: ClusterInfo with endpoint, CA cert, and kubeconfig
         :raises RuntimeError: if k3d is not installed or cluster creation fails
         """
@@ -216,7 +216,7 @@ class K3dClusterManager:
 
         key = self._cluster_key(name, account_id, region)
 
-        # BUG-02 fix: duplicate guard
+        # duplicate guard
         with self._lock:
             if key in self._clusters:
                 return self._clusters[key]
@@ -247,7 +247,7 @@ class K3dClusterManager:
             "--disable=traefik@server:0",
         ]
 
-        # PARITY-02/PARITY-06: Pass Kubernetes version via --image flag
+        # Pass Kubernetes version via --image flag
         # Map EKS version to k3s image tag when available
         if kubernetes_version:
             # Normalize version (strip "v" prefix if present, handle "1.29.x" -> "1.29")
@@ -271,7 +271,7 @@ class K3dClusterManager:
                 timeout=K3D_CREATE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
-            # BUG-08 fix: clean up partial cluster on timeout
+            # clean up partial cluster on timeout
             LOG.warning("k3d cluster create timed out after %ds, cleaning up...", K3D_CREATE_TIMEOUT)
             try:
                 subprocess.run(["k3d", "cluster", "delete", k3d_name], capture_output=True, timeout=30)
@@ -371,7 +371,7 @@ class K3dClusterManager:
         account_id: str = "",
         region: str = "",
     ) -> None:
-        """PARITY-04: Add k3d agent nodes for an EKS nodegroup.
+        """Add k3d agent nodes for an EKS nodegroup.
 
         Creates real k3d agent nodes that join the cluster, providing
         actual compute capacity instead of metadata-only nodegroups.
@@ -447,7 +447,7 @@ class K3dClusterManager:
     def get_cluster_info(self, name: str, account_id: str = "", region: str = "") -> ClusterInfo | None:
         """Return ClusterInfo for the given EKS cluster name, or None."""
         key = self._cluster_key(name, account_id, region)
-        with self._lock:  # BUG-06 fix: thread safety
+        with self._lock:  # thread safety
             return self._clusters.get(key)
 
     def stop_cluster(
@@ -623,7 +623,7 @@ class K3dClusterManager:
         persistence is OFF. Destructive — for the persistence path, see
         ``shutdown_all``.
 
-        Also scans for orphaned k3d clusters from previous crashes (BUG-10 fix).
+        Also scans for orphaned k3d clusters from previous crashes.
         """
         LOG.info("Cleaning up k3d EKS clusters...")
         with self._lock:
@@ -638,7 +638,7 @@ class K3dClusterManager:
             except Exception as e:
                 LOG.debug("Failed to clean up k3d cluster %s: %s", info.k3d_name, e)
 
-        # BUG-10 fix: scan for any orphaned localemu-eks-* k3d clusters
+        # scan for any orphaned localemu-eks-* k3d clusters
         try:
             result = subprocess.run(
                 ["k3d", "cluster", "list", "-o", "json"],

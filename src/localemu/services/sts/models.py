@@ -34,5 +34,5 @@ class STSStore(BaseStore):
 
 sts_stores = AccountRegionBundle("sts", STSStore)
 
-# BUG-02: Thread lock to prevent race conditions on session store access
+# Thread lock to prevent race conditions on session store access
 sts_store_lock = threading.Lock()

@@ -491,7 +491,7 @@ class EphemeralS3ObjectStore(S3ObjectStore):
 
     @staticmethod
     def _key_from_s3_object(s3_object: S3Object) -> str:
-        # BUG-S3-2 fix: use hashlib.md5 for stable, collision-resistant hashing
+        # Use hashlib.md5 for stable, collision-resistant hashing
         import hashlib
         return hashlib.md5(f"{s3_object.key}?{s3_object.version_id or 'null'}".encode()).hexdigest()
 

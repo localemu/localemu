@@ -56,26 +56,41 @@ def pytest_runtestloop(session):
         if item.parent and item.parent.cls:
             test_classes.add(item.parent.cls)
         # OpenSearch/Elasticsearch are pytests, not unit test classes, so we check based on the item parent's name.
-        # Any pytests that rely on opensearch/elasticsearch must be special-cased by adding them to the list below
+        # Any pytests that rely on opensearch/elasticsearch must be special-cased by adding them to the list below.
+        # The pre-install hooks for opensearch/es are optional: their test modules
+        # (``test_opensearch.py``, ``test_es.py``) may have been removed from the
+        # tree even though the snapshot/validation JSONs remain. When the module
+        # isn't importable, skip the pre-install — the targeted backend tests
+        # will install lazily at test time, or skip themselves if the backend
+        # is unavailable.
         parent_name = str(item.parent).lower()
         if any(opensearch_test in parent_name for opensearch_test in ["opensearch", "firehose"]):
-            from tests.aws.services.opensearch.test_opensearch import (
-                install_async as opensearch_install_async,
-            )
-
-            test_init_functions.add(opensearch_install_async)
+            try:
+                from tests.aws.services.opensearch.test_opensearch import (
+                    install_async as opensearch_install_async,
+                )
+            except ImportError:
+                pass
+            else:
+                test_init_functions.add(opensearch_install_async)
 
         if any(es_test in parent_name for es_test in ["elasticsearch", "firehose"]):
-            from tests.aws.services.es.test_es import install_async as es_install_async
-
-            test_init_functions.add(es_install_async)
+            try:
+                from tests.aws.services.es.test_es import install_async as es_install_async
+            except ImportError:
+                pass
+            else:
+                test_init_functions.add(es_install_async)
 
         if "transcribe" in parent_name:
-            from tests.aws.services.transcribe.test_transcribe import (
-                install_async as transcribe_install_async,
-            )
-
-            test_init_functions.add(transcribe_install_async)
+            try:
+                from tests.aws.services.transcribe.test_transcribe import (
+                    install_async as transcribe_install_async,
+                )
+            except ImportError:
+                pass
+            else:
+                test_init_functions.add(transcribe_install_async)
 
     for fn in test_init_functions:
         fn()

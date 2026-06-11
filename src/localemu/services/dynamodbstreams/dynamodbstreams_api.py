@@ -188,7 +188,7 @@ def delete_streams(account_id: str, region_name: str, table_arn: str) -> None:
                     exc_info=LOG.isEnabledFor(logging.DEBUG),
                 )
 
-        # BUG-16 fix: use daemon thread with proper logging instead of fire-and-forget
+        # Use daemon thread with proper logging instead of fire-and-forget
         t = FuncThread(_delete_stream)
         t.daemon = True
         t.start()
@@ -249,6 +249,6 @@ def get_original_region(
         return context.region
 
     table_name = table_name or table_name_from_stream_arn(stream_arn)
-    # Lazy import to avoid circular dependency (BUG-13 fix: use v1 provider, not v2)
+    # Lazy import to avoid circular dependency; use the v1 provider, not v2
     from localemu.services.dynamodb.provider import DynamoDBProvider
     return DynamoDBProvider.get_global_table_region(context=context, table_name=table_name)

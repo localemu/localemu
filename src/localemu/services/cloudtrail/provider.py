@@ -126,7 +126,7 @@ def _clear_delivery_state() -> None:
         _delivery_state.clear()
 
 # ---------------------------------------------------------------------------
-# PARITY-04: Periodic S3 log delivery
+# Periodic S3 log delivery
 # ---------------------------------------------------------------------------
 _s3_delivery_thread: threading.Thread | None = None
 # D6: the stop Event is (re)created on every start so the new thread's
@@ -411,7 +411,7 @@ def _run_delivery_cycle(stop_event: threading.Event) -> None:
 
 def _start_s3_log_delivery() -> None:
     """Start a background daemon that periodically writes CloudTrail events
-    to S3 buckets configured on each trail (PARITY-04).
+    to S3 buckets configured on each trail.
 
     Events are written as gzipped JSON files following the AWS key format:
     ``AWSLogs/{account_id}/CloudTrail/{region}/{year}/{month}/{day}/...json.gz``
@@ -471,7 +471,7 @@ def _start_s3_log_delivery() -> None:
 
 
 def _stop_s3_log_delivery() -> None:
-    """Stop the CloudTrail S3 delivery background thread (ISSUE-05).
+    """Stop the CloudTrail S3 delivery background thread.
 
     Also clears the cached delivery clients (D3) so the underlying
     botocore sockets can be released.
@@ -1761,7 +1761,7 @@ def create_cloudtrail_service() -> Service:
     # LocalEmu's native SNS store.
     _patch_moto_topic_check()
 
-    # PARITY-04: Start S3 log delivery background thread
+    # Start S3 log delivery background thread
     _start_s3_log_delivery()
 
     # F2: register the activity-recording response handler via the

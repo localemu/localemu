@@ -280,6 +280,12 @@ class S3Object:
     kms_key_id: SSEKMSKeyId | None  # inherit bucket
     bucket_key_enabled: bool | None  # inherit bucket
     sse_key_hash: SSECustomerKeyMD5 | None
+    # Set by the replication engine. PENDING -> COMPLETED/FAILED on the
+    # source ; REPLICA on the destination ; None when the bucket has no
+    # ReplicationConfiguration or the object pre-dates the rule.
+    # Serialized as the ``x-amz-replication-status`` header by the
+    # provider's GetObject / HeadObject builders.
+    replication_status: str | None
     # ``checksum_algorithm`` can only be None when SSE-C is set and while creating a Multipart.
     # TODO: remove `| None` when SSE-C is removed from AWS S3
     checksum_algorithm: ChecksumAlgorithm | None
@@ -347,6 +353,10 @@ class S3Object:
         self.restore = None
         self.owner = owner
         self.internal_last_modified = 0
+        # Default ``None`` (no header on the wire); the replication engine
+        # transitions this to PENDING/COMPLETED/FAILED on the source and
+        # to REPLICA on the destination.
+        self.replication_status = None
 
     def get_system_metadata_fields(self) -> dict:
         # TODO: change when updating the schema -> make it a property
@@ -405,6 +415,9 @@ class S3DeleteMarker:
         self.version_id = version_id
         self.last_modified = datetime.now(tz=_gmt_zone_info)
         self.is_current = True
+        # Same semantics as on S3Object: the replication engine flips this
+        # to REPLICA on the destination delete marker.
+        self.replication_status = None
 
     @staticmethod
     def is_locked(*args, **kwargs) -> bool:

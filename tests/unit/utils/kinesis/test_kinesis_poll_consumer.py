@@ -308,3 +308,169 @@ def test_back_compat_alias_kinesis_processor_thread():
         KinesisProcessorThread as B,
     )
     assert A is B, "KinesisProcessorThread must alias the new consumer class"
+
+
+# ---------------------------------------------------------------------------
+# Thread-protocol compatibility: is_alive()
+#
+# ``KinesisPollConsumer.start()`` registers ``self`` in
+# :data:`localemu.utils.threads.TMP_THREADS`. That list is pruned on every
+# :func:`localemu.utils.threads.start_thread` call via ``t.is_alive()``.
+# Without an ``is_alive`` method the prune crashed with ``AttributeError``,
+# which fired on every Lambda invocation (CloudWatch metric recorder uses
+# ``start_thread``) and cascaded into thousands of downstream
+# ``ResourceNotFoundException`` errors. These tests pin the contract.
+# ---------------------------------------------------------------------------
+
+
+def test_is_alive_returns_false_before_start():
+    """Before ``start()`` the consumer has no threads -> dead."""
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    assert consumer.is_alive() is False
+
+
+def test_is_alive_returns_true_while_shard_threads_run():
+    """Between ``start()`` and ``stop()`` with live shard threads -> alive."""
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    # Simulate post-start state without spawning real threads.
+    fake_thread = MagicMock()
+    fake_thread.is_alive.return_value = True
+    consumer._shard_threads = [fake_thread]
+    consumer._started.set()
+    assert consumer.is_alive() is True
+
+
+def test_is_alive_returns_false_after_stop():
+    """After ``stop()`` the consumer is dead even if a shard thread happens
+    to outlive the join timeout."""
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    fake_thread = MagicMock()
+    fake_thread.is_alive.return_value = True
+    consumer._shard_threads = [fake_thread]
+    consumer._started.set()
+    consumer.stopped = True
+    assert consumer.is_alive() is False
+
+
+def test_is_alive_returns_false_if_every_shard_thread_died():
+    """If every shard polling thread has exited the consumer is dead."""
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    dead_a, dead_b = MagicMock(), MagicMock()
+    dead_a.is_alive.return_value = False
+    dead_b.is_alive.return_value = False
+    consumer._shard_threads = [dead_a, dead_b]
+    consumer._started.set()
+    assert consumer.is_alive() is False
+
+
+def test_is_alive_returns_true_if_any_one_shard_thread_lives():
+    """A single surviving shard thread keeps the consumer alive."""
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    dead = MagicMock()
+    dead.is_alive.return_value = False
+    alive = MagicMock()
+    alive.is_alive.return_value = True
+    consumer._shard_threads = [dead, alive, dead]
+    consumer._started.set()
+    assert consumer.is_alive() is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: start_thread can prune TMP_THREADS containing a
+# KinesisPollConsumer without crashing.
+# ---------------------------------------------------------------------------
+
+
+def test_start_thread_can_prune_tmp_threads_with_poll_consumer():
+    """If a KinesisPollConsumer sits in TMP_THREADS, the next
+    ``start_thread`` call must prune the list without raising
+    ``AttributeError: 'KinesisPollConsumer' object has no attribute 'is_alive'``.
+    """
+    from localemu.utils import threads as t_mod
+    from localemu.utils.threads import start_thread
+
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    # Mimic what KinesisPollConsumer.start() does at its tail.
+    consumer._started.set()
+
+    # Snapshot + drop TMP_THREADS to avoid leaking other tests' state, then
+    # seed it with our consumer.
+    saved = list(t_mod.TMP_THREADS)
+    t_mod.TMP_THREADS[:] = [consumer]
+    try:
+        # The lambda is just any callable; the body returns immediately.
+        t = start_thread(lambda *_args, **_kw: None, name="prune-regression")
+        try:
+            t.join(timeout=2.0)
+        finally:
+            # After prune, the dead consumer must be gone (it returned
+            # is_alive=False because we never populated _shard_threads) and
+            # the freshly-spawned FuncThread must be present.
+            assert consumer not in t_mod.TMP_THREADS, (
+                "prune should have dropped the consumer when its shards "
+                "list was empty"
+            )
+            assert t in t_mod.TMP_THREADS
+    finally:
+        t_mod.TMP_THREADS[:] = saved
+
+
+def test_start_thread_keeps_live_poll_consumer_in_tmp_threads():
+    """A KinesisPollConsumer with a live shard thread must SURVIVE the prune."""
+    from localemu.utils import threads as t_mod
+    from localemu.utils.threads import start_thread
+
+    consumer = KinesisPollConsumer(
+        stream_name="s",
+        account_id="000000000000",
+        region_name="us-east-1",
+        listener_function=lambda recs: None,
+    )
+    fake_thread = MagicMock()
+    fake_thread.is_alive.return_value = True
+    consumer._shard_threads = [fake_thread]
+    consumer._started.set()
+
+    saved = list(t_mod.TMP_THREADS)
+    t_mod.TMP_THREADS[:] = [consumer]
+    try:
+        t = start_thread(lambda *_args, **_kw: None, name="keep-live-consumer")
+        try:
+            t.join(timeout=2.0)
+        finally:
+            assert consumer in t_mod.TMP_THREADS, (
+                "prune must keep a consumer that reports is_alive() True"
+            )
+            assert t in t_mod.TMP_THREADS
+    finally:
+        t_mod.TMP_THREADS[:] = saved

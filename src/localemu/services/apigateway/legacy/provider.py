@@ -2271,6 +2271,24 @@ class ApigatewayProvider(ApigatewayApi, ServiceLifecycleHook):
         response: Integration = integration.to_json()
 
         _key = (rest_api_id, resource_id, http_method)
+        # moto does not model ``connection_id`` on its Integration at all,
+        # so PutIntegration stashed it in ``_integration_connection_ids``
+        # to round-trip it on the wire. UpdateIntegration's patch ops
+        # never touch that side-store though, so a patch
+        # ``replace /connectionId -> <new value>`` used to leave the
+        # stash intact and the GET / response would still echo the old
+        # value. Walk the patch ops here and keep the stash in sync.
+        if patch_operations:
+            for op in patch_operations:
+                path = op.get("path") or ""
+                if path != "/connectionId":
+                    continue
+                op_kind = (op.get("op") or "").lower()
+                if op_kind in ("replace", "add"):
+                    _integration_connection_ids[_key] = op.get("value", "")
+                elif op_kind == "remove":
+                    _integration_connection_ids.pop(_key, None)
+
         if connection_id := _integration_connection_ids.get(_key):
             response["connectionId"] = connection_id
 

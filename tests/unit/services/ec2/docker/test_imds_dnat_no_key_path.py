@@ -1,17 +1,17 @@
-"""Unit tests for the IMDS DNAT decoupling (BUG-003).
+"""Unit tests for the IMDS DNAT installation on the no-key entrypoint path.
 
-Before the fix, the iptables OUTPUT-DNAT (169.254.169.254 -> sidecar) and
-POSTROUTING-MASQUERADE rules were embedded inside ``SSHD_ENTRYPOINT_SCRIPT``,
-which only runs when the instance was launched with ``--key-name``. Instances
-launched without a key ran ``sleep 3600`` instead and never got the rules.
-The fix adds ``NO_SSH_ENTRYPOINT_SCRIPT`` and uses it on the no-key branch.
+The iptables ``OUTPUT``-DNAT (169.254.169.254 -> sidecar) and
+``POSTROUTING``-MASQUERADE rules live in ``NO_SSH_ENTRYPOINT_SCRIPT`` and
+must stay byte-for-byte equivalent to the pair in ``SSHD_ENTRYPOINT_SCRIPT``,
+so an instance launched without ``--key-name`` reaches the canonical IMDS
+address the same way an instance launched with one does.
 
 These tests guard:
   * The no-key entrypoint contains the same OUTPUT-DNAT + POSTROUTING-MASQUERADE
     pair as the SSH entrypoint (the two cannot silently diverge).
   * Both rule installs are idempotent (``-C`` check before ``-A`` add).
-  * The no-key script emits the BUG-003 observability log line so a future
-    silent regression in the install path is visible from ``docker logs``.
+  * The no-key script emits an observability log line so a future silent
+    regression in the install path is visible from ``docker logs``.
   * The no-key script ends in a long-lived sleep so the container stays alive.
 """
 
@@ -81,7 +81,8 @@ def test_no_key_entrypoint_selects_sidecar_when_env_var_present():
 def test_no_key_entrypoint_logs_dnat_install_outcome_to_docker_logs():
     """A successful install logs the target; a failure logs FAILED. The log
     surfaces in ``docker logs <container>`` because the iptables block writes
-    to stderr (>&2). Closes the BUG-003 silent-failure mode."""
+    to stderr (>&2). Pins the observability hook so a silent-failure mode
+    in the install path cannot regress unnoticed."""
     s = vm_manager.NO_SSH_ENTRYPOINT_SCRIPT
     assert "[localemu-imds] DNAT installed:" in s
     assert "[localemu-imds] DNAT install FAILED" in s

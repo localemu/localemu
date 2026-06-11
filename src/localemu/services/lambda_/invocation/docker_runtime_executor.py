@@ -440,6 +440,38 @@ class DockerRuntimeExecutor(RuntimeExecutor):
             for source, target in container_config.copy_folders:
                 CONTAINER_CLIENT.copy_into_container(self.container_name, source, target)
 
+        # Mount attached Lambda layers under ``/opt`` so the runtime
+        # image's existing ``PYTHONPATH`` / ``NODE_PATH`` / ``PATH`` /
+        # ``LD_LIBRARY_PATH`` defaults pick them up. The translator
+        # produces a host-side staging dir whose CONTENTS we copy in;
+        # ``None`` means no layers are attached and we skip the copy
+        # entirely so an empty ``/opt`` does not shadow anything the
+        # base image might ship there. The merger preserves AWS's
+        # "later layers overwrite earlier layers" semantics; per-layer
+        # caching means repeated invokes pay the unzip cost once.
+        try:
+            from localemu.services.lambda_.invocation.layer_mounter import (
+                prepare_merged_opt,
+            )
+
+            layer_staging = prepare_merged_opt(self.function_version)
+        except Exception as layer_exc:
+            # A broken layer must fail the cold-start loudly — Lambda
+            # behaves the same way. We log and re-raise so the executor
+            # surfaces a clear init-failure reason rather than silently
+            # invoking a function that's missing its layer code.
+            LOG.error(
+                "Layer extraction failed for %s: %s",
+                self.function_version.qualified_arn, layer_exc,
+            )
+            raise
+        if layer_staging is not None:
+            CONTAINER_CLIENT.copy_into_container(
+                self.container_name,
+                f"{layer_staging}/.",
+                "/opt",
+            )
+
         if additional_networks:
             for additional_network in additional_networks:
                 CONTAINER_CLIENT.connect_container_to_network(

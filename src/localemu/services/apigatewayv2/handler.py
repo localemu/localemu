@@ -30,7 +30,7 @@ LOG = logging.getLogger(__name__)
 # Headers that MUST NOT be forwarded to upstream HTTP integrations
 # ────────────────────────────────────────────────────────────────────
 
-# BUG-15: Hop-by-hop headers per RFC 2616 §13.5.1
+# Hop-by-hop headers per RFC 2616 §13.5.1
 _HOP_BY_HOP_HEADERS = frozenset(
     h.lower()
     for h in [
@@ -49,7 +49,7 @@ _HOP_BY_HOP_HEADERS = frozenset(
 # SEC-05: Sensitive headers that must not leak to upstream
 _SENSITIVE_HEADERS = frozenset(h.lower() for h in ["Authorization", "Cookie"])
 
-# BUG-14: Text content types that should NOT be treated as binary
+# Text content types that should NOT be treated as binary
 _TEXT_CONTENT_TYPES = (
     "text/",
     "application/json",
@@ -61,7 +61,7 @@ _TEXT_CONTENT_TYPES = (
 )
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-14: Simple in-memory API key usage counters
+# Simple in-memory API key usage counters
 # PERF-R2-04: bounded — per-API map capped; total API count capped via eviction
 # ────────────────────────────────────────────────────────────────────
 _API_KEY_USAGE_MAX_APIS = 1000
@@ -70,7 +70,7 @@ _api_key_usage_lock = threading.Lock()
 _api_key_usage: "OrderedDict[str, OrderedDict[str, int]]" = OrderedDict()
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-04: Basic in-memory response cache
+# Basic in-memory response cache
 # PERF-R2-02: bounded LRU cache (evict oldest when full)
 # ────────────────────────────────────────────────────────────────────
 _RESPONSE_CACHE_MAXSIZE = 1000
@@ -79,7 +79,7 @@ _response_cache: "OrderedDict[str, tuple[float, Response]]" = OrderedDict()
 _CACHE_DEFAULT_TTL = 300  # seconds
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-16: Basic in-memory rate-limiting state
+# Basic in-memory rate-limiting state
 # PERF-R2-03: cleaned up on API/stage deletion via invalidate_throttle_state()
 # ────────────────────────────────────────────────────────────────────
 _throttle_lock = threading.Lock()
@@ -123,7 +123,7 @@ class HttpApiHandler:
     5. Invoke Lambda and return response
     """
 
-    # BUG-02 fix: Cache compiled RouteMatcher per API ID
+    # Cache compiled RouteMatcher per API ID
     _matcher_cache: dict[str, tuple[int, RouteMatcher]] = {}
     _matcher_cache_lock = threading.Lock()
 
@@ -174,7 +174,7 @@ class HttpApiHandler:
         if not api:
             return _json_error(404, "Not Found")
 
-        # PARITY-02: WebSocket APIs are not yet supported
+        # WebSocket APIs are not yet supported
         protocol = getattr(api, "protocol_type", "HTTP")
         if protocol == "WEBSOCKET":
             return _json_error(
@@ -183,7 +183,7 @@ class HttpApiHandler:
                 "Use HTTP APIs (protocol_type=HTTP) instead.",
             )
 
-        # BUG-02 fix: use cached matcher
+        # use cached matcher
         matcher = self._get_matcher(api)
 
         # Ensure path starts with /
@@ -204,7 +204,7 @@ class HttpApiHandler:
 
         authorizer_context: dict = {}
 
-        # SEC-01 / PARITY-01: JWT authorizer enforcement
+        # SEC-01 / JWT authorizer enforcement
         if auth_type == "JWT" and route_match.authorizer_id:
             authorizer = api.authorizers.get(route_match.authorizer_id)
             if authorizer:
@@ -213,7 +213,7 @@ class HttpApiHandler:
                     return jwt_result
                 authorizer_context = _extract_jwt_claims(request)
 
-        # PARITY-07: IAM authorization stub
+        # IAM authorization stub
         if auth_type == "AWS_IAM":
             auth_header = request.headers.get("Authorization", "")
             if not auth_header or "AWS4-HMAC-SHA256" not in auth_header:
@@ -228,14 +228,14 @@ class HttpApiHandler:
                 return api_key_result
 
         # ── Stage-level throttling ─────────────────────────────────
-        # PARITY-16: basic rate limiting when stage has route throttling
+        # basic rate limiting when stage has route throttling
         stage_obj = api.stages.get(stage) if hasattr(api, "stages") else None
         throttle_result = _check_throttle(api_id, stage, stage_obj)
         if throttle_result is not None:
             return throttle_result
 
         # ── Response cache check ───────────────────────────────────
-        # PARITY-04: check cache before invoking integration
+        # check cache before invoking integration
         cache_key = None
         if stage_obj and getattr(stage_obj, "cache_cluster_enabled", False):
             cache_key = f"{api_id}:{stage}:{request.method}:{path}:{request.query_string}"
@@ -277,7 +277,7 @@ class HttpApiHandler:
             LOG.warning("Unsupported integration type: %s", integration_type)
             return _json_error(500, "Internal Server Error")
 
-        # ── PARITY-10: gzip compression ────────────────────────────
+        # ── gzip compression ────────────────────────────
         min_compress = getattr(api, "minimum_compression_size", None)
         if min_compress is not None and min_compress >= 0:
             accept_enc = request.headers.get("Accept-Encoding", "")
@@ -287,12 +287,12 @@ class HttpApiHandler:
                     response.set_data(gzip.compress(body))
                     response.headers["Content-Encoding"] = "gzip"
 
-        # ── PARITY-04: store in cache ──────────────────────────────
+        # ── store in cache ──────────────────────────────
         if cache_key is not None:
             ttl = getattr(stage_obj, "cache_cluster_size_ttl", _CACHE_DEFAULT_TTL) or _CACHE_DEFAULT_TTL
             _cache_put(cache_key, response, ttl)
 
-        # ── PARITY-06: access logging ─────────────────────────────
+        # ── access logging ─────────────────────────────
         if stage_obj:
             _write_access_log(
                 stage_obj, api_id, stage, request, response, route_match, account_id, region
@@ -388,14 +388,14 @@ class HttpApiHandler:
             parsed = parse_qs(raw_query, keep_blank_values=True)
             query_params = {k: v[-1] for k, v in parsed.items()}
 
-        # Body — PARITY-15: multipart/form-data passed through without transformation
+        # Body — multipart/form-data passed through without transformation
         body = request.get_data(as_text=True)
         is_base64 = False
         if body and _is_binary_content_type(headers.get("content-type", "")):
             body = b64encode(request.get_data()).decode("utf-8")
             is_base64 = True
 
-        # BUG-09 fix: populate requestContext.authorizer when authorizer context present
+        # populate requestContext.authorizer when authorizer context present
         request_context: dict = {
             "accountId": account_id,
             "apiId": api_id,
@@ -471,7 +471,7 @@ class HttpApiHandler:
         parts = route_match.route_key.split(" ", 1)
         resource = parts[1] if len(parts) == 2 else parts[0]
 
-        # BUG-09 fix: populate authorizer context in V1 events too
+        # populate authorizer context in V1 events too
         authorizer_block = authorizer_context if authorizer_context else {}
 
         return {
@@ -535,7 +535,7 @@ class HttpApiHandler:
             )
 
         # Structured response format
-        # PARITY-17: validate statusCode is integer
+        # validate statusCode is integer
         raw_status = result.get("statusCode", 200)
         try:
             status_code = int(raw_status)
@@ -572,7 +572,7 @@ class HttpApiHandler:
     def _forward_http_proxy(self, request: Request, integration) -> Response:
         """Forward request to an HTTP proxy integration.
 
-        BUG-15: Strips hop-by-hop headers before forwarding.
+        Strips hop-by-hop headers before forwarding.
         SEC-05: Strips sensitive headers (Authorization, Cookie) before forwarding.
         """
         integration_uri = getattr(integration, "integration_uri", "")
@@ -670,7 +670,7 @@ def _extract_lambda_arn_from_integration_uri(integration_uri: str) -> str:
 def _is_binary_content_type(content_type: str) -> bool:
     """Check if a content type is binary (should be base64 encoded).
 
-    BUG-14 fix: application/x-www-form-urlencoded, application/graphql,
+    application/x-www-form-urlencoded, application/graphql,
     and multipart/form-data are NOT binary.
     """
     if not content_type:
@@ -679,7 +679,7 @@ def _is_binary_content_type(content_type: str) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────────
-# SEC-01 / PARITY-01: JWT authorizer enforcement
+# SEC-01 / JWT authorizer enforcement
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -830,7 +830,7 @@ def _enforce_api_key(request: Request, api, api_id: str) -> Response | None:
     """Check x-api-key header against configured API keys.
 
     Returns error Response if invalid, None if valid.
-    Also increments usage counter (PARITY-14).
+    Also increments usage counter.
     """
     api_key_header = request.headers.get("x-api-key", "")
     if not api_key_header:
@@ -867,7 +867,7 @@ def _enforce_api_key(request: Request, api, api_id: str) -> Response | None:
         if has_configured_keys:
             return _json_error(403, "Forbidden")
 
-    # PARITY-14: increment usage counter (PERF-R2-04: bounded LRU)
+    # increment usage counter (PERF-R2-04: bounded LRU)
     with _api_key_usage_lock:
         api_map = _api_key_usage.get(api_id)
         if api_map is None:
@@ -889,7 +889,7 @@ def _enforce_api_key(request: Request, api, api_id: str) -> Response | None:
 
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-04: Basic in-memory response cache
+# Basic in-memory response cache
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -918,7 +918,7 @@ def _cache_put(key: str, response: Response, ttl: float):
 
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-06: Access logging to CloudWatch Logs
+# Access logging to CloudWatch Logs
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -991,7 +991,7 @@ def _write_access_log(stage_obj, api_id, stage, request, response, route_match, 
 
 
 # ────────────────────────────────────────────────────────────────────
-# PARITY-16: Basic stage-level throttling
+# Basic stage-level throttling
 # ────────────────────────────────────────────────────────────────────
 
 

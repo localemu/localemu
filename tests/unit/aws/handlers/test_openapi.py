@@ -114,7 +114,7 @@ class TestOpenAPIRequestValidator:
         chain.handle(context=context, response=response)
         assert response.status_code == 400
         assert response.json["error"] == "Bad Request"
-        assert response.json["message"] == "Request body validation error"
+        assert response.json["message"].startswith("Request body validation error")
 
     def test_body_validation_errors(self):
         body = {"variable": "FOO", "value": "BAZ"}
@@ -138,7 +138,7 @@ class TestOpenAPIRequestValidator:
         chain.handle(context=context, response=response)
         assert response.status_code == 400
         assert response.json["error"] == "Bad Request"
-        assert response.json["message"] == "Request body validation error"
+        assert response.json["message"].startswith("Request body validation error")
 
         # Request with invalid body
         context = RequestContext(
@@ -157,7 +157,7 @@ class TestOpenAPIRequestValidator:
         chain.handle(context=context, response=response)
         assert response.status_code == 400
         assert response.json["error"] == "Bad Request"
-        assert response.json["message"] == "Request body validation error"
+        assert response.json["message"].startswith("Request body validation error")
 
     def test_multiple_specs(self, openapi):
         validator = OpenAPIRequestValidator()

@@ -14,6 +14,22 @@ import boto3
 import pytest
 from botocore.config import Config
 
+# Standalone smoke runners that the matching READMEs document as "NOT pytest
+# tests": they execute top-level network calls at import time and ``sys.exit``
+# on failure, which crashes pytest's collection phase. Each is meant to be run
+# directly (``python tests/e2e/.../test_x_live.py``) with the right opt-in
+# env flags. See tests/e2e/service_backends/README.md for the catalogue.
+collect_ignore_glob = [
+    "broad/test_*_live.py",
+    "service_backends/test_*_live.py",
+]
+collect_ignore = [
+    # Standalone runner script ; needs psycopg2 + pymysql + real Postgres /
+    # MySQL containers (run directly with ``python tests/e2e/docker_emulation/
+    # test_rds.py``).
+    "docker_emulation/test_rds.py",
+]
+
 ENDPOINT = os.environ.get("LOCALEMU_ENDPOINT", "http://localhost:4566")
 REGION = "us-east-1"
 
@@ -149,6 +165,11 @@ def apigatewayv2_client():
 @pytest.fixture
 def cognito_client():
     return _make_client("cognito-idp")
+
+
+@pytest.fixture
+def ebs_client():
+    return _make_client("ebs")
 
 
 # --- Helper fixtures ---

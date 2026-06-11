@@ -1,4 +1,11 @@
-"""Unit tests for the SSM Patch Manager read stubs (BUG-004 close)."""
+"""Unit tests for the SSM Patch Manager read stubs.
+
+``DescribeInstancePatchStates`` and ``DescribeInstancePatchStatesForPatchGroup``
+return an empty list (matching real AWS on a clean account). ``GetPatchBaseline``
+raises a typed ``DoesNotExistException`` for any unknown baseline ID so a
+caller scanning for patch state gets an AWS-shaped error instead of
+``InternalFailure``.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +43,7 @@ def test_describe_instance_patch_states_for_patch_group_empty_default():
 
 
 def test_get_patch_baseline_unknown_raises_typed_error():
-    """The whole point of the BUG-004 fix is to surface a typed
+    """The whole point of these stubs is to surface a typed
     ``DoesNotExistException`` instead of moto's ``InternalFailure``."""
     p = _provider()
     with pytest.raises(CommonServiceException) as exc:

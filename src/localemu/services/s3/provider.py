@@ -1003,6 +1003,26 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         self._notify(context, s3_bucket=s3_bucket, s3_object=s3_object)
 
+        # Dispatch replication for any rule matching this key. No-op when
+        # the bucket has no ReplicationConfiguration; sets source
+        # ``replication_status`` to PENDING and schedules async copies.
+        try:
+            from localemu.services.s3.replication import get_engine as _get_repl_engine
+
+            _get_repl_engine().dispatch(
+                src_account=context.account_id or "000000000000",
+                src_bucket=s3_bucket,
+                s3_object=s3_object,
+                tags=store.tags.get_tags(key_id) if hasattr(store, "tags") else None,
+                storage_backend=self._storage_backend,
+            )
+            # AWS does not surface ReplicationStatus on PutObject itself;
+            # the header is only on GetObject / HeadObject. We still set
+            # the attribute synchronously so the next HeadObject call
+            # reads it from s3_object.replication_status.
+        except Exception as e:
+            LOG.debug("replication dispatch on PutObject skipped: %s", e)
+
         return response
 
     @handler("GetObject", expand=False)
@@ -1099,6 +1119,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if s3_object.restore:
             response["Restore"] = s3_object.restore
+
+        # Surface x-amz-replication-status when set by the replication
+        # engine (source PENDING/COMPLETED/FAILED or destination REPLICA).
+        if getattr(s3_object, "replication_status", None):
+            response["ReplicationStatus"] = s3_object.replication_status
 
         checksum_value = None
         checksum_type = None
@@ -1252,6 +1277,12 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if s3_object.restore:
             response["Restore"] = s3_object.restore
+
+        # Surface x-amz-replication-status when the object has been
+        # tagged by the replication engine (source PENDING/COMPLETED/
+        # FAILED or destination REPLICA).
+        if getattr(s3_object, "replication_status", None):
+            response["ReplicationStatus"] = s3_object.replication_status
 
         range_header = request.get("Range")
         part_number = request.get("PartNumber")
@@ -1818,6 +1849,22 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # RequestCharged: Optional[RequestCharged] # TODO
         self._notify(context, s3_bucket=dest_s3_bucket, s3_object=s3_object)
+
+        # Replication hook: a CopyObject-into-source is a fresh source
+        # write and triggers replication just like PutObject would.
+        try:
+            from localemu.services.s3.replication import get_engine as _get_repl_engine
+
+            _get_repl_engine().dispatch(
+                src_account=context.account_id or "000000000000",
+                src_bucket=dest_s3_bucket,
+                s3_object=s3_object,
+                storage_backend=self._storage_backend,
+            )
+            if getattr(s3_object, "replication_status", None):
+                response["ReplicationStatus"] = s3_object.replication_status
+        except Exception as e:
+            LOG.debug("replication dispatch on CopyObject skipped: %s", e)
 
         return response
 
@@ -2959,6 +3006,23 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         add_encryption_to_response(response, s3_object=s3_object)
 
         self._notify(context, s3_bucket=s3_bucket, s3_object=s3_object)
+
+        # CompleteMultipartUpload terminates a multipart write; the
+        # finalized version is a fresh source write for replication
+        # purposes, same as a PutObject.
+        try:
+            from localemu.services.s3.replication import get_engine as _get_repl_engine
+
+            _get_repl_engine().dispatch(
+                src_account=context.account_id or "000000000000",
+                src_bucket=s3_bucket,
+                s3_object=s3_object,
+                storage_backend=self._storage_backend,
+            )
+            if getattr(s3_object, "replication_status", None):
+                response["ReplicationStatus"] = s3_object.replication_status
+        except Exception as e:
+            LOG.debug("replication dispatch on CompleteMultipartUpload skipped: %s", e)
 
         return response
 
@@ -4418,12 +4482,26 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
             dest_bucket_arn = rule.get("Destination", {}).get("Bucket")
             dest_bucket_name = s3_bucket_name(dest_bucket_arn)
-            if (
-                not (dest_s3_bucket := store.buckets.get(dest_bucket_name))
-                or not dest_s3_bucket.versioning_status == BucketVersioningStatus.Enabled
-            ):
-                # according to AWS testing the same exception is raised if the bucket does not exist
-                # or if versioning was disabled
+            # The destination bucket may live in a SECOND account (the
+            # canonical cross-account replication case the request's
+            # ``Destination.Account`` field names). Looking only in the
+            # source bucket's store (``store.buckets.get``) would miss
+            # every cross-account destination — even when it is genuinely
+            # versioned and ``GetBucketVersioning`` from the source
+            # account reports ``Enabled`` — and raise "Destination
+            # bucket must have versioning enabled" as a false negative.
+            # ``_get_cross_account_bucket`` walks ``global_bucket_map``
+            # to find the owning account's store, which is the same
+            # resolver every other cross-account read path uses; the
+            # two layers now agree. If the destination is genuinely
+            # missing we still raise the AWS-shaped error.
+            try:
+                _, dest_s3_bucket = self._get_cross_account_bucket(
+                    context, dest_bucket_name,
+                )
+            except NoSuchBucket:
+                raise InvalidRequest("Destination bucket must have versioning enabled.")
+            if dest_s3_bucket.versioning_status != BucketVersioningStatus.Enabled:
                 raise InvalidRequest("Destination bucket must have versioning enabled.")
 
         # TODO more validation on input
@@ -4541,12 +4619,17 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 "The bucket policy does not exist",
                 BucketName=bucket,
             )
-        # Check if the policy grants public access
+        # Check if the policy grants public access. ``Statement`` can be a
+        # single dict or a list of dicts (both AWS-valid); ``iter_policy_statements``
+        # normalises both forms and silently rejects malformed input.
         import json
+
+        from localemu.utils.aws.policy import iter_policy_statements
+
         is_public = False
         try:
             policy = json.loads(s3_bucket.policy)
-            for statement in policy.get("Statement", []):
+            for statement in iter_policy_statements(policy):
                 principal = statement.get("Principal", "")
                 if principal == "*" or (isinstance(principal, dict) and principal.get("AWS") == "*"):
                     if statement.get("Effect") == "Allow":

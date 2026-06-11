@@ -8,10 +8,13 @@ import json
 
 import pytest
 
+from localemu.testing.pytest import markers
+
 
 class TestCognitoUserPools:
     """Test user pool and client CRUD operations."""
 
+    @markers.aws.validated
     def test_create_user_pool(self, aws_client):
         """CreateUserPool returns a valid pool with correct attributes."""
         client = aws_client.cognito_idp
@@ -29,6 +32,7 @@ class TestCognitoUserPools:
         finally:
             client.delete_user_pool(UserPoolId=pool_id)
 
+    @markers.aws.validated
     def test_list_user_pools(self, aws_client):
         """ListUserPools returns created pools."""
         client = aws_client.cognito_idp
@@ -42,6 +46,7 @@ class TestCognitoUserPools:
         finally:
             client.delete_user_pool(UserPoolId=pool_id)
 
+    @markers.aws.validated
     def test_create_user_pool_client(self, aws_client):
         """CreateUserPoolClient returns a valid client with secret."""
         client = aws_client.cognito_idp
@@ -105,6 +110,7 @@ class TestCognitoUsers:
 
         client.delete_user_pool(UserPoolId=pool_id)
 
+    @markers.aws.validated
     def test_admin_create_user(self, pool_with_client):
         """AdminCreateUser creates a user with temporary password."""
         ctx = pool_with_client
@@ -120,6 +126,7 @@ class TestCognitoUsers:
         assert user["Username"] == "testuser"
         assert user["UserStatus"] == "FORCE_CHANGE_PASSWORD"
 
+    @markers.aws.validated
     def test_admin_get_user(self, pool_with_client):
         """AdminGetUser returns the correct user."""
         ctx = pool_with_client
@@ -133,6 +140,7 @@ class TestCognitoUsers:
         )
         assert resp["Username"] == "getuser"
 
+    @markers.aws.validated
     def test_list_users(self, pool_with_client):
         """ListUsers returns all users in the pool."""
         ctx = pool_with_client
@@ -152,6 +160,7 @@ class TestCognitoUsers:
         assert "listuser1" in usernames
         assert "listuser2" in usernames
 
+    @markers.aws.validated
     def test_admin_delete_user(self, pool_with_client):
         """AdminDeleteUser removes the user."""
         ctx = pool_with_client
@@ -172,6 +181,7 @@ class TestCognitoUsers:
 class TestCognitoGroups:
     """Test group management."""
 
+    @markers.aws.validated
     def test_group_crud(self, aws_client):
         """Create, list, and delete groups."""
         client = aws_client.cognito_idp
@@ -203,6 +213,7 @@ class TestCognitoGroups:
         finally:
             client.delete_user_pool(UserPoolId=pool_id)
 
+    @markers.aws.validated
     def test_add_user_to_group(self, aws_client):
         """AdminAddUserToGroup / AdminListGroupsForUser."""
         client = aws_client.cognito_idp

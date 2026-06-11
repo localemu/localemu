@@ -35,9 +35,8 @@ def handle_v2_request(request: Request, **kwargs) -> Response:
     Differentiates between V1 (REST API) and V2 (HTTP API) by checking moto's
     API type.
 
-    BUG-03 fix: Extract account_id and region from request headers instead
-    of using hardcoded defaults. Falls back to defaults only when headers
-    are absent.
+    Extracts account_id and region from request headers instead of using
+    hardcoded defaults. Falls back to defaults only when headers are absent.
     """
     api_id = kwargs.get("api_id", "")
     stage = kwargs.get("stage", "$default")
@@ -46,7 +45,7 @@ def handle_v2_request(request: Request, **kwargs) -> Response:
     if not path.startswith("/"):
         path = f"/{path}"
 
-    # BUG-03 fix: Determine account and region from request context
+    # Determine account and region from request context
     account_id = extract_account_id_from_headers(request.headers)
     region = kwargs.get("region") or extract_region_from_headers(request.headers)
 

@@ -8,10 +8,13 @@ CreateDeployment through the LocalEmu apigatewayv2 provider.
 import pytest
 from botocore.exceptions import ClientError
 
+from localemu.testing.pytest import markers
+
 
 class TestApiGatewayV2Crud:
     """CRUD tests for API Gateway V2 HTTP APIs."""
 
+    @markers.aws.validated
     def test_create_and_get_api(self, aws_client):
         """Create an HTTP API and verify it can be retrieved by ID."""
         client = aws_client.apigatewayv2
@@ -37,6 +40,7 @@ class TestApiGatewayV2Crud:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_get_apis_lists_created_api(self, aws_client):
         """CreateApi should make the API appear in GetApis listing."""
         client = aws_client.apigatewayv2
@@ -55,6 +59,7 @@ class TestApiGatewayV2Crud:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_delete_api(self, aws_client):
         """DeleteApi should remove the API so GetApi raises NotFoundException."""
         client = aws_client.apigatewayv2
@@ -75,12 +80,14 @@ class TestApiGatewayV2Crud:
             "404",
         )
 
+    @markers.aws.validated
     def test_delete_api_not_found(self, aws_client):
         """DeleteApi on a non-existent API should raise an error."""
         client = aws_client.apigatewayv2
         with pytest.raises(ClientError):
             client.delete_api(ApiId="nonexistent-api-id-99999")
 
+    @markers.aws.validated
     def test_create_api_with_cors(self, aws_client):
         """Create an HTTP API with CORS configuration."""
         client = aws_client.apigatewayv2
@@ -110,6 +117,7 @@ class TestApiGatewayV2Crud:
 class TestApiGatewayV2Routes:
     """Tests for API Gateway V2 route management."""
 
+    @markers.aws.validated
     def test_create_route_and_get_routes(self, aws_client):
         """Create a route with method+path and verify it appears in GetRoutes."""
         client = aws_client.apigatewayv2
@@ -137,6 +145,7 @@ class TestApiGatewayV2Routes:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_multiple_routes(self, aws_client):
         """Create multiple routes on the same API and verify all are listed."""
         client = aws_client.apigatewayv2
@@ -166,6 +175,7 @@ class TestApiGatewayV2Routes:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_route_with_any_method(self, aws_client):
         """Create a route with ANY method wildcard."""
         client = aws_client.apigatewayv2
@@ -190,6 +200,7 @@ class TestApiGatewayV2Routes:
 class TestApiGatewayV2Integrations:
     """Tests for API Gateway V2 integration management."""
 
+    @markers.aws.validated
     def test_create_integration_aws_proxy(self, aws_client):
         """Create an AWS_PROXY integration and retrieve it."""
         client = aws_client.apigatewayv2
@@ -225,6 +236,7 @@ class TestApiGatewayV2Integrations:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_integration_http_proxy(self, aws_client):
         """Create an HTTP_PROXY integration and retrieve it."""
         client = aws_client.apigatewayv2
@@ -256,6 +268,7 @@ class TestApiGatewayV2Integrations:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_get_integrations_lists_all(self, aws_client):
         """GetIntegrations should list all integrations for an API."""
         client = aws_client.apigatewayv2
@@ -293,6 +306,7 @@ class TestApiGatewayV2Integrations:
 class TestApiGatewayV2Stages:
     """Tests for API Gateway V2 stage management."""
 
+    @markers.aws.validated
     def test_create_stage_and_get_stages(self, aws_client):
         """Create a stage and verify it appears in GetStages."""
         client = aws_client.apigatewayv2
@@ -319,6 +333,7 @@ class TestApiGatewayV2Stages:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_stage_with_auto_deploy(self, aws_client):
         """Create a stage with autoDeploy enabled."""
         client = aws_client.apigatewayv2
@@ -341,6 +356,7 @@ class TestApiGatewayV2Stages:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_multiple_stages(self, aws_client):
         """Create multiple stages on the same API."""
         client = aws_client.apigatewayv2
@@ -366,6 +382,7 @@ class TestApiGatewayV2Stages:
 class TestApiGatewayV2Deployments:
     """Tests for API Gateway V2 deployment management."""
 
+    @markers.aws.validated
     def test_create_deployment(self, aws_client):
         """Create a deployment for an API and verify it has a deployment ID."""
         client = aws_client.apigatewayv2
@@ -391,6 +408,7 @@ class TestApiGatewayV2Deployments:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_get_deployments(self, aws_client):
         """GetDeployments should list all deployments for an API."""
         client = aws_client.apigatewayv2
@@ -419,6 +437,7 @@ class TestApiGatewayV2Deployments:
             if api_id:
                 client.delete_api(ApiId=api_id)
 
+    @markers.aws.validated
     def test_create_stage_with_deployment(self, aws_client):
         """Create a stage linked to a specific deployment."""
         client = aws_client.apigatewayv2

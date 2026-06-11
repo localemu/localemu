@@ -1781,7 +1781,7 @@ class LambdaProvider(LambdaApi, ServiceLifecycleHook):
         else:
             # delete the whole function
             self._remove_all_tags(unqualified_function_arn)
-            # ISSUE-07: deregister any function URL configs attached to this
+            # deregister any function URL configs attached to this
             # function before the function itself is removed, otherwise the
             # URL router's O(1) index keeps stale entries pointing at a
             # function that no longer exists.

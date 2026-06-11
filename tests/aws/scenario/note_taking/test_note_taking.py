@@ -15,8 +15,14 @@ import aws_cdk.aws_apigateway as apigw
 import aws_cdk.aws_dynamodb as dynamodb
 import aws_cdk.aws_lambda as awslambda
 import pytest
-import requests
 from constructs import Construct
+
+# Use the safe_requests wrapper that disables SSL verification — the
+# scenario hits LocalEmu's https://<api>.execute-api.localhost:4566/
+# endpoint, which is served with a self-signed cert. Plain
+# ``requests.get`` would fail with SSLCertVerificationError; the
+# wrapper is the codebase-standard for this exact case.
+from localemu.utils.http import safe_requests as requests
 
 from localemu.testing.pytest import markers
 from localemu.testing.scenario.cdk_lambda_helper import load_nodejs_lambda_to_s3

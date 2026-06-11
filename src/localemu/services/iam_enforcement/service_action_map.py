@@ -69,7 +69,7 @@ ACTION_MAP: dict[tuple[str, str], list[str]] = {
     ("s3", "GetPublicAccessBlock"):    ["s3:GetBucketPublicAccessBlock"],
     ("s3", "PutPublicAccessBlock"):    ["s3:PutBucketPublicAccessBlock"],
     ("s3", "DeletePublicAccessBlock"): ["s3:PutBucketPublicAccessBlock"],
-    # ---- Lambda (closes BUG-002: Invoke is the wire op, IAM action is InvokeFunction) ----
+    # ---- Lambda: the wire op is Invoke but the IAM action is InvokeFunction ----
     ("lambda", "Invoke"):                   ["lambda:InvokeFunction"],
     ("lambda", "InvokeWithResponseStream"): ["lambda:InvokeFunction"],
     ("lambda", "InvokeAsync"):              ["lambda:InvokeFunction"],
@@ -96,6 +96,101 @@ ACTION_MAP: dict[tuple[str, str], list[str]] = {
     # IAM operations match 1:1 (CreateUser -> iam:CreateUser, etc.). No overrides.
     # ---- STS ----
     # STS operations match 1:1 (AssumeRole -> sts:AssumeRole, etc.).
+    # ---- S3Control access points: the s3: namespace is what AWS uses for these IAM actions ----
+    # The s3control wire service uses ``s3:`` IAM actions per AWS docs.
+    # Without this map the enforcer asks for ``s3control:...`` which is
+    # not a real IAM action ; a least-privilege policy written the
+    # AWS-correct way (``s3:CreateAccessPoint``) would be wrongly denied.
+    ("s3control", "CreateAccessPoint"):              ["s3:CreateAccessPoint"],
+    ("s3control", "GetAccessPoint"):                 ["s3:GetAccessPoint"],
+    ("s3control", "ListAccessPoints"):               ["s3:ListAccessPoints"],
+    ("s3control", "DeleteAccessPoint"):              ["s3:DeleteAccessPoint"],
+    ("s3control", "PutAccessPointPolicy"):           ["s3:PutAccessPointPolicy"],
+    ("s3control", "GetAccessPointPolicy"):           ["s3:GetAccessPointPolicy"],
+    ("s3control", "DeleteAccessPointPolicy"):        ["s3:DeleteAccessPointPolicy"],
+    ("s3control", "GetAccessPointPolicyStatus"):     ["s3:GetAccessPointPolicyStatus"],
+    ("s3control", "PutAccessPointConfigurationForObjectLambda"): [
+        "s3:PutAccessPointConfigurationForObjectLambda",
+    ],
+    ("s3control", "GetAccessPointConfigurationForObjectLambda"): [
+        "s3:GetAccessPointConfigurationForObjectLambda",
+    ],
+    # ---- S3Control Object Lambda access points ----
+    ("s3control", "CreateAccessPointForObjectLambda"): [
+        "s3:CreateAccessPointForObjectLambda",
+    ],
+    ("s3control", "GetAccessPointForObjectLambda"): [
+        "s3:GetAccessPointForObjectLambda",
+    ],
+    ("s3control", "DeleteAccessPointForObjectLambda"): [
+        "s3:DeleteAccessPointForObjectLambda",
+    ],
+    ("s3control", "PutAccessPointPolicyForObjectLambda"): [
+        "s3:PutAccessPointPolicyForObjectLambda",
+    ],
+    ("s3control", "GetAccessPointPolicyForObjectLambda"): [
+        "s3:GetAccessPointPolicyForObjectLambda",
+    ],
+    ("s3control", "DeleteAccessPointPolicyForObjectLambda"): [
+        "s3:DeleteAccessPointPolicyForObjectLambda",
+    ],
+    ("s3control", "GetAccessPointPolicyStatusForObjectLambda"): [
+        "s3:GetAccessPointPolicyStatusForObjectLambda",
+    ],
+    ("s3control", "ListAccessPointsForObjectLambda"): [
+        "s3:ListAccessPointsForObjectLambda",
+    ],
+    # ---- S3Control Multi-Region Access Points ----
+    ("s3control", "CreateMultiRegionAccessPoint"): [
+        "s3:CreateMultiRegionAccessPoint",
+    ],
+    ("s3control", "DeleteMultiRegionAccessPoint"): [
+        "s3:DeleteMultiRegionAccessPoint",
+    ],
+    ("s3control", "GetMultiRegionAccessPoint"): [
+        "s3:GetMultiRegionAccessPoint",
+    ],
+    ("s3control", "ListMultiRegionAccessPoints"): [
+        "s3:ListMultiRegionAccessPoints",
+    ],
+    ("s3control", "GetMultiRegionAccessPointPolicy"): [
+        "s3:GetMultiRegionAccessPointPolicy",
+    ],
+    ("s3control", "PutMultiRegionAccessPointPolicy"): [
+        "s3:PutMultiRegionAccessPointPolicy",
+    ],
+    ("s3control", "GetMultiRegionAccessPointPolicyStatus"): [
+        "s3:GetMultiRegionAccessPointPolicyStatus",
+    ],
+    ("s3control", "GetMultiRegionAccessPointRoutes"): [
+        "s3:GetMultiRegionAccessPointRoutes",
+    ],
+    ("s3control", "SubmitMultiRegionAccessPointRoutes"): [
+        "s3:SubmitMultiRegionAccessPointRoutes",
+    ],
+    # ---- S3Control bucket-level Public Access Block + Storage Lens ----
+    # Account-level PAB / Storage Lens / Outposts use the `s3:` namespace.
+    ("s3control", "GetPublicAccessBlock"):    ["s3:GetAccountPublicAccessBlock"],
+    ("s3control", "PutPublicAccessBlock"):    ["s3:PutAccountPublicAccessBlock"],
+    ("s3control", "DeletePublicAccessBlock"): ["s3:PutAccountPublicAccessBlock"],
+    ("s3control", "GetStorageLensConfiguration"): [
+        "s3:GetStorageLensConfiguration",
+    ],
+    ("s3control", "PutStorageLensConfiguration"): [
+        "s3:PutStorageLensConfiguration",
+    ],
+    ("s3control", "DeleteStorageLensConfiguration"): [
+        "s3:DeleteStorageLensConfiguration",
+    ],
+    ("s3control", "ListStorageLensConfigurations"): [
+        "s3:ListStorageLensConfigurations",
+    ],
+    ("s3control", "GetStorageLensConfigurationTagging"): [
+        "s3:GetStorageLensConfigurationTagging",
+    ],
+    ("s3control", "PutStorageLensConfigurationTagging"): [
+        "s3:PutStorageLensConfigurationTagging",
+    ],
 }
 
 

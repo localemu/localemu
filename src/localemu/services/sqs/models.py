@@ -44,6 +44,7 @@ from localemu.services.sqs.utils import (
 )
 from localemu.services.stores import AccountRegionBundle, BaseStore, LocalAttribute
 from localemu.utils.aws.arns import get_partition
+from localemu.utils.aws.policy import normalize_policy_statements
 from localemu.utils.strings import long_uid
 from localemu.utils.tagging import Tags
 from localemu.utils.time import now
@@ -680,14 +681,16 @@ class SqsQueue:
         }
         if policy := self.attributes.get(QueueAttributeName.Policy):
             policy = json.loads(policy)
-            policy.setdefault("Statement", [])
         else:
             policy = {
                 "Version": "2008-10-17",
                 "Id": f"{self.arn}/SQSDefaultPolicy",
                 "Statement": [],
             }
-        policy.setdefault("Statement", [])
+        # ``Statement`` can be single-dict, list-of-dicts, or absent in a
+        # user-uploaded policy; normalise to a list before any reads or
+        # mutations so the subsequent append + comprehension is sound.
+        policy["Statement"] = normalize_policy_statements(policy)
         existing_statement_ids = [statement.get("Sid") for statement in policy["Statement"]]
         if label in existing_statement_ids:
             raise InvalidParameterValueException(
@@ -704,14 +707,15 @@ class SqsQueue:
         """
         if policy := self.attributes.get(QueueAttributeName.Policy):
             policy = json.loads(policy)
-            # this should not be necessary, but we can upload custom policies, so it's better to be safe
-            policy.setdefault("Statement", [])
         else:
             policy = {
                 "Version": "2008-10-17",
                 "Id": f"{self.arn}/SQSDefaultPolicy",
                 "Statement": [],
             }
+        # ``Statement`` can be single-dict, list-of-dicts, or absent in a
+        # user-uploaded policy; normalise to a list before iterating.
+        policy["Statement"] = normalize_policy_statements(policy)
         existing_statement_ids = [statement.get("Sid") for statement in policy["Statement"]]
         if label not in existing_statement_ids:
             raise InvalidParameterValueException(

@@ -273,13 +273,37 @@ def _register_subnet_with_allocator(subnet_payload: dict) -> None:
     # NetworkInterface.PrivateIpAddress and assumes it's in SubnetId's
     # CIDR.
     #
-    # Future work: when the VPC bridge falls back to a non-AWS CIDR
-    # tier (e.g. user asked for 10.99.0.0/16 but Docker gave 172.20.0.0/16),
-    # we'd need to translate the subnet's AWS-offset into the fallback
-    # bridge's address space. For v1 the happy path is bridge_cidr ==
-    # vpc_cidr and the subnet's aws_cidr is a valid sub-range — so
-    # passing aws_cidr as docker_cidr is correct.
+    # When the VPC bridge already exists and its docker_cidr differs
+    # from the VPC's AWS CIDR (the collision-fallback case — AWS
+    # 10.86.0.0/16 might have landed on Docker 10.0.0.0/16), we shift
+    # the subnet's network address by the same offset so the pool
+    # actually lies inside the bridge's address space. Without this,
+    # the allocator would happily hand out 10.86.1.10 for a bridge
+    # whose subnet is 10.0.0.0/16, and the subsequent Docker
+    # connect-with-ipv4 call would reject it as out-of-range.
     docker_cidr = aws_cidr
+    try:
+        from localemu.services.ec2.docker.vpc_network import (
+            translate_subnet_aws_to_docker_cidr,
+        )
+        vpc_mgr_local = get_vpc_network_manager()
+        vpc_docker_cidr = vpc_mgr_local.get_docker_cidr_for_vpc(vpc_id)
+        vpc_aws_cidr = vpc_mgr_local._lookup_vpc_cidr_in_moto(vpc_id)
+        if vpc_docker_cidr and vpc_aws_cidr:
+            docker_cidr = translate_subnet_aws_to_docker_cidr(
+                vpc_aws_cidr, vpc_docker_cidr, aws_cidr,
+            )
+    except ValueError as exc:
+        LOG.warning(
+            "subnet allocator: cannot translate %s into VPC %s's docker "
+            "CIDR (%s); pinning into this subnet will fall back to auto-IPAM",
+            aws_cidr, vpc_id, exc,
+        )
+    except Exception:
+        LOG.debug(
+            "subnet allocator: docker_cidr lookup failed for %s, using AWS CIDR",
+            vpc_id, exc_info=True,
+        )
 
     try:
         get_subnet_allocator().register_subnet(
@@ -395,8 +419,34 @@ def _reconcile_addressing_state() -> None:
                             continue
                         # Subnet pool is carved within the SUBNET's CIDR,
                         # not the VPC bridge's CIDR (AWS contract: ENI
-                        # IP must lie inside SubnetId's CidrBlock).
+                        # IP must lie inside SubnetId's CidrBlock). When
+                        # the VPC bridge fell back to a non-AWS CIDR,
+                        # shift the subnet's range to match — same logic
+                        # as ``_register_subnet_with_allocator``.
                         docker_cidr = aws_cidr
+                        try:
+                            from localemu.services.ec2.docker.vpc_network import (
+                                translate_subnet_aws_to_docker_cidr,
+                            )
+                            vpc_docker_cidr = vpc_mgr.get_docker_cidr_for_vpc(
+                                vpc_id,
+                            )
+                            vpc_obj = getattr(backend, "vpcs", {}).get(vpc_id)
+                            vpc_aws_cidr = getattr(vpc_obj, "cidr_block", None) if vpc_obj else None
+                            if vpc_docker_cidr and vpc_aws_cidr:
+                                docker_cidr = translate_subnet_aws_to_docker_cidr(
+                                    vpc_aws_cidr, vpc_docker_cidr, aws_cidr,
+                                )
+                        except ValueError as exc:
+                            LOG.debug(
+                                "reconcile: cannot translate %s into VPC %s "
+                                "docker CIDR (%s)", aws_cidr, vpc_id, exc,
+                            )
+                        except Exception:
+                            LOG.debug(
+                                "reconcile: docker_cidr lookup failed for %s",
+                                vpc_id, exc_info=True,
+                            )
                         try:
                             alloc.register_subnet(
                                 vpc_id=vpc_id, subnet_id=subnet_id,
@@ -498,6 +548,61 @@ def _patch_moto_eni(eni_id: str, primary_ip: str, mac: str) -> None:
                         break
 
 
+def _resolve_subnet_for_rt_association(
+    association_id: str | None, account_id: str, region: str,
+) -> str | None:
+    """Return the subnet ID an RT association currently binds, or None.
+
+    ``DisassociateRouteTable`` / ``ReplaceRouteTableAssociation`` take
+    an association id rather than a subnet id, so we walk moto's
+    route-table associations to find the subnet that the data-plane
+    apply needs to operate on.
+    """
+    if not association_id:
+        return None
+    try:
+        import moto.backends as moto_backends
+
+        ec2 = moto_backends.get_backend("ec2")[account_id][region]
+        rts = getattr(ec2, "route_tables", {}) or {}
+        for rt in rts.values():
+            sub_id = (rt.associations or {}).get(association_id)
+            if sub_id:
+                return sub_id
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_instance_for_eni(
+    eni_id: str, account_id: str, region: str,
+) -> str | None:
+    """Return the instance ID this ENI is attached to, or ``None``.
+
+    Reads moto's ENI store directly so the resolver is independent of
+    the LocalEmu address-index cache (which may not yet have observed
+    a freshly-attached ENI). When the ENI isn't found or has no
+    attachment, returns ``None`` — the caller skips the data-plane
+    apply with no error.
+    """
+    try:
+        import moto.backends as moto_backends
+
+        ec2_backend = moto_backends.get_backend("ec2")[account_id][region]
+        enis = getattr(ec2_backend, "enis", None)
+        if not isinstance(enis, dict):
+            return None
+        eni = enis.get(eni_id)
+        if eni is None:
+            return None
+        instance = getattr(eni, "instance", None)
+        if instance is None:
+            return None
+        return getattr(instance, "id", None)
+    except Exception:
+        return None
+
+
 def _translate_eni_error(exc: Exception):
     """Translate EniManager errors to AWS-shape CommonServiceException."""
     from localemu.services.ec2.docker.eni_manager import (
@@ -539,6 +644,42 @@ def _translate_eni_error(exc: Exception):
     return CommonServiceException(
         "InternalError", f"ENI op failed: {exc}", status_code=500,
     )
+
+
+def _resolved_user_data_from_moto(
+    account_id: str, region: str, instance_id: str,
+) -> str | None:
+    """Return the base64 user-data moto has stamped onto an Instance,
+    or ``None`` if the instance isn't found or has no user-data.
+
+    Reading this AFTER ``call_moto`` for ``RunInstances`` gives us the
+    **resolved** user-data: when the request used ``LaunchTemplate``,
+    moto's ``add_instances`` merges the template's ``UserData`` into
+    the new instance (see moto ec2/models/instances.py:780 — ``if
+    user_data is None and (template_user_data := tmpl.get("UserData"))``).
+    Reading the raw request parameter alone would miss the template
+    path entirely and the boot-time user-data executor would silently
+    do nothing for every template-launched instance.
+    """
+    try:
+        from moto.ec2.models import ec2_backends
+        backend = ec2_backends[account_id][region]
+        for reservation in getattr(backend, "reservations", {}).values():
+            for moto_instance in getattr(reservation, "instances", []) or []:
+                if getattr(moto_instance, "id", None) == instance_id:
+                    ud = getattr(moto_instance, "user_data", None)
+                    # moto wraps the field in ``Base64EncodedString`` —
+                    # a str subclass that breaks downstream equality
+                    # checks and base64 decoding against bare ``bytes``.
+                    # Cast to a plain ``str`` so the executor sees the
+                    # same shape it gets from the raw request param.
+                    return str(ud) if ud else None
+    except Exception:
+        LOG.debug(
+            "user-data lookup: moto walk failed for %s in %s/%s",
+            instance_id, account_id, region, exc_info=True,
+        )
+    return None
 
 
 def _moto_instance_state(moto_instance) -> str:
@@ -1676,8 +1817,21 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 instance_type = instance.get("InstanceType", "t2.micro")
                 key_name = instance.get("KeyName")
 
-                # Extract user data from the original request
-                user_data = context.request.values.get("UserData")
+                # Extract user data, preferring moto's resolved value over
+                # the raw request parameter. When the instance is launched
+                # via ``LaunchTemplate=...``, the request has no
+                # ``UserData`` field; moto resolves it from the template
+                # at ``add_instances`` time and stamps the base64 string
+                # onto ``Instance.user_data``. Reading the raw request
+                # parameter alone would miss every launch-template path
+                # and the boot-time executor would silently do nothing —
+                # the exact symptom of PR-007's launch-template-poisoning
+                # gap.
+                user_data = _resolved_user_data_from_moto(
+                    context.account_id, context.region, instance_id,
+                )
+                if user_data is None:
+                    user_data = context.request.values.get("UserData")
 
                 # Look up the public key for SSH injection
                 public_key = None
@@ -2535,6 +2689,30 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             )
         except Exception as exc:
             raise _translate_eni_error(exc)
+
+        # The SDC bit also has a data-plane footprint (kernel
+        # ip_forward + iptables FORWARD policy). When the ENI is the
+        # primary interface of an instance, we apply directly to the
+        # instance's container so the change takes effect immediately,
+        # not just on next ENI re-attach.
+        if source_dest_check is not None:
+            try:
+                instance_id = _resolve_instance_for_eni(
+                    eni_id, context.account_id, context.region,
+                )
+                if instance_id:
+                    from localemu.services.ec2.docker.source_dest_check import (
+                        apply_source_dest_check,
+                    )
+                    apply_source_dest_check(
+                        instance_id=instance_id,
+                        source_dest_check=bool(source_dest_check),
+                    )
+            except Exception:
+                LOG.debug(
+                    "SourceDestCheck data-plane apply after "
+                    "ModifyNetworkInterfaceAttribute failed", exc_info=True,
+                )
         return result
 
     # ------------------------------------------------------------------
@@ -2599,7 +2777,10 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
     ) -> dict:
         """Forward to moto. When the attribute being modified is the
         instance's security-group set (``Groups``), refresh iptables on
-        the container so the change reflects in the data plane."""
+        the container so the change reflects in the data plane. When
+        the attribute is ``SourceDestCheck``, apply the kernel
+        forwarding knobs so the instance can act as a router (PR-006
+        scenario E4)."""
         result = call_moto(context)
         try:
             instance_id = context.request.values.get("InstanceId")
@@ -2614,6 +2795,206 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         except Exception:
             LOG.debug(
                 "SG re-apply after ModifyInstanceAttribute failed",
+                exc_info=True,
+            )
+
+        # SourceDestCheck data-plane apply. AWS exposes the bool as
+        # ``SourceDestCheck.Value=true|false`` (boolean attribute
+        # request shape).
+        try:
+            instance_id = context.request.values.get("InstanceId")
+            sdc_value = (
+                context.request.values.get("SourceDestCheck.Value")
+                or context.request.values.get("SourceDestCheck")
+            )
+            if instance_id and sdc_value is not None:
+                desired = str(sdc_value).strip().lower() in ("true", "1")
+                from localemu.services.ec2.docker.source_dest_check import (
+                    apply_source_dest_check,
+                )
+                apply_source_dest_check(
+                    instance_id=instance_id, source_dest_check=desired,
+                )
+        except Exception:
+            LOG.debug(
+                "SourceDestCheck data-plane apply after "
+                "ModifyInstanceAttribute failed", exc_info=True,
+            )
+        return result
+
+    # ------------------------------------------------------------------
+    # VPC route-table event hooks: install / remove ``ip route`` entries
+    # on every container in every subnet bound to the route table so
+    # instance-target routes actually steer traffic (the "Quiet Router"
+    # data plane). Other target types (IGW, NAT-GW, TGW, peering, VPC
+    # endpoint) keep their existing data planes.
+    # ------------------------------------------------------------------
+
+    @handler("CreateRoute", expand=False)
+    def create_route(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        result = call_moto(context)
+        try:
+            rt_id = (
+                request.get("RouteTableId")
+                or context.request.values.get("RouteTableId")
+            )
+            if rt_id:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_route_table_change,
+                )
+                on_route_table_change(
+                    route_table_id=rt_id,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route data-plane apply after CreateRoute failed",
+                exc_info=True,
+            )
+        return result
+
+    @handler("ReplaceRoute", expand=False)
+    def replace_route(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        result = call_moto(context)
+        try:
+            rt_id = (
+                request.get("RouteTableId")
+                or context.request.values.get("RouteTableId")
+            )
+            if rt_id:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_route_table_change,
+                )
+                on_route_table_change(
+                    route_table_id=rt_id,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route data-plane apply after ReplaceRoute failed",
+                exc_info=True,
+            )
+        return result
+
+    @handler("DeleteRoute", expand=False)
+    def delete_route(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        rt_id = (
+            request.get("RouteTableId")
+            or context.request.values.get("RouteTableId")
+        )
+        dest = (
+            request.get("DestinationCidrBlock")
+            or context.request.values.get("DestinationCidrBlock")
+        )
+        result = call_moto(context)
+        try:
+            if rt_id and dest:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_route_delete,
+                )
+                on_route_delete(
+                    route_table_id=rt_id,
+                    destination_cidr=dest,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route data-plane cleanup after DeleteRoute failed",
+                exc_info=True,
+            )
+        return result
+
+    @handler("AssociateRouteTable", expand=False)
+    def associate_route_table(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        result = call_moto(context)
+        try:
+            subnet_id = (
+                request.get("SubnetId")
+                or context.request.values.get("SubnetId")
+            )
+            if subnet_id:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_subnet_rebound_to_route_table,
+                )
+                on_subnet_rebound_to_route_table(
+                    subnet_id=subnet_id,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route apply after AssociateRouteTable failed",
+                exc_info=True,
+            )
+        return result
+
+    @handler("DisassociateRouteTable", expand=False)
+    def disassociate_route_table(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        # Resolve the affected subnet BEFORE moto removes the
+        # association — afterwards the link is gone.
+        affected_subnet_id = _resolve_subnet_for_rt_association(
+            association_id=(
+                request.get("AssociationId")
+                or context.request.values.get("AssociationId")
+            ),
+            account_id=context.account_id, region=context.region,
+        )
+        result = call_moto(context)
+        try:
+            if affected_subnet_id:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_subnet_rebound_to_route_table,
+                )
+                on_subnet_rebound_to_route_table(
+                    subnet_id=affected_subnet_id,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route cleanup after DisassociateRouteTable failed",
+                exc_info=True,
+            )
+        return result
+
+    @handler("ReplaceRouteTableAssociation", expand=False)
+    def replace_route_table_association(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        affected_subnet_id = _resolve_subnet_for_rt_association(
+            association_id=(
+                request.get("AssociationId")
+                or context.request.values.get("AssociationId")
+            ),
+            account_id=context.account_id, region=context.region,
+        )
+        result = call_moto(context)
+        try:
+            if affected_subnet_id:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_subnet_rebound_to_route_table,
+                )
+                on_subnet_rebound_to_route_table(
+                    subnet_id=affected_subnet_id,
+                    account_id=context.account_id,
+                    region=context.region,
+                )
+        except Exception:
+            LOG.debug(
+                "instance-route apply after ReplaceRouteTableAssociation failed",
                 exc_info=True,
             )
         return result

@@ -38,7 +38,7 @@ LOG = logging.getLogger(__name__)
 # Label for identifying RDS containers
 RDS_CONTAINER_LABEL = "localemu.service=rds"
 
-# Data directory per engine for volume persistence (BUG-10)
+# Data directory per engine for volume persistence
 ENGINE_DATA_DIR: dict[str, str] = {
     "mysql": "/var/lib/mysql",
     "postgres": "/var/lib/postgresql/data",
@@ -402,7 +402,7 @@ class DockerDbManager:
             master_password = secrets.token_urlsafe(16)
             LOG.info("Generated random password for RDS instance %s", db_instance_id)
 
-        # BUG-02: Reserve the ID under lock to prevent duplicate containers
+        # Reserve the ID under lock to prevent duplicate containers
         with self._lock:
             if db_instance_id in self._instances:
                 raise ValueError(f"DB instance {db_instance_id} already exists")
@@ -453,7 +453,7 @@ class DockerDbManager:
         ports = PortMappings()
         ports.add(host_port, container_port)
 
-        # Named Docker volume for data persistence (BUG-10).
+        # Named Docker volume for data persistence.
         # The volume survives container removal, so database files are
         # preserved across LocalEmu restarts when PERSISTENCE=1.
         volumes = VolumeMappings()
@@ -542,7 +542,7 @@ class DockerDbManager:
             command=custom_command,
         )
 
-        # Create and start (BUG-09: cleanup on start failure).
+        # Create and start (cleanup on start failure).
         # For cluster members, attach the cluster network BEFORE start
         # so the reader's pg_basebackup can resolve the writer alias
         # the moment its CMD runs.
@@ -576,7 +576,7 @@ class DockerDbManager:
                 pass
             raise
 
-        # BUG-07: Wait for database to accept connections. Readers do
+        # Wait for database to accept connections. Readers do
         # a full pg_basebackup on first start, which can take 30s+ on
         # a fresh writer; extend the timeout for cluster members.
         # For readers, the host port wait is unreliable (docker-proxy
@@ -884,7 +884,7 @@ class DockerDbManager:
 
     @staticmethod
     def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: int = 30) -> bool:
-        """Poll a TCP port until it accepts connections or timeout expires (BUG-07)."""
+        """Poll a TCP port until it accepts connections or timeout expires."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
@@ -922,7 +922,7 @@ class DockerDbManager:
             LOG.warning("Failed to start RDS instance %s: %s", db_instance_id, e)
 
     def reboot_db_instance(self, db_instance_id: str) -> None:
-        """Reboot an RDS instance using Docker restart (BUG-08: atomic, preserves ports)."""
+        """Reboot an RDS instance using Docker restart (atomic, preserves ports)."""
         container_name = self._container_name(db_instance_id)
         try:
             with self._lock:

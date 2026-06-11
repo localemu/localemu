@@ -53,7 +53,7 @@ def _rds_endpoint_address(db_id: str, region: str) -> str:
         return f"{db_id}.{hash_hex}.{region}.rds.amazonaws.com"
     return override or "localhost"
 
-# Module-level db_manager singleton (BUG-01: double-checked locking)
+# Module-level db_manager singleton (double-checked locking)
 _db_manager = None
 _db_manager_lock = threading.Lock()
 
@@ -150,7 +150,7 @@ def _handle_create_db_instance(
         db_name = db_inst.get("DBName")
         master_pass = request.get("MasterUserPassword") or _generate_random_password()
 
-        # PARITY-01: Extract additional parameters
+        # Extract additional parameters
         port_str = request.get("Port")
         port = int(port_str) if port_str else None
         db_instance_class = (
@@ -238,7 +238,7 @@ def _handle_create_db_instance(
                         "for %s",
                         cluster_id, db_id,
                     )
-            # PARITY-06: AWS-style endpoint hostname
+            # AWS-style endpoint hostname
             endpoint_address = _rds_endpoint_address(db_id, region)
             db_inst.setdefault("Endpoint", {})
             db_inst["Endpoint"]["Address"] = endpoint_address
@@ -250,7 +250,7 @@ def _handle_create_db_instance(
             )
         except Exception as e:
             LOG.warning("Docker DB failed for %s, marking create-failed: %s", db_id, e)
-            # BUG-05: Mark Moto record as failed so state stays consistent
+            # Mark Moto record as failed so state stays consistent
             try:
                 db_inst["DBInstanceStatus"] = "create-failed"
             except Exception:
@@ -264,14 +264,14 @@ def _handle_delete_db_instance(
 ) -> ServiceResponse:
     """DeleteDBInstance: let Moto delete the record, then remove the Docker container.
 
-    PARITY-03: Checks DeletionProtection before allowing deletion.
+    Checks DeletionProtection before allowing deletion.
     If SkipFinalSnapshot is False and no FinalDBSnapshotIdentifier is given,
     AWS raises an error — Moto already handles this, so we only add the
     DeletionProtection check here.
     """
     db_id = request.get("DBInstanceIdentifier")
 
-    # PARITY-03: Check DeletionProtection before proceeding
+    # Check DeletionProtection before proceeding
     if db_id:
         from localemu.aws.api import CommonServiceException as _CSE
         try:
@@ -996,7 +996,7 @@ def create_rds_service() -> Service:
     """Create the RDS service with Docker-aware dispatch table."""
     from localemu.aws.spec import load_service
 
-    # BUG-13: Initialize Docker DB manager once at service creation
+    # Initialize Docker DB manager once at service creation
     _init_db_manager()
 
     service_model = load_service("rds")

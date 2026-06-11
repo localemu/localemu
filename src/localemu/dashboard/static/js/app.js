@@ -147,6 +147,11 @@
       DASH.sidebar.render();
       return;
     }
+    if (r.service === "accounts") {
+      DASH.accounts.render();
+      DASH.sidebar.render();
+      return;
+    }
     if (r.service) {
       DASH.resources.open(r.service);
       DASH.resources.render();
@@ -289,6 +294,7 @@
     DASH.resources.init();
     DASH.activity.init();
     DASH.cloudtrail.init();
+    if (DASH.accounts && DASH.accounts.init) DASH.accounts.init();
     if (DASH.actions && DASH.actions._modal) DASH.actions._modal.init();
     if (DASH.drills && DASH.drills.s3) DASH.drills.s3.init && DASH.drills.s3.init();
     if (DASH.drills && DASH.drills.ddb) DASH.drills.ddb.init && DASH.drills.ddb.init();

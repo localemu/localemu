@@ -348,6 +348,9 @@ def register_dashboard():
 
     from .actions import ActionsResource
     from .api import (
+        AccountResource,
+        AccountSummaryResource,
+        AccountsResource,
         AcmCertificateDetailResource,
         ActivityResource,
         ApiGatewayV2DetailResource,
@@ -452,6 +455,10 @@ def register_dashboard():
     router.add(Resource("/_localemu/api/cloudtrail", G(CloudTrailResource())))
     router.add(Resource("/_localemu/api/cloudtrail/<request_id>", G(CloudTrailDetailResource())))
     router.add(Resource("/_localemu/api/activity", G(ActivityResource())))
+    # Multi-account discoverability + admin API.
+    router.add(Resource("/_localemu/api/accounts", G(AccountsResource())))
+    router.add(Resource("/_localemu/api/accounts/<account_id>", G(AccountResource())))
+    router.add(Resource("/_localemu/api/accounts/<account_id>/summary", G(AccountSummaryResource())))
     router.add(Resource("/_localemu/api/actions/<service>/<action>", G(ActionsResource())))
     router.add(Resource("/_localemu/api/stream", G(StreamResource())))
     router.add(Resource("/_localemu/api/stream/stats", G(StreamStatsResource())))

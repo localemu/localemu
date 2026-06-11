@@ -1435,7 +1435,13 @@ class TestIAMServiceRoles:
 
     @markers.aws.validated
     @pytest.mark.parametrize(
-        "service_name", list(set(SERVICES.keys()) - set(SERVICES_CUSTOM_SUFFIX))
+        # ``sorted`` is required: pytest-xdist workers each compute the
+        # parametrize list independently and the un-sorted ``list(set(...))``
+        # order varies per worker because Python sets iterate in
+        # hash-randomization-dependent order. The collection mismatch
+        # aborts the whole xdist run before a single test executes.
+        "service_name",
+        sorted(set(SERVICES.keys()) - set(SERVICES_CUSTOM_SUFFIX)),
     )
     def test_service_role_lifecycle_custom_suffix_not_allowed(
         self, aws_client, snapshot, create_service_linked_role, service_name

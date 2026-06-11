@@ -26,16 +26,16 @@ from localemu.services.plugins import Service, ServiceLifecycleHook
 
 LOG = logging.getLogger(__name__)
 
-# Module-level task_manager singleton (BUG-04: double-checked locking)
+# Module-level task_manager singleton (double-checked locking)
 _task_manager = None
 _task_manager_lock = threading.Lock()
 
-# Track synthetic EC2 instance IDs per cluster for cleanup (BUG-03)
+# Track synthetic EC2 instance IDs per cluster for cleanup
 _synthetic_instances: dict[str, str] = {}
 
 
 def _normalize_cluster_name(cluster: str) -> str:
-    """Extract short cluster name from ARN or plain name (BUG-12: centralized normalization)."""
+    """Extract short cluster name from ARN or plain name (centralized normalization)."""
     if "/" in cluster:
         return cluster.split("/")[-1]
     return cluster
@@ -96,10 +96,10 @@ def _ensure_synthetic_instance(context: RequestContext, cluster_name: str, launc
     The call is idempotent — if the cluster already has instances, this is a
     no-op.
 
-    PARITY-02: For FARGATE launch type, skip synthetic instance creation since
+    For FARGATE launch type, skip synthetic instance creation since
     Fargate tasks don't need registered container instances.
     """
-    # PARITY-02: FARGATE tasks don't need container instances
+    # FARGATE tasks don't need container instances
     if launch_type and launch_type.upper() == "FARGATE":
         return
 
@@ -124,14 +124,14 @@ def _ensure_synthetic_instance(context: RequestContext, cluster_name: str, launc
         ec2_instance_id = reservation.instances[0].id
 
         ecs_backend.register_container_instance(cluster_key, ec2_instance_id)
-        # BUG-03: Track synthetic instance for cleanup on cluster deletion
+        # Track synthetic instance for cleanup on cluster deletion
         _synthetic_instances[cluster_key] = ec2_instance_id
         LOG.debug(
             "Registered synthetic container instance %s for cluster %s",
             ec2_instance_id, cluster_key,
         )
     except (KeyboardInterrupt, SystemExit, MemoryError):
-        # BUG-09: Re-raise critical errors that should never be swallowed
+        # Re-raise critical errors that should never be swallowed
         raise
     except Exception as e:
         LOG.warning("Failed to ensure synthetic instance for %s: %s", cluster_name, e)
@@ -141,7 +141,7 @@ def _handle_run_task(
     context: RequestContext, request: ServiceRequest
 ) -> ServiceResponse:
     """RunTask: let Moto create the task record, then start real Docker containers."""
-    # PARITY-02: Extract launch type to distinguish FARGATE from EC2
+    # Extract launch type to distinguish FARGATE from EC2
     launch_type = request.get("launchType", "EC2")
 
     # Ensure Moto has a container instance so its run_task check passes.
@@ -168,17 +168,17 @@ def _handle_run_task(
         task["lastStatus"] = "PROVISIONING"
         task["desiredStatus"] = "RUNNING"
 
-        # PARITY-04: Add timing fields
+        # Add timing fields
         now_ts = time.time()
         task["createdAt"] = now_ts
 
         overrides_data = task.get("overrides", {})
 
-        # PARITY-03: Resolve the full task definition to get networkMode, cpu, memory
+        # Resolve the full task definition to get networkMode, cpu, memory
         full_td = _resolve_full_task_definition(context, task_def_arn)
         network_mode = full_td.get("networkMode", "bridge") if full_td else "bridge"
 
-        # PARITY-04: Add cpu/memory from the task definition
+        # Add cpu/memory from the task definition
         td_cpu = full_td.get("cpu") if full_td else None
         td_memory = full_td.get("memory") if full_td else None
         if td_cpu:
@@ -186,7 +186,7 @@ def _handle_run_task(
         if td_memory:
             task["memory"] = str(td_memory)
 
-        # BUG-ECS-04 fix: moto's ``Task.containers`` is hard-coded to
+        # moto's ``Task.containers`` is hard-coded to
         # ``[Container(task_definition)]`` and ``Container.__init__`` only
         # ever inspects ``task_def.container_definitions[0]``. So a multi-
         # container task definition (e.g. web + sidecar sharing a volume)
@@ -194,7 +194,7 @@ def _handle_run_task(
         # ``task.get("containers", [])``. Source the launch list from the
         # registered task definition itself, then push synthetic Container
         # entries back into ``task["containers"]`` so DescribeTasks reflects
-        # what we actually launched (and downstream PARITY-09 status updates
+        # what we actually launched (and downstream status updates
         # find each container by name).
         registered_defs = _resolve_task_definition(context, task_def_arn)
         container_defs = []
@@ -232,15 +232,15 @@ def _handle_run_task(
                     ),
                 })
 
-        # PARITY-07: Extract volumes from task definition
+        # Extract volumes from task definition
         td_volumes = full_td.get("volumes", []) if full_td else []
 
         task_definition = {
             "taskDefinitionArn": task_def_arn,
             "containerDefinitions": container_defs,
-            # PARITY-03: Pass network mode to Docker task manager
+            # Pass network mode to Docker task manager
             "networkMode": network_mode,
-            # PARITY-07: Pass volumes
+            # Pass volumes
             "volumes": td_volumes,
             # #79: task role ARN drives IAM credential minting
             "taskRoleArn": full_td.get("taskRoleArn") if full_td else None,
@@ -270,7 +270,7 @@ def _handle_run_task(
                 ti = task_infos[0]
                 task["lastStatus"] = "RUNNING"
                 task["desiredStatus"] = "RUNNING"
-                # PARITY-04: Add startedAt
+                # Add startedAt
                 task["startedAt"] = time.time()
 
                 for mc in task.get("containers", []):
@@ -344,7 +344,7 @@ def _resolve_task_definition(context: RequestContext, task_def_arn: str) -> list
                     pm = getattr(cdef, "port_mappings", None) or getattr(cdef, "portMappings", None)
                     if pm is not None:
                         d["portMappings"] = pm
-                    # PARITY-06: Extract health check
+                    # Extract health check
                     hc = getattr(cdef, "health_check", None) or getattr(cdef, "healthCheck", None)
                     if hc is not None:
                         d["healthCheck"] = hc if isinstance(hc, dict) else {
@@ -354,7 +354,7 @@ def _resolve_task_definition(context: RequestContext, task_def_arn: str) -> list
                             "retries": getattr(hc, "retries", 3),
                             "startPeriod": getattr(hc, "start_period", 0),
                         }
-                    # PARITY-07: Extract mount points
+                    # Extract mount points
                     mp = getattr(cdef, "mount_points", None) or getattr(cdef, "mountPoints", None)
                     if mp is not None:
                         d["mountPoints"] = mp
@@ -394,7 +394,7 @@ _full_td_cache: dict[str, dict] = {}
 def _resolve_full_task_definition(context: RequestContext, task_def_arn: str) -> dict | None:
     """Resolve the full task definition metadata (networkMode, volumes, cpu, memory).
 
-    PARITY-03/07: Extracts top-level task definition attributes that affect
+    Extracts top-level task definition attributes that affect
     Docker container configuration.
     """
     if task_def_arn in _full_td_cache:
@@ -407,7 +407,7 @@ def _resolve_full_task_definition(context: RequestContext, task_def_arn: str) ->
             result["networkMode"] = getattr(td_obj, "network_mode", None) or getattr(td_obj, "networkMode", "bridge") or "bridge"
             result["cpu"] = getattr(td_obj, "cpu", None)
             result["memory"] = getattr(td_obj, "memory", None)
-            # PARITY-07: Extract volumes
+            # Extract volumes
             vols = getattr(td_obj, "volumes", None)
             if vols:
                 result["volumes"] = vols if isinstance(vols, list) else []
@@ -446,12 +446,12 @@ def _handle_stop_task(
     # NOT in context.request.values (which is empty for JSON bodies).
     task_arn = request.get("task") or ""
     cluster = request.get("cluster", "default")
-    # PARITY-09: Capture the stop reason
+    # Capture the stop reason
     reason = request.get("reason", "")
 
     result = call_moto(context)
 
-    # PARITY-09: Propagate reason to the response
+    # Propagate reason to the response
     if reason and result.get("task"):
         result["task"]["stoppedReason"] = reason
 
@@ -459,7 +459,7 @@ def _handle_stop_task(
     if result.get("task"):
         result["task"]["lastStatus"] = "STOPPING"
         result["task"]["desiredStatus"] = "STOPPED"
-        # PARITY-04: Add stoppedAt timestamp
+        # Add stoppedAt timestamp
         result["task"]["stoppedAt"] = time.time()
 
     mgr = _init_task_manager()
@@ -490,7 +490,7 @@ def _handle_describe_tasks(
         task_def_arn = task.get("taskDefinitionArn", "")
         task_info = mgr.get_task_status(task_arn)
 
-        # PARITY-04: Enrich with cpu/memory from task definition even without Docker info
+        # Enrich with cpu/memory from task definition even without Docker info
         if task_def_arn:
             full_td = _resolve_full_task_definition(context, task_def_arn)
             if full_td:
@@ -503,7 +503,7 @@ def _handle_describe_tasks(
             continue
 
         task["lastStatus"] = task_info.status
-        # PARITY-04: Add timing fields from task info
+        # Add timing fields from task info
         if task_info.created_at:
             task["createdAt"] = task_info.created_at
         if task_info.started_at:
@@ -517,7 +517,7 @@ def _handle_describe_tasks(
                     mc["lastStatus"] = ci.status
                     if ci.exit_code is not None:
                         mc["exitCode"] = ci.exit_code
-                    # BUG-ECS-05 fix: populate networkBindings on every
+                    # Populate networkBindings on every
                     # DescribeTasks call. Moto's Container model does not
                     # carry port bindings, so without this re-projection
                     # the field is dropped on the second call (real AWS
@@ -565,7 +565,7 @@ def _handle_delete_cluster(
         except Exception as e:
             LOG.warning("Failed to clean up containers for ECS cluster %s: %s", cluster_name, e)
 
-    # BUG-03: Terminate synthetic EC2 instance for this cluster
+    # Terminate synthetic EC2 instance for this cluster
     cluster_short = _normalize_cluster_name(cluster_name)
     ec2_instance_id = _synthetic_instances.pop(cluster_short, None)
     if ec2_instance_id:
@@ -576,7 +576,7 @@ def _handle_delete_cluster(
         except Exception as e:
             LOG.debug("Failed to terminate synthetic instance %s: %s", ec2_instance_id, e)
 
-    # BUG-02: Invalidate task definition caches on cluster deletion
+    # Invalidate task definition caches on cluster deletion
     _task_def_cache.clear()
     _full_td_cache.clear()
 
@@ -588,7 +588,7 @@ def _handle_register_task_definition(
 ) -> ServiceResponse:
     """RegisterTaskDefinition: invalidate cache after Moto registers the definition."""
     result = call_moto(context)
-    # BUG-ECS-01 fix: invalidate task def cache on new registration
+    # Invalidate task def cache on new registration
     td_arn = result.get("taskDefinition", {}).get("taskDefinitionArn")
     if td_arn:
         _task_def_cache.pop(td_arn, None)
@@ -635,7 +635,7 @@ def _handle_create_service(
     launch_type = service_data.get("launchType", "EC2")
 
     if desired_count > 0 and task_def_arn:
-        # BUG-ECS-03 fix: pass the full cluster ARN to the task manager so
+        # Pass the full cluster ARN to the task manager so
         # the ``localemu.cluster`` Docker label matches what RunTask writes
         # (the ARN). Using the short name here made label-scoped docker
         # queries (e.g. by ops tooling) skip every service-started
@@ -686,7 +686,7 @@ def _handle_update_service(
         current_count = len(current_task_arns)
 
     if desired_count > current_count:
-        # Scale up — see BUG-ECS-03: label tasks with the cluster ARN (not
+        # Scale up: label tasks with the cluster ARN (not
         # the short name) so they are discoverable via docker-label queries
         # and match RunTask's labelling.
         cluster_label = cluster_arn or _normalize_cluster_name(cluster_arn or "default")
@@ -761,7 +761,7 @@ def _run_service_tasks(
 ) -> list[str]:
     """Run N tasks for a service, returning the task ARNs created.
 
-    BUG-ECS-02 fix: ``_resolve_full_task_definition`` only exposes top-level
+    ``_resolve_full_task_definition`` only exposes top-level
     task-def fields (networkMode, cpu, memory, volumes) — *not* the container
     definitions. Before this fix we pulled ``containerDefinitions`` out of
     that dict and got an empty list every time, so CreateService/UpdateService

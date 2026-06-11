@@ -41,6 +41,11 @@ NATIVE_STORES = {
     # AWS Backup overlay (selections + protected-resource index that moto
     # doesn't model). See services/backup/models.py.
     "backup_overlay": ("localemu.services.backup.models", "backup_stores"),
+    # Central registry of accounts known to this LocalEmu instance.
+    # CrossAccount dict in _universal slot, shared across all services.
+    # Loaded first so Organizations and IAM cross-account evaluators see
+    # a populated account list immediately after restore.
+    "accounts_registry": ("localemu.accounts.registry", "accounts_stores"),
 }
 
 # Moto backends — every instantiated moto backend is serialized via dill.dumps(backend).
@@ -58,13 +63,18 @@ MOTO_SERVICES = [
     "logs", "cloudwatch", "kinesis", "firehose", "stepfunctions",
     "route53", "apigateway", "apigatewayv2", "cloudformation", "cloudtrail",
     "opensearch", "es",
+    # s3control holds the S3 Access Point records (name, bucket, alias,
+    # policy, BPA, VPC config); without it the AP metadata is lost on
+    # every restart.
+    "s3control",
 ]
 
 # Topological load order — each tier loads before the next.
 # Hard dependencies: Lambda -> S3 (code), CloudFormation -> everything.
 LOAD_ORDER = [
     # Tier 0: no dependencies
-    ["iam", "sts", "kms", "ec2_account_settings", "backup_overlay"],
+    ["iam", "sts", "kms", "ec2_account_settings", "backup_overlay",
+     "accounts_registry"],
     # Tier 1: depends on IAM/KMS only
     ["s3", "sqs", "sns", "dynamodb", "dynamodbstreams", "kinesis",
      "secretsmanager", "ssm", "route53", "route53resolver"],

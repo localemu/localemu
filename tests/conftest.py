@@ -20,6 +20,11 @@ pytest_plugins = [
     "localemu.testing.pytest.path_filter",
     "localemu.testing.pytest.stepfunctions.fixtures",
     "localemu.testing.pytest.cloudformation.fixtures",
+    # Bootstrap plugin: declares a session-scoped autouse fixture that
+    # creates the host config dirs (idempotent ``config.dirs.mkdirs()``).
+    # Lives here at the top-level conftest because pytest 9 forbids
+    # ``pytest_plugins`` in any other conftest. Used by tests/bootstrap/.
+    "localemu.testing.pytest.bootstrap",
 ]
 
 

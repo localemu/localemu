@@ -434,8 +434,14 @@ PERSISTENCE = is_env_true("PERSISTENCE")
 # their subnet's CIDR range and Docker binds the container to that
 # exact address. When disabled, Docker assigns the container address
 # automatically and the recorded private IP is updated to match it.
-# Default: off.
-LOCALEMU_VPC_IP_PINNING = is_env_true("LOCALEMU_VPC_IP_PINNING")
+# Default: on — without this, two instances in different subnets of the
+# same VPC both land on whatever Docker's IPAM picks (e.g. 10.0.0.3 and
+# 10.0.0.4), outside their own subnet CIDR. That breaks the AWS contract
+# that an ENI's PrivateIpAddress lies inside its SubnetId's CidrBlock,
+# and it breaks every PR-006-style data-plane test that wires routes by
+# instance IP. To revert to Docker auto-IPAM, set the var to a falsy
+# value (the same shape every other LocalEmu opt-out flag uses).
+LOCALEMU_VPC_IP_PINNING = is_env_not_false("LOCALEMU_VPC_IP_PINNING")
 
 # When enabled, Elastic Network Interface operations (create, attach,
 # detach, delete, assign and unassign private IPs, modify attributes,
@@ -1122,8 +1128,17 @@ SFN_MOCK_CONFIG = os.environ.get("SFN_MOCK_CONFIG", "").strip()
 # path prefix for windows volume mounting
 WINDOWS_DOCKER_MOUNT_PREFIX = os.environ.get("WINDOWS_DOCKER_MOUNT_PREFIX", "/host_mnt")
 
-# whether to skip S3 presign URL signature validation (TODO: currently enabled, until all issues are resolved)
-S3_SKIP_SIGNATURE_VALIDATION = is_env_not_false("S3_SKIP_SIGNATURE_VALIDATION")
+# Whether to skip S3 presigned-URL signature validation. The historical
+# default ``is_env_not_false(...)`` returned True when the env var was
+# unset, meaning every freshly-started LocalEmu served tampered presigned
+# URLs without checking the signature — the canonical request could be
+# rewritten by any caller after the URL was minted and the server would
+# still serve it. Real S3 always validates the signature; there is no
+# AWS-side knob to disable it. The new default is False (strict, AWS
+# parity); set ``S3_SKIP_SIGNATURE_VALIDATION=1`` to opt back in to the
+# permissive dev mode (useful when iterating against unregistered access
+# keys), at the cost of accepting requests a real S3 would reject.
+S3_SKIP_SIGNATURE_VALIDATION = is_env_true("S3_SKIP_SIGNATURE_VALIDATION")
 # whether to skip S3 validation of provided KMS key
 S3_SKIP_KMS_KEY_VALIDATION = is_env_not_false("S3_SKIP_KMS_KEY_VALIDATION")
 

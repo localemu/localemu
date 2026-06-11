@@ -1103,6 +1103,15 @@ class ChangeSetModelPreproc(ChangeSetModelVisitor):
                     return to_number(value)
             return value
 
+        # Parse both sides of the delta. Skipping ``before`` left
+        # ``CommaDelimitedList`` / ``List<*>`` parameters as the raw
+        # comma-string when a downstream ``_cached_apply`` resolved a
+        # ``Fn::Ref`` to the before-state, which then crashed
+        # ``Fn::Join`` (the join resolver requires a list as the second
+        # argument per AWS spec). Both deltas now go through the same
+        # type-coercion, matching real CFN's contract.
+        if not is_nothing(before):
+            before = _resolve_parameter_type(before, parameter_type.before)
         if not is_nothing(after):
             after = _resolve_parameter_type(after, parameter_type.after)
 

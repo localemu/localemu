@@ -30,7 +30,8 @@
     "sqs", "sns", "events", "stepfunctions",
     "apigateway", "apigatewayv2", "route53", "elbv2",
     "iam", "kms", "secretsmanager", "cloudtrail",
-    "logs", "ssm"
+    "logs", "ssm",
+    "accounts"
   ]);
 
   // AWS-branded labels. Anything not listed gets auto-humanized.
@@ -42,6 +43,7 @@
     xray: "X-Ray", "iot-data": "IoT Data", dynamodb: "DynamoDB",
     dynamodbstreams: "DynamoDB Streams", cloudwatch: "CloudWatch",
     logs: "CloudWatch Logs", cloudtrail: "CloudTrail",
+    accounts: "Accounts",
     cloudformation: "CloudFormation", cloudfront: "CloudFront",
     cloudhsmv2: "CloudHSM v2", secretsmanager: "Secrets Manager",
     stepfunctions: "Step Functions", events: "EventBridge",
@@ -141,7 +143,7 @@
     apigatewayv2: "networking", appmesh: "networking",
     servicediscovery: "networking", ram: "networking", transfer: "networking",
     iam: "security", secretsmanager: "security", kms: "security",
-    cloudtrail: "security", "cognito-idp": "security",
+    cloudtrail: "security", accounts: "security", "cognito-idp": "security",
     "cognito-identity": "security", acm: "security", "acm-pca": "security",
     identitystore: "security", cloudhsmv2: "security",
     guardduty: "security", inspector2: "security", macie2: "security",

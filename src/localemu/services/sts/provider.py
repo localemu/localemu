@@ -51,7 +51,7 @@ class InvalidParameterValueError(ServiceException):
     sender_fault = True
 
 
-# BUG-05: Stricter regex — must be iam service and role/ resource type
+# Stricter regex — must be iam service and role/ resource type
 ROLE_ARN_REGEX = re.compile(
     r"^arn:[^:]+:iam:[^:]*:[^:]*:role/[a-zA-Z0-9+=,.@_/-]+$"
 )
@@ -69,7 +69,7 @@ class MalformedPolicyDocumentError(CommonServiceException):
         super().__init__("MalformedPolicyDocument", message, 400, True)
 
 
-# Duration limits per operation (PARITY-04)
+# Duration limits per operation
 _ASSUME_ROLE_MIN_DURATION = 900
 _ASSUME_ROLE_MAX_DURATION = 43200
 _ASSUME_ROLE_DEFAULT_DURATION = 3600
@@ -88,7 +88,7 @@ _WEB_IDENTITY_DEFAULT_DURATION = 3600
 
 
 def _validate_duration(value, min_val, max_val, operation_name):
-    """PARITY-04: Validate session duration within AWS-specified range."""
+    """Validate session duration within AWS-specified range."""
     if value is not None:
         if value < min_val or value > max_val:
             raise ValidationError(
@@ -209,7 +209,7 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
                            external_id: str | None = None,
                            serial_number: str | None = None,
                            service_principal: str | None = None) -> bool:
-    """PARITY-02: Evaluate the role's trust policy (AssumeRolePolicyDocument).
+    """Evaluate the role's trust policy (AssumeRolePolicyDocument).
 
     Returns True if the caller is allowed to assume the role.
 
@@ -233,7 +233,29 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
         LOG.debug("Failed to parse trust policy for role %s", getattr(role, "name", "unknown"))
         return False
 
-    for statement in trust_doc.get("Statement", []):
+    # AWS IAM policy grammar: ``Statement`` may be a single statement object
+    # OR a list of statement objects. ``for statement in trust_doc["Statement"]``
+    # on the single-dict form would iterate over the dict's *keys* (the strings
+    # ``"Effect"``, ``"Principal"`` ...) and ``.get`` would fail on each.
+    # Normalise before iterating.
+    statements = trust_doc.get("Statement", [])
+    if isinstance(statements, dict):
+        statements = [statements]
+    elif not isinstance(statements, list):
+        LOG.debug(
+            "Trust policy for role %s has malformed Statement (type=%s); denying",
+            getattr(role, "name", "unknown"),
+            type(statements).__name__,
+        )
+        return False
+
+    for statement in statements:
+        if not isinstance(statement, dict):
+            LOG.debug(
+                "Trust policy for role %s contains non-dict statement; denying",
+                getattr(role, "name", "unknown"),
+            )
+            return False
         effect = statement.get("Effect", "")
         if effect != "Allow":
             continue
@@ -250,7 +272,7 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
         # Check conditions
         conditions = statement.get("Condition", {})
 
-        # PARITY-02: ExternalId check
+        # ExternalId check
         external_id_condition = (
             conditions.get("StringEquals", {}).get("sts:ExternalId")
             or conditions.get("StringEquals", {}).get("sts:externalId")
@@ -262,7 +284,7 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
             elif external_id != external_id_condition:
                 continue
 
-        # PARITY-05: MFA check
+        # MFA check
         mfa_required = conditions.get("Bool", {}).get("aws:MultiFactorAuthPresent")
         if mfa_required == "true" and not serial_number:
             continue
@@ -378,14 +400,14 @@ def _resolve_caller_arn(access_key_id: str, account_id: str) -> str:
 
 
 def _store_session(target_account_id: str, access_key_id: str, config: SessionConfig):
-    """BUG-02: Thread-safe session store write."""
+    """Thread-safe session store write."""
     store = sts_stores[target_account_id]["us-east-1"]
     with sts_store_lock:
         store.sessions[access_key_id] = config
 
 
 def _get_session(account_id: str, access_key_id: str) -> SessionConfig | None:
-    """BUG-02: Thread-safe session store read."""
+    """Thread-safe session store read."""
     store = sts_stores[account_id]["us-east-1"]
     with sts_store_lock:
         return store.sessions.get(access_key_id)
@@ -402,7 +424,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         visitor.visit(sts_stores)
 
     def get_caller_identity(self, context: RequestContext, **kwargs) -> GetCallerIdentityResponse:
-        # BUG-01: Check access key against root keys instead of fragile Moto ARN heuristic
+        # Check access key against root keys instead of a fragile Moto ARN heuristic
         access_key_id = extract_access_key_id_from_auth_header(context.request.headers)
         response = call_moto(context)
 
@@ -434,7 +456,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         provided_contexts: ProvidedContextsListType = None,
         **kwargs,
     ) -> AssumeRoleResponse:
-        # BUG-05: Validate ARN is iam service and role/ resource type
+        # Validate ARN is iam service and role/ resource type
         if not ROLE_ARN_REGEX.match(role_arn):
             raise ValidationError(f"{role_arn} is invalid")
 
@@ -444,7 +466,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
                 f"failed to satisfy constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]*"
             )
 
-        # BUG-06 / PARITY-04: Validate duration range
+        # Validate duration range
         _validate_duration(
             duration_seconds, _ASSUME_ROLE_MIN_DURATION, _ASSUME_ROLE_MAX_DURATION, "AssumeRole"
         )
@@ -452,7 +474,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         target_account_id = extract_account_id_from_arn(role_arn) or context.account_id
         access_key_id = extract_access_key_id_from_auth_header(context.request.headers)
 
-        # PARITY-02 / PARITY-06: Trust policy evaluation
+        # / Trust policy evaluation
         role = _resolve_role(target_account_id, role_arn)
         if role:
             caller_arn = _resolve_caller_arn(access_key_id, context.account_id)
@@ -476,7 +498,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
                     status_code=403,
                 )
 
-        # BUG-02: Thread-safe session read
+        # Thread-safe session read
         existing_session_config = _get_session(target_account_id, access_key_id) if access_key_id else None
 
         if tags:
@@ -534,7 +556,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         effective_duration = duration_seconds or _ASSUME_ROLE_DEFAULT_DURATION
         expiration = datetime.now(timezone.utc).timestamp() + effective_duration
 
-        # BUG-02: Thread-safe session store write
+        # Thread-safe session store write
         new_access_key_id = response["Credentials"]["AccessKeyId"]
         _store_session(target_account_id, new_access_key_id, SessionConfig(
             tags=transformed_tags,
@@ -564,8 +586,8 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         duration_seconds: roleDurationSecondsType | None = None,
         **kwargs,
     ) -> AssumeRoleWithWebIdentityResponse:
-        """PARITY-01: Custom AssumeRoleWithWebIdentity with session tag storage."""
-        # BUG-05: Validate role ARN
+        """Custom AssumeRoleWithWebIdentity with session tag storage."""
+        # Validate role ARN
         if not ROLE_ARN_REGEX.match(role_arn):
             raise ValidationError(f"{role_arn} is invalid")
 
@@ -583,7 +605,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
                 status_code=400,
             )
 
-        # PARITY-04: Duration validation
+        # Duration validation
         _validate_duration(
             duration_seconds, _WEB_IDENTITY_MIN_DURATION, _WEB_IDENTITY_MAX_DURATION,
             "AssumeRoleWithWebIdentity"
@@ -644,14 +666,14 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         token_code: tokenCodeType | None = None,
         **kwargs,
     ) -> GetSessionTokenResponse:
-        """PARITY-01: Custom GetSessionToken with duration validation and expiration tracking."""
-        # PARITY-04: Duration validation
+        """Custom GetSessionToken with duration validation and expiration tracking."""
+        # Duration validation
         _validate_duration(
             duration_seconds, _SESSION_TOKEN_MIN_DURATION, _SESSION_TOKEN_MAX_DURATION,
             "GetSessionToken"
         )
 
-        # PARITY-05: MFA validation — if serial_number provided, token_code must also be provided
+        # MFA validation — if serial_number provided, token_code must also be provided
         if serial_number and not token_code:
             raise ValidationError(
                 "Also provide a value for tokenCode when providing serialNumber."
@@ -692,8 +714,8 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         tags: tagListType | None = None,
         **kwargs,
     ) -> GetFederationTokenResponse:
-        """PARITY-01 / PARITY-03: Custom GetFederationToken with session tag storage."""
-        # PARITY-04: Duration validation
+        """/ Custom GetFederationToken with session tag storage."""
+        # Duration validation
         _validate_duration(
             duration_seconds, _FEDERATION_TOKEN_MIN_DURATION, _FEDERATION_TOKEN_MAX_DURATION,
             "GetFederationToken"
@@ -740,7 +762,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
     def decode_authorization_message(
         self, context: RequestContext, encoded_message: encodedMessageType, **kwargs
     ) -> DecodeAuthorizationMessageResponse:
-        """PARITY-08: Return a more useful decoded message instead of Moto stub."""
+        """Return a more useful decoded message instead of Moto stub."""
         # In AWS, this decodes an encoded authorization failure message.
         # We return a synthetic decoded message that includes the encoded input,
         # since LocalEmu doesn't produce real encoded auth messages.

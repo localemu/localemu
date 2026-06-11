@@ -12,6 +12,7 @@ from localemu.aws.connect import connect_to
 from localemu.http import Response
 from localemu.utils.aws.arns import extract_region_from_arn
 from localemu.utils.aws.client_types import ServicePrincipal
+from localemu.utils.aws.policy import iter_policy_statements
 from localemu.utils.strings import to_str
 
 from ..api import RestApiGatewayHandler, RestApiGatewayHandlerChain
@@ -213,12 +214,12 @@ class AuthorizerHandler(RestApiGatewayHandler):
         if not result:
             raise UnauthorizedError("Unauthorized")
 
-        # Check the policy document
+        # Check the policy document. ``Statement`` can be a single dict or a
+        # list of dicts in any user-returned authorizer policy.
         policy = result.get("policyDocument", {})
-        statements = policy.get("Statement", [])
 
         is_allowed = False
-        for statement in statements:
+        for statement in iter_policy_statements(policy):
             effect = statement.get("Effect", "").lower()
             if effect == "allow":
                 is_allowed = True

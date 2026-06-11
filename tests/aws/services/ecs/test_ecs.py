@@ -8,10 +8,13 @@ the Moto-backed API layer; Docker container execution is not tested here.
 import pytest
 from botocore.exceptions import ClientError
 
+from localemu.testing.pytest import markers
+
 
 class TestEcsCluster:
     """Tests for ECS cluster create, describe, list, and delete."""
 
+    @markers.aws.validated
     def test_create_and_describe_cluster(self, aws_client):
         """CreateCluster should return cluster details; DescribeClusters should find it."""
         ecs = aws_client.ecs
@@ -35,6 +38,7 @@ class TestEcsCluster:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_list_clusters(self, aws_client):
         """ListClusters should include a newly created cluster."""
         ecs = aws_client.ecs
@@ -52,6 +56,7 @@ class TestEcsCluster:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_delete_cluster(self, aws_client):
         """DeleteCluster should remove the cluster."""
         ecs = aws_client.ecs
@@ -70,6 +75,7 @@ class TestEcsCluster:
         # Or it might show up in failures
         # (Moto may place it in failures list after deletion)
 
+    @markers.aws.validated
     def test_describe_nonexistent_cluster(self, aws_client):
         """DescribeClusters for a nonexistent cluster should return it in failures."""
         ecs = aws_client.ecs
@@ -81,6 +87,7 @@ class TestEcsCluster:
 class TestEcsTaskDefinition:
     """Tests for ECS task definition registration and deregistration."""
 
+    @markers.aws.validated
     def test_register_task_definition(self, aws_client):
         """RegisterTaskDefinition should return the registered definition."""
         ecs = aws_client.ecs
@@ -121,6 +128,7 @@ class TestEcsTaskDefinition:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_register_task_definition_with_multiple_containers(self, aws_client):
         """RegisterTaskDefinition with multiple containers should register all of them."""
         ecs = aws_client.ecs
@@ -158,6 +166,7 @@ class TestEcsTaskDefinition:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_deregister_task_definition(self, aws_client):
         """DeregisterTaskDefinition should mark the definition as INACTIVE."""
         ecs = aws_client.ecs
@@ -184,6 +193,7 @@ class TestEcsTaskDefinition:
 class TestEcsService:
     """Tests for ECS service create, update, and delete."""
 
+    @markers.aws.validated
     def test_create_service(self, aws_client):
         """CreateService should create a service with the specified desired count."""
         ecs = aws_client.ecs
@@ -234,6 +244,7 @@ class TestEcsService:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_update_service_scaling(self, aws_client):
         """UpdateService should change the desired count."""
         ecs = aws_client.ecs
@@ -296,6 +307,7 @@ class TestEcsService:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_delete_service(self, aws_client):
         """DeleteService should remove the service."""
         ecs = aws_client.ecs

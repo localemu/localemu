@@ -40,6 +40,7 @@ class LocalemuAwsGateway(Gateway):
                 handlers.serve_edge_router_rules,
                 # start aws handler chain
                 handlers.parse_service_name,
+                self._access_point_host_rewriter(),
                 handlers.parse_pre_signed_url_request,
                 handlers.inject_auth_header_if_missing,
                 handlers.add_region_from_header,
@@ -50,6 +51,7 @@ class LocalemuAwsGateway(Gateway):
                 metric_collector.record_parsed_request,
                 handlers.simulate_throttling,
                 handlers.validate_temporary_credentials,
+                self._access_point_resolver(),
                 self._iam_enforcement_handler(),
                 self._cloudfront_oac_guard(),
                 handlers.serve_custom_service_request_handlers,
@@ -97,6 +99,33 @@ class LocalemuAwsGateway(Gateway):
         from localemu.services.iam_enforcement.enforcer import iam_enforcement_handler
 
         return iam_enforcement_handler
+
+    @staticmethod
+    def _access_point_resolver():
+        """Lazy-import S3 access-point resolver handler.
+
+        Detects requests addressed to an S3 access point (by Bucket ARN,
+        alias, or hostname), stashes AP context on the request, and
+        rewrites Bucket to the underlying bucket so downstream handlers
+        process the request normally.
+        """
+        from localemu.aws.handlers.ap_resolver import access_point_resolver
+
+        return access_point_resolver
+
+    @staticmethod
+    def _access_point_host_rewriter():
+        """Lazy-import the early-chain AP host rewriter.
+
+        Boto3 with a custom endpoint emits ``<ap-name>-<account>.<host>``
+        when given an AP ARN as ``Bucket`` ; this handler rewrites that
+        host to the underlying-bucket virtual-host form so the normal
+        ``parse_service_request`` produces the right ``Bucket`` parameter.
+        Runs immediately after ``parse_service_name``.
+        """
+        from localemu.aws.handlers.ap_resolver import access_point_host_rewriter
+
+        return access_point_host_rewriter
 
     @staticmethod
     def _cloudfront_oac_guard():

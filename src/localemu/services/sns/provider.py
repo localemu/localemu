@@ -143,6 +143,7 @@ from localemu.utils.aws.arns import (
     sns_platform_application_arn,
     sns_topic_arn,
 )
+from localemu.utils.aws.policy import iter_policy_statements
 from localemu.utils.collections import PaginatedList, select_from_typed_dict
 from localemu.utils.strings import to_bytes
 
@@ -1317,8 +1318,14 @@ class SnsProvider(SnsApi, ServiceLifecycleHook):
     ) -> None:
         topic: Topic = self._get_topic(topic_arn, context)
         policy = json.loads(topic["attributes"]["Policy"])
+        # ``iter_policy_statements`` normalises single-dict + list forms of
+        # the ``Statement`` field, both of which are AWS-valid.
         statement = next(
-            (statement for statement in policy["Statement"] if statement["Sid"] == label),
+            (
+                statement
+                for statement in iter_policy_statements(policy)
+                if statement.get("Sid") == label
+            ),
             None,
         )
 

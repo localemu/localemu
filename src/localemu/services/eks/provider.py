@@ -85,8 +85,8 @@ def _handle_create_cluster(
 ) -> ServiceResponse:
     """CreateCluster: let Moto create the record, then start a real k3d cluster.
 
-    PARITY-09: Return CREATING status immediately, create cluster in background thread.
-    PARITY-02: Pass version to k3d.
+    Return CREATING status immediately, create cluster in background thread.
+    Pass version to k3d.
     """
     result = call_moto(context)
 
@@ -94,11 +94,11 @@ def _handle_create_cluster(
     if mgr and result.get("cluster"):
         cluster = result["cluster"]
         cluster_name = cluster.get("name")
-        # PARITY-02: Extract Kubernetes version from request
+        # Extract Kubernetes version from request
         kubernetes_version = request.get("version")
 
         if cluster_name:
-            # PARITY-09: Return CREATING status immediately, create in
+            # Return CREATING status immediately, create in
             # background. The status has to be written into moto's stored
             # cluster object (not just the response dict) so DescribeCluster
             # returns CREATING for subsequent polls — otherwise the test
@@ -121,7 +121,7 @@ def _handle_create_cluster(
                         account_id=context.account_id,
                         region=context.region,
                     )
-                    # BUG-05: Update the Moto cluster object with endpoint and CA cert
+                    # Update the Moto cluster object with endpoint and CA cert
                     try:
                         eks_backend = moto_backends.get_backend("eks")[context.account_id][context.region]
                         moto_cluster = eks_backend.clusters.get(cluster_name)
@@ -168,14 +168,14 @@ def _handle_delete_cluster(
 ) -> ServiceResponse:
     """DeleteCluster: let Moto delete the record, then remove the k3d cluster.
 
-    PARITY-08: Return DELETING status, delete in background thread.
+    Return DELETING status, delete in background thread.
     """
     # Extract cluster name from the request path before Moto processes it
     cluster_name = _extract_cluster_name_from_path(context)
 
     result = call_moto(context)
 
-    # PARITY-08: Set DELETING status in response
+    # Set DELETING status in response
     if result.get("cluster"):
         result["cluster"]["status"] = "DELETING"
 
@@ -206,8 +206,8 @@ def _handle_describe_cluster(
 ) -> ServiceResponse:
     """DescribeCluster: let Moto return the record, then enrich with real details.
 
-    PARITY-03: Add platformVersion, kubernetesNetworkConfig, identity.oidc.
-    QUALITY-02/BUG-13: Expose kubeconfig via response.
+    Add platformVersion, kubernetesNetworkConfig, identity.oidc.
+    QUALITY-02/Expose kubeconfig via response.
     """
     result = call_moto(context)
 
@@ -225,11 +225,11 @@ def _handle_describe_cluster(
                 cluster["endpoint"] = info.endpoint
                 cluster["certificateAuthority"] = {"data": info.ca_cert_data}
                 cluster["status"] = info.status
-                # QUALITY-02/BUG-13: Expose kubeconfig for tools that need it
+                # QUALITY-02/Expose kubeconfig for tools that need it
                 if info.kubeconfig:
                     cluster["kubeconfig"] = info.kubeconfig
 
-    # PARITY-03: Add missing fields that AWS returns
+    # Add missing fields that AWS returns
     if result.get("cluster"):
         cluster = result["cluster"]
         if "platformVersion" not in cluster:
@@ -257,7 +257,7 @@ def _handle_create_nodegroup(
 ) -> ServiceResponse:
     """CreateNodegroup: let Moto create the record, then add k3d agent nodes.
 
-    PARITY-04: Nodegroups are no longer metadata-only — they create real k3d agent nodes.
+    Nodegroups are no longer metadata-only — they create real k3d agent nodes.
     """
     result = call_moto(context)
 
@@ -296,7 +296,7 @@ def _extract_cluster_name_from_path(context: RequestContext) -> str:
     path = context.request.path or ""
     parts = [p for p in path.split("/") if p]
     # Expected: ["clusters", "<cluster-name>"] or ["clusters", "<name>", "sub-resource", ...]
-    # BUG-04 fix: always extract parts[1] (the cluster name), never fall back to last segment
+    # always extract parts[1] (the cluster name), never fall back to last segment
     if len(parts) >= 2 and parts[0] == "clusters":
         return parts[1]
     return ""

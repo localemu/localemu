@@ -1,0 +1,143 @@
+/* Accounts panel: list view of every registered AWS account. */
+
+.accounts-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+
+.accounts-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.accounts-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.accounts-subtitle {
+  font-size: 0.8125rem;
+  color: var(--txt-3, #6b7280);
+  margin: 0.25rem 0 0;
+  line-height: 1.4;
+  max-width: 60ch;
+}
+
+.accounts-header-right {
+  flex-shrink: 0;
+}
+
+.accounts-create-btn {
+  background: var(--teal, #14b8a6);
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.4375rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.accounts-create-btn:hover {
+  background: var(--teal-bright, #0d9488);
+}
+
+.accounts-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--txt-3, #6b7280);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.accounts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.accounts-table th,
+.accounts-table td {
+  padding: 0.625rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+
+.accounts-table th {
+  background: var(--surface-2, #f9fafb);
+  font-weight: 600;
+  color: var(--txt-2, #374151);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accounts-table th.num,
+.accounts-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.accounts-table tbody tr:hover {
+  background: var(--surface-2, #f9fafb);
+}
+
+.acct-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  color: var(--txt-1, #111827);
+}
+
+.acct-email {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  color: var(--txt-2, #374151);
+}
+
+.acct-status {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.acct-status.active {
+  background: rgba(16, 185, 129, 0.12);
+  color: rgb(5, 150, 105);
+}
+
+.acct-status.suspended {
+  background: rgba(239, 68, 68, 0.12);
+  color: rgb(220, 38, 38);
+}
+
+.acct-actions {
+  text-align: right;
+}
+
+.acct-delete-btn {
+  background: transparent;
+  border: 1px solid var(--line, #e5e7eb);
+  color: var(--txt-2, #374151);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.acct-delete-btn:hover {
+  border-color: rgb(220, 38, 38);
+  color: rgb(220, 38, 38);
+}

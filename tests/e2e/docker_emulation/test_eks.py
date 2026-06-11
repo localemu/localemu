@@ -174,7 +174,7 @@ def create_cluster() -> None:
     assert cluster.get("name") == CLUSTER_NAME, (
         f"CreateCluster returned wrong name: {cluster.get('name')}"
     )
-    # PARITY-09: provider returns CREATING immediately, ACTIVE comes later
+    # provider returns CREATING immediately, ACTIVE comes later
     assert cluster.get("status") in ("CREATING", "ACTIVE"), (
         f"Unexpected initial status: {cluster.get('status')}"
     )

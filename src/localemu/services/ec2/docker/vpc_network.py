@@ -82,6 +82,59 @@ _pubport_lock = threading.Lock()
 _pubport_ready = False
 
 
+def translate_subnet_aws_to_docker_cidr(
+    vpc_aws_cidr: str,
+    vpc_docker_cidr: str,
+    subnet_aws_cidr: str,
+) -> str:
+    """Translate a subnet's AWS-side CIDR into the Docker-side CIDR
+    that lies inside the VPC bridge's actual ``docker_cidr``.
+
+    Happy path (``vpc_aws == vpc_docker``): returns ``subnet_aws_cidr``
+    unchanged. When the AWS-side VPC CIDR collided with another Docker
+    bridge and the fallback subnet picker landed the VPC bridge on a
+    different base (e.g. AWS 10.86.0.0/16 → Docker 10.0.0.0/16), the
+    subnet's pool must follow the bridge. We shift the subnet's network
+    address by ``vpc_docker_base - vpc_aws_base`` and keep the prefix
+    length; the resulting range is the slice of the bridge that
+    corresponds to this subnet.
+
+    Raises ``ValueError`` if the resulting CIDR would not fit inside
+    ``vpc_docker_cidr`` — callers fall back to using ``subnet_aws_cidr``
+    and the pinning attempt later fails cleanly (Docker rejects the
+    ``--ip`` with "not in network range"), preserving the auto-IPAM
+    backstop.
+    """
+    if vpc_aws_cidr == vpc_docker_cidr:
+        return subnet_aws_cidr
+    vpc_aws = ipaddress.IPv4Network(vpc_aws_cidr, strict=False)
+    vpc_docker = ipaddress.IPv4Network(vpc_docker_cidr, strict=False)
+    subnet_aws = ipaddress.IPv4Network(subnet_aws_cidr, strict=False)
+
+    aws_offset = int(subnet_aws.network_address) - int(vpc_aws.network_address)
+    if aws_offset < 0:
+        raise ValueError(
+            f"subnet {subnet_aws_cidr} is below VPC base {vpc_aws_cidr}",
+        )
+    docker_base_int = int(vpc_docker.network_address) + aws_offset
+    try:
+        docker_base = ipaddress.IPv4Address(docker_base_int)
+    except (ValueError, ipaddress.AddressValueError) as exc:
+        raise ValueError(
+            f"subnet shift overflows IPv4 space: vpc_aws={vpc_aws_cidr} "
+            f"vpc_docker={vpc_docker_cidr} subnet_aws={subnet_aws_cidr}",
+        ) from exc
+    candidate = ipaddress.IPv4Network(
+        f"{docker_base}/{subnet_aws.prefixlen}", strict=False,
+    )
+    if not candidate.subnet_of(vpc_docker):
+        raise ValueError(
+            f"translated subnet {candidate} does not fit in VPC docker "
+            f"bridge {vpc_docker_cidr}",
+        )
+    return str(candidate)
+
+
 def ensure_pubport_bridge() -> str:
     """Make sure the shared port-publishing bridge exists. Idempotent.
 
@@ -227,6 +280,7 @@ class VpcNetworkManager:
             # Clear any cached failure for this VPC; we now have a live
             # bridge.
             self._failed_creates.pop(vpc_id, None)
+
             if docker_cidr and cidr_block and docker_cidr != cidr_block:
                 LOG.info(
                     "Created Docker network %s for VPC %s (AWS CIDR %s, "
@@ -241,6 +295,29 @@ class VpcNetworkManager:
                     "Created Docker network %s for VPC %s (CIDR %s, internal)",
                     network_name, vpc_id, cidr_block,
                 )
+
+        # Install the host-iptables ACCEPT rule that exempts intra-VPC
+        # bridge traffic from Docker's DOCKER-INTERNAL DROP. Without
+        # this, any frame whose dst-IP lies outside the VPC CIDR
+        # (e.g. the Quiet Router scenario where a route table directs
+        # traffic via an instance to a non-VPC destination) is silently
+        # dropped by br_netfilter before reaching the next-hop instance.
+        # Best-effort and done OUTSIDE the lock: the docker-run spawn
+        # for the host-netns helper takes ~50ms and we don't want
+        # CreateVpc callers to serialize behind it. A failure here
+        # doesn't roll back the VPC create, just degrades the
+        # cross-subnet route-table data plane until the rule is
+        # re-applied.
+        try:
+            from localemu.services.ec2.docker.host_iptables import (
+                install_vpc_bridge_intra_accept,
+            )
+            install_vpc_bridge_intra_accept(vpc_id)
+        except Exception:
+            LOG.debug(
+                "VPC %s: host-iptables intra-accept install raised",
+                vpc_id, exc_info=True,
+            )
 
         return network_name
 
@@ -416,6 +493,22 @@ class VpcNetworkManager:
             cleanup_for_vpc(vpc_id)
         except Exception:
             pass
+
+        # Remove the host-iptables intra-bridge ACCEPT rule BEFORE the
+        # bridge interface itself is deleted: the cleanup helper deletes
+        # by comment-tag so it doesn't need the iface name, but doing
+        # it first keeps the host filter table consistent in the
+        # post-delete observable window.
+        try:
+            from localemu.services.ec2.docker.host_iptables import (
+                remove_vpc_bridge_intra_accept,
+            )
+            remove_vpc_bridge_intra_accept(vpc_id)
+        except Exception:
+            LOG.debug(
+                "VPC %s: host-iptables intra-accept removal raised",
+                vpc_id, exc_info=True,
+            )
 
         try:
             DOCKER_CLIENT.delete_network(network_name)
@@ -1157,6 +1250,20 @@ class VpcNetworkManager:
             )
         return adopted, deleted
 
+    def get_docker_cidr_for_vpc(self, vpc_id: str) -> str | None:
+        """Return the live ``docker_cidr`` of a VPC's bridge, or ``None``.
+
+        Pure read against in-memory tracking. The value matches what
+        Docker actually allocated, which is the AWS CIDR in the happy
+        path and a fallback-tier CIDR (e.g. ``10.0.0.0/16``) when the
+        AWS CIDR collided with another bridge.
+        """
+        with self._lock:
+            entry = self._vpcs.get(vpc_id)
+            if not entry:
+                return None
+            return entry.get("docker_cidr") or entry.get("cidr") or None
+
     def get_vpc_id_for_subnet(self, subnet_id: str, account_id: str, region: str) -> str | None:
         """Resolve a subnet ID to its VPC ID via Moto."""
         try:
@@ -1458,6 +1565,20 @@ class VpcNetworkManager:
             "Cleaned up %d/%d VPC Docker networks and %d/%d peering networks",
             vpc_deleted, len(vpc_data), peering_deleted, len(peering_data),
         )
+
+        # Sweep every LocalEmu-owned host-iptables rule. Catches both
+        # the per-VPC intra-bridge ACCEPTs we installed on create AND
+        # any orphan rules left from prior crashed sessions (same way
+        # adopt_vpc_networks_from_docker reclaims orphan bridges).
+        try:
+            from localemu.services.ec2.docker.host_iptables import (
+                cleanup_all_localemu_host_rules,
+            )
+            cleanup_all_localemu_host_rules()
+        except Exception:
+            LOG.debug(
+                "host-iptables shutdown sweep raised", exc_info=True,
+            )
 
 
 # Module-level singleton

@@ -238,6 +238,63 @@ class IAMEnforcementHandler(Handler):
             service_name, resource_arn, context.account_id, context.region
         )
 
+        # S3 Access Point: when the request was routed through an AP,
+        # the AP policy is consulted alongside the bucket policy. AWS
+        # requires Allow in BOTH layers ; LocalEmu combines them into a
+        # single statement list so explicit Deny in either layer wins
+        # (Step 1 of the evaluator) and either layer's Allow satisfies
+        # the resource-policy step. The strict per-layer AND is
+        # documented as a 1.1.0 limitation in DESIGN_PR_REQUEST_002.
+        _ap_policy = getattr(context, "_ap_policy", None)
+        if _ap_policy:
+            # Rewrite AP-form Resource ARNs to bucket-form so the
+            # action / resource matcher (which works against bucket-form
+            # ARNs) finds them too. AP policies typically use
+            # ``arn:aws:s3:region:acct:accesspoint/<name>/object/<key>``;
+            # we map those to ``arn:aws:s3:::<bucket>/<key>``.
+            ap_stmts = _ap_policy.get("Statement") or []
+            if isinstance(ap_stmts, dict):
+                ap_stmts = [ap_stmts]
+            underlying = getattr(context, "_ap_underlying_bucket", None)
+            rewritten = []
+            for stmt in ap_stmts:
+                if not isinstance(stmt, dict):
+                    continue
+                new_stmt = dict(stmt)
+                res = new_stmt.get("Resource")
+                if isinstance(res, str):
+                    res = [res]
+                if isinstance(res, list) and underlying:
+                    new_res = []
+                    for r in res:
+                        if isinstance(r, str) and ":accesspoint/" in r:
+                            if "/object/" in r:
+                                key_part = r.split("/object/", 1)[1]
+                                new_res.append(f"arn:aws:s3:::{underlying}/{key_part}")
+                            else:
+                                new_res.append(f"arn:aws:s3:::{underlying}")
+                            # Keep the original AP-form too so policies
+                            # referencing the AP ARN as a resource also
+                            # match for bucket-level read ops.
+                            new_res.append(r)
+                        else:
+                            new_res.append(r)
+                    new_stmt["Resource"] = new_res
+                rewritten.append(new_stmt)
+            if resource_policy:
+                bucket_stmts = resource_policy.get("Statement") or []
+                if isinstance(bucket_stmts, dict):
+                    bucket_stmts = [bucket_stmts]
+                resource_policy = {
+                    "Version": resource_policy.get("Version", "2012-10-17"),
+                    "Statement": list(bucket_stmts) + rewritten,
+                }
+            else:
+                resource_policy = {
+                    "Version": _ap_policy.get("Version", "2012-10-17"),
+                    "Statement": rewritten,
+                }
+
         # Evaluate every IAM action implied by this API call. ``map_action``
         # returns multiple entries only for the rare ops where AWS demands
         # several permissions at once (e.g. CopyObject needs both
@@ -431,6 +488,79 @@ def _build_conditions(context: RequestContext, caller) -> dict:
     except Exception:
         LOG.debug("ResourceTag load failed", exc_info=True)
 
+    # aws:ResourceAccount / aws:SourceAccount — account-scoping condition
+    # keys used by cross-account resource policies. Parse the resource
+    # ARN for the owning account; SourceAccount falls back to a header
+    # injected by the calling AWS service (e.g. S3 → SNS notifications
+    # carry x-amz-source-account).
+    resource_arn = getattr(context, "_iam_resource_arn", None) or ""
+    if resource_arn:
+        # ARN form: arn:aws:service:region:account:resource
+        try:
+            parts = resource_arn.split(":")
+            if len(parts) >= 5 and parts[4]:
+                conditions["aws:ResourceAccount"] = parts[4]
+        except Exception:
+            pass
+    src_acct_hdr = context.request.headers.get("x-amz-source-account") \
+        or context.request.headers.get("X-Amz-Source-Account")
+    if src_acct_hdr:
+        conditions["aws:SourceAccount"] = src_acct_hdr
+
+    # S3 Access Point condition keys — populated when the request was
+    # routed through an access point by the AP resolver handler.
+    # Reference: https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-points-policies.html
+    if getattr(context, "_ap_arn", None):
+        conditions["s3:DataAccessPointArn"] = context._ap_arn
+        conditions["s3:DataAccessPointAccount"] = getattr(
+            context, "_ap_account", caller.account_id,
+        )
+        conditions["s3:AccessPointNetworkOrigin"] = getattr(
+            context, "_ap_origin", "Internet",
+        )
+
+    # aws:PrincipalOrgID / aws:PrincipalOrgPaths / aws:ResourceOrgID —
+    # AWS Organizations scoping keys. Resolve via the central account
+    # registry + the Organizations moto backend. Absent if the account
+    # is not part of any org; absence (not empty) is the AWS behaviour.
+    try:
+        from moto.organizations import organizations_backends
+        from localemu.constants import DEFAULT_AWS_ACCOUNT_ID
+
+        # Walk every instantiated Organizations backend (single-master in
+        # practice but the dict allows for multi-master testing).
+        for _acct_id, backend in dict(organizations_backends).items():
+            if _acct_id == "master_accounts":   # the sidecar registry, not a backend
+                continue
+            try:
+                ab = backend.get("aws") if isinstance(backend, dict) else backend
+            except Exception:
+                ab = backend
+            org = getattr(ab, "org", None)
+            if org is None:
+                continue
+            accounts = getattr(ab, "accounts", []) or []
+            account_ids = {getattr(a, "id", None) for a in accounts}
+            account_ids.add(org.master_account_id)
+            org_id = getattr(org, "id", None)
+            if caller.account_id in account_ids and org_id:
+                conditions["aws:PrincipalOrgID"] = org_id
+                # PrincipalOrgPaths needs root-id/ou-path/account-id. Use
+                # the simplest form here: root-id/account-id. A full OU
+                # walk can be added when SCP enforcement lands.
+                root_id = getattr(org, "root_id", "r-empty")
+                conditions["aws:PrincipalOrgPaths"] = [
+                    f"{org_id}/{root_id}/{caller.account_id}"
+                ]
+            # aws:ResourceOrgID — same org id if the resource account is
+            # also a member of this org.
+            if "aws:ResourceAccount" in conditions \
+                    and conditions["aws:ResourceAccount"] in account_ids \
+                    and org_id:
+                conditions["aws:ResourceOrgID"] = org_id
+    except Exception:
+        LOG.debug("Org context-key resolution failed", exc_info=True)
+
     return conditions
 
 
@@ -529,6 +659,44 @@ def _get_resource_policy(service: str, resource_arn: str, account_id: str, regio
                 key = backend.keys.get(key_id)
                 if key and getattr(key, "policy", None):
                     return json.loads(key.policy)
+
+        elif service in ("lambda", "lambda_"):
+            # Lambda function resource policy lives on the Function object
+            # in moto's lambda backend, accessed by short function name.
+            from moto.awslambda import lambda_backends
+            backend = lambda_backends[account_id][region]
+            # ARN: arn:aws:lambda:region:acct:function:NAME[:QUALIFIER]
+            try:
+                tail = resource_arn.split(":function:", 1)[1]
+                func_name = tail.split(":")[0]
+            except (IndexError, ValueError):
+                func_name = ""
+            if func_name and hasattr(backend, "get_function"):
+                func = backend.get_function(func_name)
+                if func is not None:
+                    raw = getattr(func, "policy", None)
+                    if hasattr(raw, "_policy"):
+                        raw = raw._policy
+                    if isinstance(raw, str):
+                        return json.loads(raw)
+                    if isinstance(raw, dict):
+                        return raw
+
+        elif service == "events":
+            # EventBridge event-bus policy. ARN form
+            # arn:aws:events:region:acct:event-bus/NAME
+            from moto.events import events_backends
+            backend = events_backends[account_id][region]
+            bus_name = resource_arn.rsplit("/", 1)[-1]
+            buses = getattr(backend, "event_buses", {}) or {}
+            for b in buses.values():
+                if getattr(b, "arn", None) == resource_arn \
+                        or getattr(b, "name", None) == bus_name:
+                    policy = getattr(b, "policy", None)
+                    if isinstance(policy, str):
+                        return json.loads(policy)
+                    if isinstance(policy, dict):
+                        return policy
 
     except Exception as e:
         LOG.debug("Failed to get resource policy for %s: %s", resource_arn, e)

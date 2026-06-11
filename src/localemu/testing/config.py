@@ -4,11 +4,23 @@ from localemu.config import is_env_true
 from localemu.constants import DEFAULT_AWS_ACCOUNT_ID
 
 # Credentials used in the test suite
-# These can be overridden if the tests are being run against AWS
+# These can be overridden if the tests are being run against AWS.
+#
+# Defaults are AWS's published example credentials, which the IAM
+# enforcement layer recognises as the canonical demo root key (see
+# ``localemu.services.iam_enforcement.identity._get_root_access_keys``
+# and ``localemu.services.sts.provider``). Picking a structured
+# access key here means tests run identically whether
+# ``IAM_ENFORCEMENT`` is on (production-style) or off (unit-only):
+# in the on case the key resolves to Root and bypasses policy
+# evaluation; in the off case the value is irrelevant.
 TEST_AWS_ACCOUNT_ID = os.getenv("TEST_AWS_ACCOUNT_ID") or DEFAULT_AWS_ACCOUNT_ID
 # If a structured access key ID is used, it must correspond to the account ID
-TEST_AWS_ACCESS_KEY_ID = os.getenv("TEST_AWS_ACCESS_KEY_ID") or "test"
-TEST_AWS_SECRET_ACCESS_KEY = os.getenv("TEST_AWS_SECRET_ACCESS_KEY") or "test"
+TEST_AWS_ACCESS_KEY_ID = os.getenv("TEST_AWS_ACCESS_KEY_ID") or "AKIAIOSFODNN7EXAMPLE"
+TEST_AWS_SECRET_ACCESS_KEY = (
+    os.getenv("TEST_AWS_SECRET_ACCESS_KEY")
+    or "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+)
 TEST_AWS_REGION_NAME = os.getenv("TEST_AWS_REGION_NAME") or "us-east-1"
 TEST_AWS_ENDPOINT_URL = os.getenv("TEST_AWS_ENDPOINT_URL")
 

@@ -937,7 +937,7 @@ def import_api_from_openapi_spec(
 
     api_paths = resolved_schema.get("paths", {})
     if api_paths:
-        # PARITY-11: Implement merge mode — only clear resources in overwrite mode.
+        # Implement merge mode — only clear resources in overwrite mode.
         # In merge mode, existing resources are preserved and new paths are added/updated.
         if mode != "merge":
             rest_api.resources = {}

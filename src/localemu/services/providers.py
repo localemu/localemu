@@ -153,6 +153,11 @@ def sts():
 
 @aws_provider()
 def kinesis():
+    # Apply the LocalEmu Kinesis patches before serving the first request.
+    # Idempotent; closes the ``Stream.init_shards`` crash on CreateStream
+    # without ShardCount / StreamModeDetails.
+    from localemu.services.kinesis.patches import apply_patches as _apply_kinesis_patches
+    _apply_kinesis_patches()
     from localemu.services.kinesis.provider import KinesisProvider
     from localemu.services.moto import MotoFallbackDispatcher
 
@@ -708,7 +713,15 @@ def ds():
 
 @aws_provider()
 def ebs():
-    return _moto_service("ebs")
+    # The LocalEmu EBS provider overrides moto for the direct-API
+    # data-plane operations (StartSnapshot / PutSnapshotBlock /
+    # CompleteSnapshot / GetSnapshotBlock / ListSnapshotBlocks /
+    # ListChangedBlocks) so blocks live on disk and stay visible
+    # across snapshots created via ``ec2:CreateSnapshot`` too.
+    # See ``services/ebs/provider.py`` + ``services/ebs/moto_bridge.py``.
+    from localemu.services.ebs.provider import create_ebs_service
+
+    return create_ebs_service()
 
 
 @aws_provider()
@@ -839,6 +852,11 @@ def opensearchserverless():
 
 @aws_provider()
 def organizations():
+    # Apply the LocalEmu overlay (DescribeEffectivePolicy stub,
+    # AdministratorAccess attach on OrganizationAccountAccessRole,
+    # AccountRegistry sync) before serving the first request. Idempotent.
+    from localemu.services.organizations.patches import apply_patches as _apply_org_patches
+    _apply_org_patches()
     return _moto_service("organizations")
 
 

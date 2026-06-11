@@ -206,6 +206,38 @@ class KinesisPollConsumer:
         """
         return self._started.wait(timeout=timeout)
 
+    def is_alive(self) -> bool:
+        """``threading.Thread``-protocol compatibility for :data:`TMP_THREADS`.
+
+        ``start()`` registers ``self`` in
+        :data:`localemu.utils.threads.TMP_THREADS` so the shutdown hook in
+        :func:`localemu.utils.threads.cleanup_threads_and_processes` can
+        call ``stop()`` at runtime exit. That same list is pruned on every
+        :func:`localemu.utils.threads.start_thread` call via
+        ``t.is_alive()`` on each entry. Without this method the prune
+        raises ``AttributeError: 'KinesisPollConsumer' object has no
+        attribute 'is_alive'``; during normal operation that fires on
+        every Lambda invocation (the CloudWatch metric recorder uses
+        ``start_thread``), and the failure cascades into mass
+        ``ResourceNotFoundException`` errors as downstream invocations
+        cannot find functions whose previous invoke crashed in the
+        prune.
+
+        Semantics:
+            * Before :meth:`start` (or if :meth:`start` raised before
+              any shard thread spawned)                          -> ``False``
+            * Between :meth:`start` and :meth:`stop`, while at least one
+              shard polling thread is still alive                -> ``True``
+            * After :meth:`stop`                                 -> ``False``
+            * If every shard polling thread has exited
+              (death-by-error or end-of-stream)                  -> ``False``
+        """
+        if not self._started.is_set():
+            return False
+        if self.stopped:
+            return False
+        return any(t.is_alive() for t in self._shard_threads)
+
 
 def listen_to_kinesis(
     stream_name: str,

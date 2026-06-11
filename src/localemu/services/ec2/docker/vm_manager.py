@@ -207,6 +207,82 @@ def _resolve_nacl_for_subnet(
     return None
 
 
+def _realign_subnet_pool_to_vpc_bridge(vpc_id: str, subnet_id: str) -> None:
+    """If the SubnetAllocator pool for ``(vpc_id, subnet_id)`` was
+    registered with a ``docker_cidr`` that doesn't lie inside the VPC
+    bridge's actual ``docker_cidr``, force-re-register it with the
+    shifted CIDR so the reserve below returns an IP Docker will accept.
+
+    Happens whenever the subnet was created before the VPC bridge
+    existed (the common ordering: ``CreateVpc`` → ``CreateSubnet`` →
+    ``RunInstances``), AND the VPC bridge fell back to a non-AWS CIDR
+    on creation because the AWS CIDR collided. In the happy non-collision
+    path this is a no-op (the existing pool's ``docker_cidr`` already
+    equals the bridge's ``docker_cidr``).
+
+    Best-effort: errors are logged at DEBUG and swallowed; the reserve
+    that follows then either succeeds (pool was already correct) or
+    fails with ``InvalidIpForSubnet`` / out-of-range, which the caller
+    catches and falls back to Docker auto-IPAM.
+    """
+    try:
+        from localemu.services.ec2.docker.subnet_allocator import (
+            get_subnet_allocator,
+        )
+        from localemu.services.ec2.docker.vpc_network import (
+            get_vpc_network_manager,
+            translate_subnet_aws_to_docker_cidr,
+        )
+    except Exception:
+        return
+
+    alloc = get_subnet_allocator()
+    vpc_mgr = get_vpc_network_manager()
+    pool = None
+    for p in alloc.all_pools():
+        if p.vpc_id == vpc_id and p.subnet_id == subnet_id:
+            pool = p
+            break
+    if pool is None:
+        return  # not registered yet — happens for non-VPC instances
+
+    vpc_docker_cidr = vpc_mgr.get_docker_cidr_for_vpc(vpc_id)
+    vpc_aws_cidr = vpc_mgr._lookup_vpc_cidr_in_moto(vpc_id)
+    if not (vpc_docker_cidr and vpc_aws_cidr):
+        return  # bridge not yet tracked
+
+    try:
+        target_docker_cidr_str = translate_subnet_aws_to_docker_cidr(
+            vpc_aws_cidr, vpc_docker_cidr, str(pool.aws_cidr),
+        )
+    except ValueError:
+        return  # subnet wouldn't fit; let reserve fail later
+
+    import ipaddress as _ip
+    target = _ip.IPv4Network(target_docker_cidr_str, strict=False)
+    if pool.docker_cidr == target:
+        return  # already aligned
+
+    # The pool needs to move. Live allocations from the stale pool
+    # would now be invalid Docker IPs anyway, so a force-re-register
+    # is the right shape — any container holding the stale IP is
+    # already broken (or was on auto-IPAM and not tracked).
+    LOG.info(
+        "subnet pool realign: %s in %s docker_cidr %s → %s "
+        "(VPC bridge fell back from %s to %s)",
+        subnet_id, vpc_id, pool.docker_cidr, target,
+        vpc_aws_cidr, vpc_docker_cidr,
+    )
+    alloc.force_unregister_subnet(vpc_id, subnet_id)
+    alloc.register_subnet(
+        vpc_id=vpc_id,
+        subnet_id=subnet_id,
+        aws_cidr=pool.aws_cidr,
+        docker_cidr=target,
+        az=pool.az,
+    )
+
+
 def _resolve_container_private_ip(
     container_name: str, vpc_network_hint: str | None,
 ) -> str | None:
@@ -361,9 +437,69 @@ if [ -f "$SSHD_CONFIG" ]; then
     sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG"
 fi
 
-if [ -f /var/lib/localemu/user-data.sh ]; then
-    chmod +x /var/lib/localemu/user-data.sh
-    /var/lib/localemu/user-data.sh > /var/log/user-data.log 2>&1 || true
+# ----- LocalEmu cloud-init: run user-data once per instance lifetime -----
+#
+# The script at /var/lib/localemu/user-data.sh is produced by the
+# Python-side ``build_cloud_init_shell`` translator in
+# ``services/ec2/docker/user_data.py``. It is fully self-contained: it
+# has its own one-shot guard file at /var/lib/localemu/user-data-ran,
+# writes to the cloud-init standard log paths
+# (/var/log/cloud-init.log + /var/log/cloud-init-output.log), and
+# keeps /var/log/user-data.log as a back-compat symlink alias.
+#
+# Running it from the entrypoint covers ``docker restart``: the guard
+# is checked at the script's top and the second run short-circuits to
+# exit 0 like real cloud-init.
+if [ -x /var/lib/localemu/user-data.sh ]; then
+    /var/lib/localemu/user-data.sh || true
+fi
+
+# ----- SourceDestCheck: default secure state + marker replay -----
+#
+# Docker's default FORWARD policy is ACCEPT, which would let any
+# container silently forward packets regardless of the AWS-level
+# SourceDestCheck attribute. We lock down to DROP on every boot so
+# the AWS-default (SDC=true) is enforced even on fresh containers
+# that were never touched by ``ec2:ModifyInstanceAttribute``. This is
+# the secure state and matches real EC2's hypervisor-level behaviour.
+#
+# Then, if the Python-side data-plane apply
+# (``services/ec2/docker/source_dest_check.py``) requested SDC=false
+# by writing the marker file, we flip the policy back to ACCEPT and
+# enable kernel forwarding. The marker file is what makes the
+# ``ec2:ModifyInstanceAttribute --no-source-dest-check`` change
+# survive ``docker restart``.
+if command -v iptables >/dev/null 2>&1; then
+    iptables -P FORWARD DROP 2>/dev/null || true
+fi
+if [ -f /var/lib/localemu/source-dest-check-disabled ]; then
+    sysctl -w net.ipv4.ip_forward=1 2>/dev/null \
+        || echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null \
+        || true
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -P FORWARD ACCEPT 2>/dev/null || true
+        iptables -C FORWARD -j ACCEPT 2>/dev/null \
+            || iptables -I FORWARD 1 -j ACCEPT 2>/dev/null || true
+    fi
+fi
+
+# ----- Instance-target VPC routes (Quiet Router data plane) -----
+#
+# Per-container ``ip route`` entries are persisted to
+# /var/lib/localemu/instance-routes.txt by
+# ``services/ec2/docker/instance_routes.py`` whenever a route in the
+# subnet's route table points at another instance as its target. On
+# every boot we replay the file so a ``docker restart`` doesn't drop
+# the routes — without this, the route would only apply during the
+# initial CreateRoute window.
+if [ -f /var/lib/localemu/instance-routes.txt ] \
+    && command -v ip >/dev/null 2>&1; then
+    while read -r _dest _gw; do
+        [ -n "$_dest" ] && [ -n "$_gw" ] || continue
+        ip route replace "$_dest" via "$_gw" 2>/dev/null \
+            || ip route add "$_dest" via "$_gw" 2>/dev/null \
+            || true
+    done < /var/lib/localemu/instance-routes.txt
 fi
 
 # If sshd still isn't installed (bare image + internal network), keep
@@ -383,7 +519,7 @@ fi
 # sleep loop so the container stays alive. Without this, instances launched
 # without a key (the AWS CLI default) would never install the link-local
 # 169.254.169.254 -> sidecar DNAT, leaving real AWS SDKs and curl getting
-# "Connection refused" at the canonical IMDS address (BUG-003).
+# "Connection refused" at the canonical IMDS address.
 #
 # The iptables block is intentionally a copy of the one in
 # SSHD_ENTRYPOINT_SCRIPT. Both are asserted by the unit tests below to
@@ -433,6 +569,48 @@ if command -v iptables >/dev/null 2>&1; then
 fi
 
 echo "[localemu] no SSH key provided -- IMDS DNAT installed, container staying alive" >&2
+
+# ----- LocalEmu cloud-init: run user-data once per instance lifetime -----
+#
+# Same contract as the SSH entrypoint above: the script is self-guarded,
+# self-logged, and idempotent on container restart. Without this block,
+# no-SSH instances (the AWS-CLI default) would never run their user-data
+# after the inline post-start exec window.
+if [ -x /var/lib/localemu/user-data.sh ]; then
+    /var/lib/localemu/user-data.sh || true
+fi
+
+# ----- SourceDestCheck: default secure state + marker replay -----
+# See SSHD_ENTRYPOINT_SCRIPT for the contract; the no-key path needs the
+# same two blocks so a no-key instance starts secure (FORWARD policy
+# DROP) AND can act as a router when the marker requests it.
+if command -v iptables >/dev/null 2>&1; then
+    iptables -P FORWARD DROP 2>/dev/null || true
+fi
+if [ -f /var/lib/localemu/source-dest-check-disabled ]; then
+    sysctl -w net.ipv4.ip_forward=1 2>/dev/null \
+        || echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null \
+        || true
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -P FORWARD ACCEPT 2>/dev/null || true
+        iptables -C FORWARD -j ACCEPT 2>/dev/null \
+            || iptables -I FORWARD 1 -j ACCEPT 2>/dev/null || true
+    fi
+fi
+
+# ----- Instance-target VPC routes (Quiet Router data plane) -----
+# See SSHD_ENTRYPOINT_SCRIPT for the contract. The no-key path replays
+# the same marker file so no-key instances also pick up instance-target
+# routes their subnet's route table installed via CreateRoute / ReplaceRoute.
+if [ -f /var/lib/localemu/instance-routes.txt ] \
+    && command -v ip >/dev/null 2>&1; then
+    while read -r _dest _gw; do
+        [ -n "$_dest" ] && [ -n "$_gw" ] || continue
+        ip route replace "$_dest" via "$_gw" 2>/dev/null \
+            || ip route add "$_dest" via "$_gw" 2>/dev/null \
+            || true
+    done < /var/lib/localemu/instance-routes.txt
+fi
 
 # ----- VPC Block Public Access (drops IGW ingress / egress on eth0 when active) -----
 if command -v iptables >/dev/null 2>&1 \
@@ -737,7 +915,7 @@ class DockerVmManager:
 
         # The link-local IMDS DNAT (169.254.169.254 -> sidecar) is installed
         # by BOTH entrypoint scripts so it runs regardless of whether the
-        # instance was launched with --key-name. Closes BUG-003.
+        # instance was launched with --key-name.
         if public_key:
             container_command = ["sh", "-c", SSHD_ENTRYPOINT_SCRIPT]
         else:
@@ -754,6 +932,42 @@ class DockerVmManager:
         secondary_networks: list[str] = []
         if vpc_network:
             secondary_networks.append(vpc_network)
+        # Honour the VPC's DHCP option set's ``domain-name-servers`` —
+        # without this, a malicious ``ec2:CreateDhcpOptions`` /
+        # ``AssociateDhcpOptions`` (the "VPC DNS Hijack" attack) has
+        # no observable effect on launched instances. Resolution lives
+        # in ``services/ec2/docker/vpc_dns.py`` and silently falls
+        # back to an empty list (Docker default DNS) when the subnet
+        # has no DHCP-supplied DNS servers, so non-VPC instances and
+        # default-DHCP instances are unaffected.
+        from localemu.services.ec2.docker.vpc_dns import resolve_vpc_dns_servers
+
+        try:
+            vpc_dns_servers = resolve_vpc_dns_servers(
+                subnet_id=subnet_id,
+                account_id=account_id,
+                region=region or "us-east-1",
+            )
+        except Exception:
+            # DNS resolution must NOT fail RunInstances. Log + continue
+            # with Docker default DNS.
+            LOG.warning(
+                "vpc_dns: DHCP DNS resolution failed for instance %s; "
+                "using Docker default DNS",
+                instance_id, exc_info=True,
+            )
+            vpc_dns_servers = []
+
+        # ``ContainerConfiguration.dns`` is ``str | None`` so it can only
+        # carry one server; multiple DHCP-supplied DNS servers are passed
+        # via the existing additional-flags string, which the docker
+        # arg-parser turns into multiple ``--dns`` flags via
+        # ``action="append"``. The leading space keeps us from gluing onto
+        # the existing flags below when the list is empty.
+        dns_flags = "".join(
+            f" --dns {server}" for server in vpc_dns_servers
+        )
+
         container_config = ContainerConfiguration(
             image_name=image,
             name=container_name,
@@ -763,7 +977,7 @@ class DockerVmManager:
             command=container_command,
             network=primary_network,
             # NET_ADMIN: SG/NACL iptables enforcement
-            # SYSLOG: dmesg inside the container for VPC Flow Logs 
+            # SYSLOG: dmesg inside the container for VPC Flow Logs
             cap_add=["NET_ADMIN", "SYSLOG"],
             # VPC networks are --internal=True so host.docker.internal
             # cannot be reached via the default route. Map it to the host
@@ -779,6 +993,7 @@ class DockerVmManager:
             additional_flags=(
                 "--add-host host.docker.internal:host-gateway "
                 "--sysctl net.ipv4.conf.all.accept_local=1"
+                f"{dns_flags}"
             ),
             detach=True,
             labels={
@@ -835,6 +1050,19 @@ class DockerVmManager:
                         )
                         _vpc_id = vpc_network.removeprefix("localemu-vpc-")
                         synth_eni_id = f"eni-{instance_id.removeprefix('i-')}"
+                        # Realign the subnet pool's docker_cidr against the
+                        # VPC bridge's actual docker_cidr before reserving.
+                        # The subnet was likely registered at CreateSubnet
+                        # time when the VPC bridge didn't exist yet, so its
+                        # docker_cidr is the optimistic-AWS value. If the
+                        # bridge later landed on a fallback tier (CIDR
+                        # collision), reserving from the stale pool would
+                        # return an IP outside the bridge and the
+                        # connect_container_to_network --ip call would be
+                        # rejected.
+                        _realign_subnet_pool_to_vpc_bridge(
+                            _vpc_id, subnet_id,
+                        )
                         reserved_vpc_ip = get_subnet_allocator().reserve(
                             vpc_id=_vpc_id, subnet_id=subnet_id,
                             owner_key=synth_eni_id,
@@ -875,57 +1103,111 @@ class DockerVmManager:
                     reserved_vpc_ip = None
                     synth_eni_id = None
 
-        # Handle user data.
+        # Handle user data via the LocalEmu cloud-init translator.
         #
-        # We write the decoded script to ``/var/lib/localemu/user-data.sh``
-        # AND execute it right away. The file is also persisted for
-        # audit / diagnostics; executing inline fixes a race: the
-        # SSHD entrypoint only runs user-data if the file already
-        # exists at container-startup time, but we create the file
-        # AFTER ``start_container`` returns — so the entrypoint
-        # always misses the first boot. Inline exec here closes that
-        # gap for both sshd-enabled and sleep-loop instances.
-        user_data_script = self._build_user_data_script(user_data)
+        # The raw user-data bytes (after base64-decoding the request
+        # parameter — boto3 / AWS CLI always submit UserData as base64)
+        # are passed through
+        # :func:`localemu.services.ec2.docker.user_data.build_cloud_init_shell`
+        # which classifies the payload (shebang / #cloud-config /
+        # multipart MIME / gzip-wrapped / unknown) and emits a single
+        # ``/bin/sh`` script that:
+        #
+        # * One-shot-guards itself with /var/lib/localemu/user-data-ran
+        #   so a ``docker restart`` re-running this same script via the
+        #   entrypoint hook (see SSHD_ENTRYPOINT_SCRIPT /
+        #   NO_SSH_ENTRYPOINT_SCRIPT) short-circuits to exit 0 — same
+        #   contract as real cloud-init.
+        # * Writes the cloud-init standard log paths
+        #   /var/log/cloud-init.log (process log) and
+        #   /var/log/cloud-init-output.log (user-command stdout/stderr)
+        #   and keeps /var/log/user-data.log as a back-compat symlink.
+        #
+        # We still execute it inline right here (after start_container
+        # returned) because the entrypoint may already have completed
+        # and dropped into sshd / sleep before the post-start
+        # ``exec_in_container`` could write the script file — so the
+        # entrypoint hook is the second-boot / restart safety net, not
+        # the first-boot path.
         console_output = ""
-        if user_data_script:
+        if user_data:
+            from localemu.services.ec2.docker.user_data import build_cloud_init_shell
+
             try:
-                DOCKER_CLIENT.exec_in_container(
-                    container_name,
-                    ["sh", "-c", "mkdir -p /var/lib/localemu"],
-                )
-                # base64 via env var and `printf` to avoid shell-arg
-                # length limits and to handle any script content cleanly.
-                import base64 as _b64
-                ud_b64 = _b64.b64encode(user_data_script.encode()).decode()
-                DOCKER_CLIENT.exec_in_container(
-                    container_name,
-                    ["sh", "-c",
-                     f"printf '%s' '{ud_b64}' | base64 -d > /var/lib/localemu/user-data.sh "
-                     f"&& chmod +x /var/lib/localemu/user-data.sh"],
-                )
-                out, _ = DOCKER_CLIENT.exec_in_container(
-                    container_name,
-                    ["sh", "-c",
-                     "/var/lib/localemu/user-data.sh "
-                     "> /var/log/user-data.log 2>&1; "
-                     "cat /var/log/user-data.log 2>/dev/null"],
-                )
-                console_output = (
-                    out.decode("utf-8") if isinstance(out, bytes) else str(out)
-                )
-                LOG.debug(
-                    "User data executed for %s (%d bytes output)",
-                    instance_id, len(console_output),
-                )
+                raw_user_data_bytes = base64.b64decode(user_data)
             except Exception as e:
-                console_output = f"Error executing user data: {e}"
                 LOG.warning(
-                    "User data execution failed for %s: %s", instance_id, e,
+                    "Could not base64-decode user-data for %s: %s",
+                    instance_id, e,
                 )
+                raw_user_data_bytes = None
+
+            if raw_user_data_bytes:
+                translation = build_cloud_init_shell(raw_user_data_bytes)
+                for warning in translation.warnings:
+                    LOG.info(
+                        "user-data translator (%s) for %s: %s",
+                        translation.format.value, instance_id, warning,
+                    )
+                try:
+                    DOCKER_CLIENT.exec_in_container(
+                        container_name,
+                        ["sh", "-c", "mkdir -p /var/lib/localemu /var/log"],
+                    )
+                    script_b64 = base64.b64encode(
+                        translation.shell_script.encode("utf-8")
+                    ).decode("ascii")
+                    DOCKER_CLIENT.exec_in_container(
+                        container_name,
+                        ["sh", "-c",
+                         f"printf '%s' '{script_b64}' | base64 -d > /var/lib/localemu/user-data.sh "
+                         f"&& chmod +x /var/lib/localemu/user-data.sh"],
+                    )
+                    # The translated script has its own guard + log
+                    # redirection; we just invoke it and then read the
+                    # cloud-init-output log for the console-output
+                    # captured by DescribeInstances.
+                    out, _ = DOCKER_CLIENT.exec_in_container(
+                        container_name,
+                        ["sh", "-c",
+                         "/var/lib/localemu/user-data.sh; "
+                         "cat /var/log/cloud-init-output.log 2>/dev/null"],
+                    )
+                    console_output = (
+                        out.decode("utf-8") if isinstance(out, bytes) else str(out)
+                    )
+                    LOG.debug(
+                        "User data executed for %s (format=%s, %d bytes captured)",
+                        instance_id, translation.format.value, len(console_output),
+                    )
+                except Exception as e:
+                    console_output = f"Error executing user data: {e}"
+                    LOG.warning(
+                        "User data execution failed for %s: %s", instance_id, e,
+                    )
 
         # Inject SSH key if a public key is available
         if key_name and public_key:
             self._inject_ssh_key(container_name, key_name, public_key)
+
+        # Pre-existing instance-target routes on the subnet's route
+        # table must apply to the new container too — otherwise a
+        # route configured BEFORE the launch would only ever affect
+        # instances that happened to exist at the time of CreateRoute.
+        if subnet_id:
+            try:
+                from localemu.services.ec2.docker.instance_routes import (
+                    on_instance_launch,
+                )
+                on_instance_launch(
+                    instance_id=instance_id, subnet_id=subnet_id,
+                    account_id=account_id, region=region or "us-east-1",
+                )
+            except Exception:
+                LOG.debug(
+                    "instance-route replay at launch failed for %s",
+                    instance_id, exc_info=True,
+                )
 
         # Get container IP from Docker — VPC network first, then bridge.
         # When the container is only attached to a localemu-vpc-* network

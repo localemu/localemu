@@ -7,10 +7,13 @@ LookupEvents implementation that queries the shared event store.
 import pytest
 from botocore.exceptions import ClientError
 
+from localemu.testing.pytest import markers
+
 
 class TestCloudTrailTrailCrud:
     """Tests for CloudTrail trail create, describe, start/stop logging, and delete."""
 
+    @markers.aws.validated
     def test_create_and_describe_trail(self, aws_client):
         """CreateTrail followed by DescribeTrails should return the trail."""
         cloudtrail = aws_client.cloudtrail
@@ -52,6 +55,7 @@ class TestCloudTrailTrailCrud:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_start_and_stop_logging(self, aws_client):
         """StartLogging and StopLogging should succeed without error."""
         cloudtrail = aws_client.cloudtrail
@@ -91,6 +95,7 @@ class TestCloudTrailTrailCrud:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_delete_trail(self, aws_client):
         """DeleteTrail should remove the trail from DescribeTrails results."""
         cloudtrail = aws_client.cloudtrail
@@ -124,6 +129,7 @@ class TestCloudTrailTrailCrud:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_delete_nonexistent_trail_raises(self, aws_client):
         """Deleting a trail that does not exist should raise an error."""
         cloudtrail = aws_client.cloudtrail
@@ -136,6 +142,7 @@ class TestCloudTrailTrailCrud:
 class TestCloudTrailLookupEvents:
     """Tests for the custom LookupEvents implementation."""
 
+    @markers.aws.validated
     def test_lookup_events_returns_list(self, aws_client):
         """LookupEvents should return a list of events (possibly empty)."""
         cloudtrail = aws_client.cloudtrail
@@ -147,6 +154,7 @@ class TestCloudTrailLookupEvents:
         assert "Events" in response
         assert isinstance(response["Events"], list)
 
+    @markers.aws.validated
     def test_lookup_events_with_event_name_filter(self, aws_client):
         """LookupEvents with EventName filter should only return matching events."""
         cloudtrail = aws_client.cloudtrail
@@ -168,6 +176,7 @@ class TestCloudTrailLookupEvents:
         for event in response["Events"]:
             assert event.get("EventName") == "ListBuckets"
 
+    @markers.aws.validated
     def test_lookup_events_with_resource_type_filter(self, aws_client):
         """LookupEvents with ResourceType filter should return matching events."""
         cloudtrail = aws_client.cloudtrail
@@ -197,6 +206,7 @@ class TestCloudTrailLookupEvents:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_lookup_events_max_results(self, aws_client):
         """LookupEvents should respect the MaxResults parameter."""
         cloudtrail = aws_client.cloudtrail
@@ -209,6 +219,7 @@ class TestCloudTrailLookupEvents:
         assert "Events" in response
         assert len(response["Events"]) <= 2
 
+    @markers.aws.validated
     def test_lookup_events_pagination(self, aws_client):
         """LookupEvents should support pagination via NextToken."""
         cloudtrail = aws_client.cloudtrail

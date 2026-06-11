@@ -110,6 +110,24 @@ def package_for_lang(scenario: str, runtime: str, root_folder: Path) -> str:
     if os.path.exists(package_path) and os.path.isfile(package_path):
         return package_path
 
+    # If neither the runtime-specific nor the generic-runtime source
+    # directory exists in this checkout, the scenario simply isn't
+    # implemented for this runtime — for example, the Java sources
+    # for ``echo`` / ``introspection`` / ``endpointinjection`` /
+    # ``uncaughtexception`` aren't carried in the repo. Skip the test
+    # cleanly with the actual reason rather than letting the next
+    # ``subprocess.run(cwd=runtime_dir)`` raise an opaque
+    # ``FileNotFoundError`` from inside pytest's setup phase, which
+    # confuses every parser of test output (and balloons the failure
+    # inventory under ``make test``).
+    if not runtime_dir.exists():
+        import pytest
+        pytest.skip(
+            f"scenario {scenario!r} has no source for runtime {runtime!r} "
+            f"in this checkout (looked at {runtime_dir})",
+            allow_module_level=False,
+        )
+
     # packaging
     # Use the default Lambda architecture x86_64 unless the ignore architecture flag is configured.
     # This enables local testing of both architectures on multi-architecture platforms such as Apple Silicon machines.

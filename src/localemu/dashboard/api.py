@@ -778,6 +778,19 @@ class OverviewResource:
         vpc_count = _count_vpc()
         service_data["vpc"] = {"status": "available", "resources": vpc_count}
 
+        # Accounts panel surfaces the central account registry. It is not
+        # a real AWS service but the dashboard treats it as one so the
+        # sidebar can route to it. Resource count = number of accounts
+        # currently known to this instance.
+        try:
+            from localemu.accounts import get_registry
+            account_count = len(get_registry().list())
+        except Exception:
+            account_count = 0
+        service_data["accounts"] = {
+            "status": "available", "resources": account_count,
+        }
+
         payload = {
             "version": constants.VERSION,
             "uptime_seconds": int(time.time() - _start_time),
@@ -5212,3 +5225,163 @@ class DashboardResource:
                 status=404,
                 content_type="text/html",
             )
+
+
+# ---------------------------------------------------------------------------
+# Accounts admin endpoint (multi-account discoverability)
+# ---------------------------------------------------------------------------
+
+
+class AccountsResource:
+    """``GET / POST /_localemu/api/accounts`` — multi-account registry.
+
+    GET returns every account this LocalEmu instance has ever seen (or
+    that was explicitly registered through Organizations or the admin
+    POST). Records mirror the ``Organizations.Account`` shape so the
+    dashboard and Organizations clients can share consumers.
+
+    POST creates an account out-of-band without going through Organizations.
+    Body: ``{"account_id": "111122223333", "name": "...", "email": "..."}``.
+    The account is added to the registry but no IAM users / roles are
+    seeded; that flow belongs to Organizations.CreateAccount.
+    """
+
+    def on_get(self, request: Request):
+        from localemu.accounts import get_registry
+
+        registry = get_registry()
+        payload = {"Accounts": [r.to_dict() for r in registry.list()]}
+        return _json_response(payload)
+
+    def on_post(self, request: Request):
+        import json
+
+        from localemu.accounts import get_registry
+
+        try:
+            body = json.loads(request.get_data(as_text=True) or "{}")
+        except json.JSONDecodeError as e:
+            return _json_response({"error": f"Invalid JSON body: {e}"}, status=400)
+
+        account_id = (body.get("account_id") or "").strip()
+        if not account_id:
+            return _json_response(
+                {"error": "account_id is required"}, status=400
+            )
+
+        registry = get_registry()
+        try:
+            record = registry.create(
+                account_id,
+                email=body.get("email"),
+                name=body.get("name"),
+            )
+        except ValueError as e:
+            return _json_response({"error": str(e)}, status=400)
+        return _json_response(record.to_dict(), status=201)
+
+
+class AccountResource:
+    """``GET / DELETE /_localemu/api/accounts/<account_id>`` — single account.
+
+    GET returns the AccountRecord; 404 if unknown.
+    DELETE removes the account from the registry. Resources in other
+    services are NOT touched (matches AWS account closure semantics
+    where data lingers for 90 days post-closure). The default account
+    ``000000000000`` cannot be deleted.
+    """
+
+    def on_get(self, request: Request, account_id: str = ""):
+        from localemu.accounts import get_registry
+
+        record = get_registry().get(account_id)
+        if record is None:
+            return _json_response(
+                {"error": f"Account {account_id} not found"}, status=404
+            )
+        return _json_response(record.to_dict())
+
+    def on_delete(self, request: Request, account_id: str = ""):
+        from localemu.accounts import get_registry
+        from localemu.constants import DEFAULT_AWS_ACCOUNT_ID
+
+        if account_id == DEFAULT_AWS_ACCOUNT_ID:
+            return _json_response(
+                {"error": "Default account cannot be deleted"}, status=400
+            )
+        removed = get_registry().delete(account_id)
+        if not removed:
+            return _json_response(
+                {"error": f"Account {account_id} not found"}, status=404
+            )
+        return _json_response({"deleted": account_id})
+
+
+class AccountSummaryResource:
+    """``GET /_localemu/api/accounts/<account_id>/summary`` — per-account counts.
+
+    Returns the resource count this account currently owns in every
+    moto-backed service. Used by the dashboard Accounts panel to render
+    a "at-a-glance" view per account.
+    """
+
+    def on_get(self, request: Request, account_id: str = ""):
+        from localemu.accounts import get_registry
+
+        registry = get_registry()
+        if account_id not in registry:
+            return _json_response(
+                {"error": f"Account {account_id} not found"}, status=404
+            )
+
+        # Walk moto backends per service and count entries living under
+        # this account. Each service exposes a different concept of
+        # "resource"; we use the simple heuristic "non-empty per-region
+        # dicts/lists" which matches the dashboard's per-service counters.
+        import moto.backends as moto_backends
+
+        per_service: dict[str, int] = {}
+        for service in (
+            "s3", "sqs", "sns", "lambda", "dynamodb", "ec2", "kms", "iam",
+            "events", "logs", "stepfunctions", "secretsmanager",
+            "cloudwatch", "kinesis", "firehose",
+        ):
+            try:
+                backend_dict = moto_backends.get_backend(service)
+            except Exception:
+                continue
+            count = 0
+            account_backend = None
+            try:
+                # ``.get(...)`` style to avoid lazily creating a backend.
+                items = list(backend_dict.items())
+                for acct, regions in items:
+                    if acct != account_id:
+                        continue
+                    account_backend = regions
+                    break
+            except Exception:
+                account_backend = None
+            if account_backend is None:
+                per_service[service] = 0
+                continue
+            try:
+                for _region, backend in account_backend.items():
+                    # Count every attribute that looks like a resource
+                    # container (dict / list) of non-trivial size.
+                    for attr_name in dir(backend):
+                        if attr_name.startswith("_"):
+                            continue
+                        try:
+                            value = getattr(backend, attr_name)
+                        except Exception:
+                            continue
+                        if isinstance(value, dict):
+                            count += len(value)
+                        elif isinstance(value, list):
+                            count += len(value)
+            except Exception:
+                pass
+            per_service[service] = count
+
+        return _json_response({"account_id": account_id, "resources": per_service})

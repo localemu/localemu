@@ -74,7 +74,7 @@ class MethodRequestHandler(RestApiGatewayHandler):
     def _is_body_valid(
         method: Method, rest_api: RestApiContainer, request: InvocationRequest
     ) -> bool:
-        # PARITY-09: Known limitation — request body validation currently only supports
+        # Known limitation — request body validation currently only supports
         # application/json content type. XML and other content types are not validated.
         # Non-JSON bodies that reach this path will fail validation with a JSONDecodeError
         # which is caught and returns False (treated as invalid).

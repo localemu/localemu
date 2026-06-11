@@ -9,10 +9,13 @@ RDS_DOCKER_BACKEND=1 is set.
 import pytest
 from botocore.exceptions import ClientError
 
+from localemu.testing.pytest import markers
+
 
 class TestRdsDbInstance:
     """Tests for RDS DB instance create, describe, modify, and delete."""
 
+    @markers.aws.validated
     def test_create_and_describe_db_instance(self, aws_client):
         """CreateDBInstance should create an instance; DescribeDBInstances should find it."""
         rds = aws_client.rds
@@ -50,6 +53,7 @@ class TestRdsDbInstance:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_describe_db_instances_all(self, aws_client):
         """DescribeDBInstances without filters should list all instances."""
         rds = aws_client.rds
@@ -91,6 +95,7 @@ class TestRdsDbInstance:
                 except Exception:
                     pass
 
+    @markers.aws.validated
     def test_modify_db_instance(self, aws_client):
         """ModifyDBInstance should update instance attributes."""
         rds = aws_client.rds
@@ -125,6 +130,7 @@ class TestRdsDbInstance:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_delete_db_instance_with_skip_final_snapshot(self, aws_client):
         """DeleteDBInstance with SkipFinalSnapshot=True should succeed."""
         rds = aws_client.rds
@@ -151,6 +157,7 @@ class TestRdsDbInstance:
             rds.describe_db_instances(DBInstanceIdentifier=db_id)
         assert exc_info.value.response["Error"]["Code"] == "DBInstanceNotFound"
 
+    @markers.aws.validated
     def test_delete_nonexistent_db_instance_raises(self, aws_client):
         """Deleting a DB instance that does not exist should raise an error."""
         rds = aws_client.rds
@@ -162,6 +169,7 @@ class TestRdsDbInstance:
             )
         assert "DBInstanceNotFound" in exc_info.value.response["Error"]["Code"]
 
+    @markers.aws.validated
     def test_create_db_instance_with_db_name(self, aws_client):
         """CreateDBInstance with a DBName should set the initial database name."""
         rds = aws_client.rds
@@ -191,6 +199,7 @@ class TestRdsDbInstance:
 class TestRdsDbCluster:
     """Tests for RDS Aurora DB cluster create, describe, and delete."""
 
+    @markers.aws.validated
     def test_create_and_describe_db_cluster(self, aws_client):
         """CreateDBCluster should create an Aurora cluster; DescribeDBClusters should find it."""
         rds = aws_client.rds
@@ -224,6 +233,7 @@ class TestRdsDbCluster:
             except Exception:
                 pass
 
+    @markers.aws.validated
     def test_describe_db_clusters_all(self, aws_client):
         """DescribeDBClusters without filters should list all clusters."""
         rds = aws_client.rds
@@ -260,6 +270,7 @@ class TestRdsDbCluster:
                 except Exception:
                     pass
 
+    @markers.aws.validated
     def test_delete_db_cluster(self, aws_client):
         """DeleteDBCluster should remove the cluster."""
         rds = aws_client.rds
@@ -284,6 +295,7 @@ class TestRdsDbCluster:
             rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
         assert "DBClusterNotFound" in exc_info.value.response["Error"]["Code"]
 
+    @markers.aws.validated
     def test_delete_nonexistent_cluster_raises(self, aws_client):
         """Deleting a cluster that does not exist should raise an error."""
         rds = aws_client.rds

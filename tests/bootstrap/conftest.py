@@ -5,9 +5,10 @@ import pytest
 from localemu import constants
 from localemu.testing.scenario.provisioning import InfraProvisioner
 
-pytest_plugins = [
-    "localemu.testing.pytest.bootstrap",
-]
+# ``pytest_plugins`` is declared at the top-level conftest
+# (``tests/conftest.py``); pytest 9 forbids it in non-top-level conftests.
+# The bootstrap plugin's autouse fixture is harmless when loaded session-wide
+# (``config.dirs.mkdirs()`` is idempotent).
 
 
 @pytest.fixture(scope="session")

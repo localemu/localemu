@@ -115,10 +115,22 @@ class NetrcBypassAuth(requests.auth.AuthBase):
 
 
 class _RequestsSafe:
-    """Wrapper around requests library, which can prevent it from verifying
-    SSL certificates or reading credentials from ~/.netrc file"""
+    """Wrapper around the requests library that bypasses two LocalEmu-
+    specific friction points:
 
-    verify_ssl = True
+    * ``~/.netrc`` credentials never bleed into the request — useful
+      when developers have machine-wide netrc entries that shouldn't
+      mask a test's intended unauthenticated call.
+    * SSL verification is off by default for ``https://`` URLs —
+      LocalEmu serves its single port (4566) with a self-signed
+      certificate, so every test hitting ``https://<api>.execute-api.
+      localhost:4566/...`` would otherwise fail with
+      ``SSLCertVerificationError`` and the wrapper's name (``safe``)
+      would be misleading. Set ``safe_requests.verify_ssl = True`` for
+      the rare path that points at a real CA-trusted endpoint.
+    """
+
+    verify_ssl = False
 
     def __getattr__(self, name):
         method = requests.__dict__.get(name.lower())

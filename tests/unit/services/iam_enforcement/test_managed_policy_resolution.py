@@ -1,10 +1,11 @@
-"""Unit tests for the managed-policy and permission-boundary document
-resolution in the IAM enforcement gather step (BUG-001).
+"""Unit tests for managed-policy and permission-boundary document
+resolution in the IAM enforcement gather step.
 
-Before the fix, ``_get_managed_policy_doc`` read a non-existent attribute
-(``policy.default_version``) on moto's ``ManagedPolicy``, silently returning
-``None`` for every attached managed policy and every managed permission
-boundary. That dropped all of:
+``_get_managed_policy_doc`` walks moto's ``ManagedPolicy.versions`` list,
+picks the version whose ``version_id`` equals ``default_version_id``, and
+returns its document. The boundary extractor accepts moto's two storage
+shapes (``permissions_boundary_arn`` string and the ``permissions_boundary``
+dict property). Together they cover :
 
 * user-attached managed policies
 * role-attached managed policies
@@ -12,11 +13,8 @@ boundary. That dropped all of:
 * managed permission boundaries on users and roles
 * AWS-managed policies (``arn:aws:iam::aws:policy/...``)
 
-from the principal's effective policy set, so enforcement was effectively
-inline-only.
-
-These tests exercise the real moto backend (no monkey-patching of the gather
-functions) to make sure the bug stays fixed.
+These tests exercise the real moto backend (no monkey-patching of the
+gather functions) so a regression in either piece surfaces immediately.
 """
 
 from __future__ import annotations

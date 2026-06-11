@@ -140,7 +140,7 @@ def apply_patches():
             result["documentationVersion"] = getattr(self, "documentation_version", None)
 
         if "canarySettings" not in result:
-            # PARITY-12: Known limitation — canary deployment settings are stored
+            # Known limitation — canary deployment settings are stored
             # but canary traffic splitting is not enforced at runtime. All traffic
             # goes to the current deployment. Canary support is planned for a
             # future release of the next-gen engine.

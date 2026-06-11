@@ -109,7 +109,7 @@ class Backup:
 
 
 class DynamoDBStore(BaseStore):
-    # BUG-18: Reentrant lock for thread-safe access to store dicts.
+    # Reentrant lock for thread-safe access to store dicts.
     # Use ``with store.lock:`` when performing compound read-modify-write
     # operations on any of the dicts below.
     _lock: threading.RLock = LocalAttribute(default=threading.RLock)

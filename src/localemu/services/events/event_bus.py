@@ -14,6 +14,7 @@ from localemu.aws.api.events import (
 )
 from localemu.services.events.models import EventBus, ResourcePolicy, RuleDict
 from localemu.utils.aws.arns import get_partition
+from localemu.utils.aws.policy import normalize_policy_statements
 
 
 class EventBusService:
@@ -79,9 +80,13 @@ class EventBusService:
             )
 
             if existing_policy := self.event_bus.policy:
+                # ``Statement`` can be single-dict or list-of-dicts in any
+                # user-supplied policy; normalise once so the wildcard check
+                # and the subsequent ``.append`` both operate on a list.
+                existing_policy["Statement"] = normalize_policy_statements(existing_policy)
                 if permission_statement["Principal"] == "*":
                     for statement in existing_policy["Statement"]:
-                        if "*" == statement["Principal"]:
+                        if statement.get("Principal") == "*":
                             return
                 existing_policy["Statement"].append(permission_statement)
             else:
@@ -92,17 +97,17 @@ class EventBusService:
 
     def revoke_put_events_permission(self, statement_id: str):
         policy = self.event_bus.policy
+        # Normalise to a list so the ``any()`` test and the filter
+        # comprehension below handle the single-dict ``Statement`` form too.
+        statements = normalize_policy_statements(policy) if policy else []
         if not policy or not any(
-            statement.get("Sid") == statement_id for statement in policy["Statement"]
+            statement.get("Sid") == statement_id for statement in statements
         ):
             raise ResourceNotFoundException("Statement with the provided id does not exist.")
-        if policy:
-            policy["Statement"] = [
-                statement
-                for statement in policy["Statement"]
-                if statement.get("Sid") != statement_id
-            ]
-            self.event_bus.last_modified_time = datetime.now(UTC)
+        policy["Statement"] = [
+            statement for statement in statements if statement.get("Sid") != statement_id
+        ]
+        self.event_bus.last_modified_time = datetime.now(UTC)
 
     def _parse_statement(
         self,

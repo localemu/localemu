@@ -201,7 +201,7 @@ def get_engine_env_vars(
         if not db_name:
             db_name = "main"
         env[env_config["database_env"]] = db_name
-        # For non-root users, set engine-specific user env vars (BUG-04)
+        # For non-root users, set engine-specific user env vars
         if master_username != "root":
             env[env_config["user_env"]] = master_username
             env[env_config["password_env"]] = master_password

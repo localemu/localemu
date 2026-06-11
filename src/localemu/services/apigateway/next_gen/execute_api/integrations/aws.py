@@ -101,14 +101,25 @@ def _get_internal_mocked_headers_cached(
     source_arn: str,
     role_arn: str | None,
 ) -> dict[str, str]:
+    session_token: str | None = None
     if role_arn:
-        access_key_id = (
+        # Assumed-role credentials are temporary (ASIA / LSIA prefix). The
+        # TemporaryCredentialValidator handler (aws/handlers/auth.py)
+        # rejects every temporary credential that arrives without
+        # ``X-Amz-Security-Token`` with a 403 "Request is missing
+        # required security token". Stash the SessionToken alongside
+        # the AccessKeyId so the downstream backend call carries
+        # the full temporary-credential triplet, matching what a
+        # real assumed-role SigV4 signer would emit.
+        sts_creds = (
             connect_to()
             .sts.request_metadata(service_principal=ServicePrincipal.apigateway)
             .assume_role(RoleArn=role_arn, RoleSessionName="BackplaneAssumeRoleSession")[
                 "Credentials"
-            ]["AccessKeyId"]
+            ]
         )
+        access_key_id = sts_creds["AccessKeyId"]
+        session_token = sts_creds.get("SessionToken")
     else:
         access_key_id = INTERNAL_AWS_ACCESS_KEY_ID
 
@@ -125,6 +136,8 @@ def _get_internal_mocked_headers_cached(
         ),
         INTERNAL_REQUEST_PARAMS_HEADER: dump_dto(dto),
     }
+    if session_token:
+        headers["X-Amz-Security-Token"] = session_token
 
     return headers
 

@@ -160,17 +160,31 @@ def _cbor_blob_parser(value):
     return bytes(value)
 
 
-@hooks.on_infra_start()
-def _patch_botocore_json_parser():
+# Set to True the first time the botocore JSON-parser fallback patch is applied
+# (either by ``_patch_botocore_json_parser`` firing on infra start, or by an
+# early-startup caller invoking ``_patch_cbor2``). The ``@patch`` helper does
+# not de-duplicate, so this sentinel keeps a second call from wrapping the
+# patch around its previous self.
+_BOTOCORE_CBOR_FALLBACK_APPLIED = False
+
+
+def _ensure_botocore_cbor_fallback() -> None:
+    """Patch botocore's JSON parser to fall back to AWS-quirk CBOR decoding.
+
+    botocore does not natively support CBOR responses, but several AWS
+    services (DynamoDB, KMS, Kinesis SubscribeToShard streams) emit CBOR.
+    This patch makes ``BaseJSONParser._parse_body_as_json`` try the
+    AWS-quirk CBOR codec from :mod:`localemu.aws.protocol._cbor` whenever
+    JSON decoding fails on the raw bytes. Idempotent.
+    """
+    global _BOTOCORE_CBOR_FALLBACK_APPLIED
+    if _BOTOCORE_CBOR_FALLBACK_APPLIED:
+        return
+
     from botocore.parsers import BaseJSONParser
 
     @patch(BaseJSONParser._parse_body_as_json)
     def _parse_body_as_json(fn, self, body_contents):
-        """
-        botocore does not support CBOR-encoded response parsing, but several AWS services
-        (DynamoDB, KMS, Kinesis SubscribeToShard streams) emit CBOR. Try CBOR decoding as a
-        fallback when JSON parsing fails on the raw bytes.
-        """
         try:
             return fn(self, body_contents)
         except UnicodeDecodeError as json_exception:
@@ -182,6 +196,46 @@ def _patch_botocore_json_parser():
             except Exception as cbor_exception:
                 LOG.debug("CBOR fallback decoding failed.")
                 raise cbor_exception from json_exception
+
+    _BOTOCORE_CBOR_FALLBACK_APPLIED = True
+
+
+def _patch_cbor2() -> None:
+    """Apply the AWS-quirk CBOR plumbing immediately, ahead of infra start.
+
+    Earlier LocalEmu (cbor2 5.x era) monkey-patched
+    ``cbor2._decoder.semantic_decoders`` and
+    ``cbor2._encoder.default_encoders`` so that ``cbor2.loads`` /
+    ``cbor2.dumps`` anywhere in the process applied the AWS Kinesis
+    epoch-millis quirk. cbor2 6.x ships as a C extension and those
+    private dicts are gone; the equivalent plumbing is now split:
+
+      * :mod:`localemu.aws.protocol._cbor` is a per-call wrapper that
+        applies the quirk via cbor2's public hook API. Internal callers
+        that know they're dealing with AWS data import ``loads`` /
+        ``dumps`` from there directly.
+
+      * :func:`_ensure_botocore_cbor_fallback` patches botocore's JSON
+        parser to fall back to that wrapper, so boto3 transparently
+        consumes CBOR-encoded responses (DynamoDB, KMS, Kinesis
+        SubscribeToShard).
+
+    Both pieces are normally activated as part of LocalEmu startup: the
+    wrapper at first import, the botocore fallback via the
+    ``on_infra_start`` hook below. Tests that need them in place BEFORE
+    infra has started call this function at module-import time; it
+    force-loads the wrapper module (so it lands in :data:`sys.modules`
+    ready to use) and immediately applies the botocore fallback patch
+    rather than waiting for the hook to fire. Idempotent.
+    """
+    import localemu.aws.protocol._cbor  # noqa: F401
+
+    _ensure_botocore_cbor_fallback()
+
+
+@hooks.on_infra_start()
+def _patch_botocore_json_parser():
+    _ensure_botocore_cbor_fallback()
 
 
 def _create_and_enrich_aws_request(

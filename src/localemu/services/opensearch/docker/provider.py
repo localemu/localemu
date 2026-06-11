@@ -247,11 +247,70 @@ def _handle_describe_domains(
     return result
 
 
+def _handle_list_versions(
+    context: RequestContext, request: ServiceRequest
+) -> ServiceResponse:
+    """ListVersions: return the set of engine versions LocalEmu's Docker
+    backend can actually run.
+
+    moto doesn't implement ``list_versions`` at all (it returns
+    ``InternalFailure: The list_versions action has not been
+    implemented``). Real AWS surfaces every OpenSearch + Elasticsearch
+    version available in the region; here we mirror that with the
+    exact set of versions we have Docker images for, taken from
+    ``cluster_manager.OPENSEARCH_IMAGES`` and ``ELASTICSEARCH_IMAGES``
+    — anything else would let a caller request a version we can't
+    actually launch. The ``default`` alias key inside those dicts is
+    an internal fallback (consulted by ``_resolve_image`` when the
+    caller doesn't specify an engine version); it must NOT surface on
+    the public ListVersions response. Pagination params (``MaxResults``
+    / ``NextToken``) are accepted on the wire but the list is small
+    enough that we always return the whole thing.
+    """
+    from localemu.services.opensearch.docker.cluster_manager import (
+        ELASTICSEARCH_IMAGES,
+        OPENSEARCH_IMAGES,
+    )
+
+    versions = [
+        v for v in (
+            list(OPENSEARCH_IMAGES.keys()) + list(ELASTICSEARCH_IMAGES.keys())
+        )
+        if v != "default"
+    ]
+    return {"Versions": versions}
+
+
+def _handle_get_compatible_versions(
+    context: RequestContext, request: ServiceRequest
+) -> ServiceResponse:
+    """GetCompatibleVersions: return the in-place upgrade matrix.
+
+    On real AWS this lists every (source_engine, target_engines) pair
+    the managed control plane can perform without a snapshot/restore.
+    LocalEmu does not perform in-place version upgrades of running
+    OpenSearch / Elasticsearch containers (an upgrade would require
+    rebuilding the cluster with the new image and a data migration we
+    don't model), so the honest answer for every source version is an
+    empty target list. Returning an explicit empty list — rather than
+    inheriting moto's hardcoded real-AWS upgrade matrix that names
+    versions LocalEmu has no Docker images for — keeps a caller from
+    asking for an upgrade we can't actually deliver.
+
+    The wire-level shape (``CompatibleVersions: []``) is the same one
+    AWS uses for an engine with no upgrade path; SDK callers handle it
+    identically.
+    """
+    return {"CompatibleVersions": []}
+
+
 _INTERCEPTED_OPS = {
     "CreateDomain": _handle_create_domain,
     "DeleteDomain": _handle_delete_domain,
     "DescribeDomain": _handle_describe_domain,
     "DescribeDomains": _handle_describe_domains,
+    "ListVersions": _handle_list_versions,
+    "GetCompatibleVersions": _handle_get_compatible_versions,
 }
 
 

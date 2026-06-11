@@ -54,7 +54,7 @@ STREAM_STATUS_MAP = {
 class DynamoDBStreamsProvider(DynamodbstreamsApi, ServiceLifecycleHook):
     shard_to_region: collections.OrderedDict
     """Map a shard iterator to the originating region. Bounded to prevent
-    memory leaks (BUG-12 fix). Oldest entries evicted when limit reached."""
+    memory leaks. Oldest entries evicted when limit reached."""
 
     _MAX_SHARD_ENTRIES = 10_000
 
@@ -130,7 +130,7 @@ class DynamoDBStreamsProvider(DynamodbstreamsApi, ServiceLifecycleHook):
                     # slicing the resulting shards after the exclusive_start_shard_id parameters
                     stream_shards = stream_shards[start_index + 1 :]
 
-                # Apply limit if specified (BUG-10 fix)
+                # Apply limit if specified
                 if limit and len(stream_shards) > limit:
                     stream_shards = stream_shards[:limit]
 
@@ -173,7 +173,7 @@ class DynamoDBStreamsProvider(DynamodbstreamsApi, ServiceLifecycleHook):
         if region_name != context.region and "NextShardIterator" in result:
             with self._shard_to_region_lock:
                 self.shard_to_region[result["NextShardIterator"]] = region_name
-                # Evict oldest entries if cache exceeds limit (BUG-12 fix)
+                # Evict oldest entries if cache exceeds limit
                 while len(self.shard_to_region) > self._MAX_SHARD_ENTRIES:
                     self.shard_to_region.popitem(last=False)
         return GetRecordsOutput(**result)

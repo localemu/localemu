@@ -270,6 +270,21 @@ def get_credentials_from_parameters(parameters: dict, region: str) -> PreSignedC
     return PreSignedCredentials(access_key_id, secret_access_key, security_token)
 
 
+# Canonical AWS-published example credential pair. Every reasonable
+# user of LocalEmu reaches for these (they're the AKIA / secret-key
+# pair that AWS publishes in its SigV4 docs and that we recognise as
+# the demo Root key in ``services.iam_enforcement.identity``). Without
+# this map the strict signature validator can't recompute the
+# signature for a presigned URL signed with this canonical secret —
+# moto's IAM backend has never seen the key, the fallback returns
+# ``"test"``, and every well-formed presigned URL minted by a typical
+# LocalEmu user fails as ``SignatureDoesNotMatch``. Real AWS would
+# look the secret up in IAM; here we mirror that for the demo key.
+_DEMO_ACCESS_KEY_SECRETS: dict[str, str] = {
+    "AKIAIOSFODNN7EXAMPLE": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+}
+
+
 @cache
 def get_secret_access_key_from_access_key_id(access_key_id: str, region: str) -> str | None:
     """
@@ -281,6 +296,12 @@ def get_secret_access_key_from_access_key_id(access_key_id: str, region: str) ->
     :param region: the region from the credentials
     :return: the linked secret_access_key to the access_key
     """
+    # Canonical demo Root key — recognised before any moto lookup so a
+    # presigned URL signed with the published AWS example credentials
+    # round-trips through strict validation cleanly.
+    if demo_secret := _DEMO_ACCESS_KEY_SECRETS.get(access_key_id):
+        return demo_secret
+
     try:
         from moto.iam.models import AccessKey, iam_backends
     except ImportError:
