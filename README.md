@@ -294,12 +294,14 @@ Lambda functions, SQS queues, Secrets Manager secrets. Everything survives.
 docker run --rm -d -p 4566:4566 -p 4510-4559:4510-4559 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --group-add docker \
+  -e DASHBOARD_API_OPEN=1 \
   localemu/localemu
 
 # macOS (Docker Desktop)
 docker run --rm -d -p 4566:4566 -p 4510-4559:4510-4559 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --user root \
+  -e DASHBOARD_API_OPEN=1 \
   localemu/localemu
 ```
 
@@ -308,6 +310,15 @@ docker run --rm -d -p 4566:4566 -p 4510-4559:4510-4559 \
 > socket is owned by `root` inside the container regardless of host GID, so
 > the non-root `localemu` user cannot access it. On Linux, adding the
 > `docker` group (`--group-add docker`) is sufficient.
+
+> **Why `DASHBOARD_API_OPEN=1`?** The dashboard at
+> `http://localhost:4566/_localemu/dashboard` is restricted to loopback
+> callers by default. When LocalEmu runs in a container, a port-mapped
+> request from your browser reaches the container from the Docker bridge,
+> not from `127.0.0.1` inside it, so without the variable the dashboard
+> returns 403 with a message naming this exact variable. The pip-install
+> path does not need it because `localemu start` listens directly on the
+> host loopback.
 
 ## Using the AWS CLI with Docker
 
