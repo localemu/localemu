@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localemu"
-version = "1.1.0"
+version = "1.1.1"
 authors = [
     { name = "LocalEmu Contributors", email = "info@localemu.cloud" }
 ]
@@ -191,7 +191,9 @@ exclude = ["tests*"]
     "openapi.yaml",
     "http/resources/swagger/templates/index.html",
     "dashboard/static/index.html",
-    "dashboard/static/icons/*.svg"
+    "dashboard/static/icons/*.svg",
+    "dashboard/static/css/*.css",
+    "dashboard/static/js/**/*.js"
 ]
 
 [tool.ruff]

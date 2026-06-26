@@ -603,6 +603,122 @@ def _resolve_instance_for_eni(
         return None
 
 
+def _resolve_primary_eni_for_instance(
+    instance_id: str, account_id: str, region: str,
+):
+    """Return ``(eni_id, moto_nic)`` for the instance's primary ENI
+    (``device_index == 0``), or ``(None, None)`` when the instance is
+    unknown, has no attached primary ENI, or moto's store is in a shape
+    we don't recognize.
+
+    Walks ``ec2_backend.enis`` directly — same store the reverse
+    helper above reads — so the resolver is independent of the
+    LocalEmu address-index cache (which may not yet have observed a
+    freshly-attached ENI). One pass, no copies, mutation on the
+    returned NIC is safe.
+    """
+    try:
+        import moto.backends as moto_backends
+
+        ec2_backend = moto_backends.get_backend("ec2")[account_id][region]
+        enis = getattr(ec2_backend, "enis", None)
+        if not isinstance(enis, dict):
+            return None, None
+        for eni in enis.values():
+            instance = getattr(eni, "instance", None)
+            if instance is None or getattr(instance, "id", None) != instance_id:
+                continue
+            if getattr(eni, "device_index", None) != 0:
+                continue
+            return getattr(eni, "id", None), eni
+    except Exception:
+        LOG.debug(
+            "primary-ENI resolution failed for %s", instance_id, exc_info=True,
+        )
+    return None, None
+
+
+def _sync_sdc_to_primary_eni(
+    instance_id: str, source_dest_check: bool,
+    account_id: str, region: str,
+) -> None:
+    """Mirror an instance-level SourceDestCheck write onto the primary
+    ENI in every storage cell that surfaces it:
+
+      * moto's NIC model (``device_index == 0``), which feeds
+        ``DescribeInstances.Instances[*].NetworkInterfaces[0].SourceDestCheck``.
+      * LocalEmu's address index ``EniEntry.source_dest_check``, which
+        feeds the ``DescribeNetworkInterfaces`` enrichment.
+
+    AWS treats the instance-level bit as a convenience view of the
+    primary ENI's bit — without this mirror, the three storage cells
+    drift, and any tool that reads NIC-level SourceDestCheck (the AWS
+    console does) sees the stale value.
+
+    Idempotent. Failures are logged, never raised: a sync failure must
+    not break the user's ``ModifyInstanceAttribute`` call because the
+    primary write to ``Instance.source_dest_check`` already succeeded.
+    """
+    eni_id, moto_nic = _resolve_primary_eni_for_instance(
+        instance_id, account_id, region,
+    )
+    if eni_id is None:
+        return
+    try:
+        if moto_nic is not None:
+            moto_nic.source_dest_check = bool(source_dest_check)
+    except Exception:
+        LOG.debug(
+            "sync SourceDestCheck -> moto NIC %s failed",
+            eni_id, exc_info=True,
+        )
+    try:
+        from localemu.services.ec2.docker.eni_manager import get_eni_manager
+        get_eni_manager().modify_attribute(
+            eni_id=eni_id, source_dest_check=bool(source_dest_check),
+        )
+    except Exception:
+        LOG.debug(
+            "sync SourceDestCheck -> address_index %s failed",
+            eni_id, exc_info=True,
+        )
+
+
+def _sync_sdc_to_instance(
+    eni_id: str, source_dest_check: bool,
+    account_id: str, region: str,
+) -> None:
+    """Mirror an ENI-level SourceDestCheck write back onto the
+    attached instance's ``Instance.source_dest_check`` IFF the ENI is
+    the primary (``device_index == 0``). No-op for secondary ENIs:
+    AWS scopes the instance-level view to the primary, and a
+    secondary's SourceDestCheck must not silently rewrite the
+    instance's bit.
+
+    Failures are logged, never raised: the user's
+    ``ModifyNetworkInterfaceAttribute`` call already mutated the ENI;
+    the mirror is a metadata convenience.
+    """
+    try:
+        import moto.backends as moto_backends
+
+        ec2_backend = moto_backends.get_backend("ec2")[account_id][region]
+        eni = (getattr(ec2_backend, "enis", None) or {}).get(eni_id)
+        if eni is None:
+            return
+        if getattr(eni, "device_index", None) != 0:
+            return
+        instance = getattr(eni, "instance", None)
+        if instance is None:
+            return
+        instance.source_dest_check = bool(source_dest_check)
+    except Exception:
+        LOG.debug(
+            "sync SourceDestCheck -> Instance via ENI %s failed",
+            eni_id, exc_info=True,
+        )
+
+
 def _translate_eni_error(exc: Exception):
     """Translate EniManager errors to AWS-shape CommonServiceException."""
     from localemu.services.ec2.docker.eni_manager import (
@@ -2656,27 +2772,43 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
     ) -> dict:
         eni_id = request.get("NetworkInterfaceId")
         result = call_moto(context)
-        if not (_eni_real_enabled() and eni_id):
-            return result
+
         # AWS exposes attributes in three shapes in the request — the
         # API maps each ModifyNetworkInterfaceAttribute call to ONE
-        # attribute change. Extract whichever is present.
+        # attribute change. Extract whichever is present. We parse
+        # before the real-ENI flag gate so the SDC metadata mirror
+        # (pure-Python, no Docker side effect) runs in EVERY mode,
+        # including a default LocalEmu without ``LOCALEMU_ENI_REAL``.
+        # The address-index update and the data-plane apply do depend
+        # on the real-ENI subsystem and stay behind the gate below.
         groups = None
         source_dest_check = None
         delete_on_termination = None
-        # Groups: list field (Groups.N=sg-...)
         if request.get("Groups"):
             groups = list(request["Groups"])
-        # SourceDestCheck: {"Value": True|False}
         sdc = request.get("SourceDestCheck")
         if isinstance(sdc, dict) and "Value" in sdc:
             source_dest_check = bool(sdc["Value"])
         elif isinstance(sdc, bool):
             source_dest_check = sdc
-        # Attachment: {"AttachmentId": ..., "DeleteOnTermination": bool}
         attachment = request.get("Attachment")
         if isinstance(attachment, dict) and "DeleteOnTermination" in attachment:
             delete_on_termination = bool(attachment["DeleteOnTermination"])
+
+        # Metadata mirror: when an ENI write targets the primary ENI
+        # of an instance, ``Instance.source_dest_check`` must reflect
+        # the new value so ``DescribeInstances`` agrees with
+        # ``DescribeNetworkInterfaces``. Runs in every mode, since
+        # the moto cells are mutated by ``call_moto`` regardless of
+        # the real-ENI flag.
+        if eni_id and source_dest_check is not None:
+            _sync_sdc_to_instance(
+                eni_id=eni_id, source_dest_check=bool(source_dest_check),
+                account_id=context.account_id, region=context.region,
+            )
+
+        if not (_eni_real_enabled() and eni_id):
+            return result
         try:
             from localemu.services.ec2.docker.eni_manager import (
                 get_eni_manager,
@@ -2690,11 +2822,11 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         except Exception as exc:
             raise _translate_eni_error(exc)
 
-        # The SDC bit also has a data-plane footprint (kernel
-        # ip_forward + iptables FORWARD policy). When the ENI is the
-        # primary interface of an instance, we apply directly to the
-        # instance's container so the change takes effect immediately,
-        # not just on next ENI re-attach.
+        # Data-plane apply (kernel ip_forward + iptables FORWARD
+        # policy on the instance's container). The Instance->bit
+        # metadata mirror has already run above the real-ENI gate;
+        # this block only covers the Docker side effect, which
+        # depends on the real-ENI subsystem being live.
         if source_dest_check is not None:
             try:
                 instance_id = _resolve_instance_for_eni(
@@ -2798,9 +2930,20 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 exc_info=True,
             )
 
-        # SourceDestCheck data-plane apply. AWS exposes the bool as
-        # ``SourceDestCheck.Value=true|false`` (boolean attribute
-        # request shape).
+        # SourceDestCheck has two follow-ups beyond moto's
+        # Instance.source_dest_check write:
+        #   1. Mirror the bit onto the primary ENI in BOTH storage
+        #      cells (moto's NIC model and the LocalEmu address
+        #      index). On AWS, the instance-level SourceDestCheck is a
+        #      convenience view of the primary ENI's bit — without
+        #      the mirror, DescribeInstances.NetworkInterfaces[0] and
+        #      DescribeNetworkInterfaces both report the stale value
+        #      after an instance-level write.
+        #   2. Apply the kernel forwarding knobs (ip_forward +
+        #      iptables FORWARD policy) on the container so the bit
+        #      actually changes traffic behavior.
+        # AWS exposes the bool as ``SourceDestCheck.Value=true|false``
+        # (boolean attribute request shape).
         try:
             instance_id = context.request.values.get("InstanceId")
             sdc_value = (
@@ -2809,6 +2952,10 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             )
             if instance_id and sdc_value is not None:
                 desired = str(sdc_value).strip().lower() in ("true", "1")
+                _sync_sdc_to_primary_eni(
+                    instance_id=instance_id, source_dest_check=desired,
+                    account_id=context.account_id, region=context.region,
+                )
                 from localemu.services.ec2.docker.source_dest_check import (
                     apply_source_dest_check,
                 )
@@ -2817,7 +2964,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 )
         except Exception:
             LOG.debug(
-                "SourceDestCheck data-plane apply after "
+                "SourceDestCheck propagation/data-plane apply after "
                 "ModifyInstanceAttribute failed", exc_info=True,
             )
         return result
