@@ -180,56 +180,6 @@ class PermissionDownloadInstaller(DownloadInstaller, ABC):
         chmod_r(self.get_executable_path(), 0o777)  # type: ignore[arg-type]
 
 
-class GitHubReleaseInstaller(PermissionDownloadInstaller):
-    """
-    Installer which downloads an asset from a GitHub project's tag.
-    """
-
-    def __init__(self, name: str, tag: str, github_slug: str):
-        super().__init__(name, tag)
-        self.github_tag_url = (
-            f"https://api.github.com/repos/{github_slug}/releases/tags/{self.version}"
-        )
-
-    @lru_cache
-    def _get_download_url(self) -> str:
-        asset_name = self._get_github_asset_name()
-        # try to use a token when calling the GH API for increased API rate limits
-        headers = None
-        gh_token = os.environ.get("GITHUB_API_TOKEN")
-        if gh_token:
-            headers = {"authorization": f"Bearer {gh_token}"}
-        response = requests.get(self.github_tag_url, headers=headers, proxies=get_proxies())
-        if not response.ok:
-            raise PackageException(
-                f"Could not get list of releases from {self.github_tag_url}: {response.text}"
-            )
-        github_release = response.json()
-        download_url = None
-        for asset in github_release.get("assets", []):
-            # find the correct binary in the release
-            if asset["name"] == asset_name:
-                download_url = asset["browser_download_url"]
-                break
-        if download_url is None:
-            raise PackageException(
-                f"Could not find required binary {asset_name} in release {self.github_tag_url}"
-            )
-        return download_url
-
-    def _get_install_marker_path(self, install_dir: str) -> str:
-        # Use the GitHub asset name instead of the download URL (since the download URL needs to be fetched online).
-        return os.path.join(install_dir, self._get_github_asset_name())
-
-    def _get_github_asset_name(self) -> str:
-        """
-        Determines the name of the asset to download.
-        The asset name must be determinable without having any online data (because it is used in offline scenarios to
-        determine if the package is already installed).
-
-        :return: name of the asset to download from the GitHub project's tag / version
-        """
-        raise NotImplementedError()
 
 
 class NodePackageInstaller(ExecutableInstaller):

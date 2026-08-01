@@ -1,14 +1,14 @@
-"""End-to-end tests for the EBS direct API (PR-005).
+"""End-to-end tests for the EBS direct API.
 
 These tests run against a live LocalEmu instance and cover:
 
 * The full direct-API write/read path
-  (``StartSnapshot`` → ``PutSnapshotBlock`` → ``CompleteSnapshot`` →
-  ``GetSnapshotBlock`` → ``ListSnapshotBlocks``).
-* The PR-005 reproduction: ``ebs:ListSnapshotBlocks`` on a snapshot
+  (``StartSnapshot`` -> ``PutSnapshotBlock`` -> ``CompleteSnapshot`` ->
+  ``GetSnapshotBlock`` -> ``ListSnapshotBlocks``).
+* The reproduction: ``ebs:ListSnapshotBlocks`` on a snapshot
   created via ``ec2:CreateSnapshot`` no longer raises ``InternalError``.
-* The "Snapshot Heist" data path: PutSnapshotBlock → CreateVolume from
-  snapshot → take another snapshot of the restored volume → blocks
+* The "Snapshot Heist" data path: PutSnapshotBlock -> CreateVolume from
+  snapshot -> take another snapshot of the restored volume -> blocks
   survive.
 * ``ListChangedBlocks`` returns the right diff between two snapshots.
 """
@@ -94,14 +94,14 @@ def test_list_snapshot_blocks_returns_all_indexes(ebs_client):
 
 
 # ---------------------------------------------------------------------------
-# PR-005 reproduction: list_snapshot_blocks on an ec2:CreateSnapshot snapshot
+# reproduction: list_snapshot_blocks on an ec2:CreateSnapshot snapshot
 # ---------------------------------------------------------------------------
 
 
 def test_pr005_reproduction_ec2_created_snapshot_is_visible_to_ebs_api(
     ebs_client, ec2_client,
 ):
-    """Before PR-005: ``ListSnapshotBlocks`` raised ``InternalError``
+    """``ListSnapshotBlocks`` raised ``InternalError``
     because the snapshot wasn't in the EBS backend's dict. After the
     fix the bridge registers a mirror entry, so the direct API can
     list it (empty if the source volume had no blocks)."""
@@ -131,7 +131,7 @@ def test_pr005_reproduction_ec2_created_snapshot_is_visible_to_ebs_api(
 def test_snapshot_heist_data_survives_restore_and_resnapshot(
     ebs_client, ec2_client,
 ):
-    """The full PR-005 attack path: an attacker puts a block via the
+    """The full attack path: an attacker puts a block via the
     direct API, restores it via CreateVolume, then takes a new
     snapshot of the restored volume and reads the same bytes back."""
     secret = b"victims-disk-bytes" + uuid.uuid4().bytes
@@ -156,19 +156,19 @@ def test_snapshot_heist_data_survives_restore_and_resnapshot(
             VolumeId=restored_vol, Description="heist",
         )["SnapshotId"]
         try:
-            # 4. Read block 0 from the new snapshot — must be the secret.
+            # 4. Read block 0 from the new snapshot - must be the secret.
             got = ebs_client.get_snapshot_block(
                 SnapshotId=new_snap, BlockIndex=0, BlockToken="any",
             )
             assert _read_block_payload(got) == secret, (
-                "blocks did not survive the snapshot → restore → snapshot "
+                "blocks did not survive the snapshot -> restore -> snapshot "
                 "round trip; the Snapshot Heist scenario is still blocked"
             )
         finally:
             ec2_client.delete_snapshot(SnapshotId=new_snap)
     finally:
         ec2_client.delete_volume(VolumeId=restored_vol)
-        # Cleanup the upstream snapshot too — ec2:CreateVolume(SnapshotId=)
+        # Cleanup the upstream snapshot too - ec2:CreateVolume(SnapshotId=)
         # creates a moto-side mirror, but the direct-API snapshot we
         # started with also needs an ec2:DeleteSnapshot to fully tear down.
         try:

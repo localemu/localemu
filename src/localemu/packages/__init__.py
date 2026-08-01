@@ -8,12 +8,11 @@ from .api import (
     package,
     packages,
 )
-from .core import DownloadInstaller, GitHubReleaseInstaller, SystemNotSupportedException
+from .core import DownloadInstaller, SystemNotSupportedException
 
 __all__ = [
     "Package",
     "PackageInstaller",
-    "GitHubReleaseInstaller",
     "DownloadInstaller",
     "InstallTarget",
     "PackageException",

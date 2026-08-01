@@ -65,7 +65,7 @@ def _patch_moto_instance_ip(
     Moto allocates IPs from its in-memory subnet pool (e.g. 10.50.1.4)
     while the Docker bridge for the VPC may assign from the wider VPC
     CIDR (e.g. 10.50.0.2). Without this reconciliation,
-    ``DescribeInstances`` reports an address that does not route — every
+    ``DescribeInstances`` reports an address that does not route - every
     intra-VPC ping by the AWS-reported IP fails. We push the real Docker
     address into moto so callers see one consistent, routable address.
 
@@ -144,7 +144,7 @@ def _reissue_sts_for_restore(
 
     Returns the IMDS-shaped credential dict (``Code``, ``AccessKeyId``,
     ``SecretAccessKey``, ``Token``, ``Expiration``) or ``None`` on
-    failure. All exceptions are caught and logged — restore never
+    failure. All exceptions are caught and logged - restore never
     blocks on STS.
     """
     try:
@@ -244,7 +244,7 @@ def _realign_subnet_pool_to_vpc_bridge(vpc_id: str, subnet_id: str) -> None:
             pool = p
             break
     if pool is None:
-        return  # not registered yet — happens for non-VPC instances
+        return  # not registered yet - happens for non-VPC instances
 
     vpc_docker_cidr = vpc_mgr.get_docker_cidr_for_vpc(vpc_id)
     vpc_aws_cidr = vpc_mgr._lookup_vpc_cidr_in_moto(vpc_id)
@@ -265,7 +265,7 @@ def _realign_subnet_pool_to_vpc_bridge(vpc_id: str, subnet_id: str) -> None:
 
     # The pool needs to move. Live allocations from the stale pool
     # would now be invalid Docker IPs anyway, so a force-re-register
-    # is the right shape — any container holding the stale IP is
+    # is the right shape - any container holding the stale IP is
     # already broken (or was on auto-IPAM and not tracked).
     LOG.info(
         "subnet pool realign: %s in %s docker_cidr %s → %s "
@@ -292,7 +292,7 @@ def _resolve_container_private_ip(
       1. ``vpc_network_hint`` (the VPC network we attached at create time).
       2. Any other ``localemu-vpc-*`` network on the container.
       3. Default ``bridge`` network.
-      4. ``None`` — NO synthetic SHA256 fallback. A fake IP that looks
+      4. ``None`` - NO synthetic SHA256 fallback. A fake IP that looks
          real but doesn't route is worse than a clearly-absent one
          (callers can then surface the real state instead of lying).
 
@@ -344,10 +344,10 @@ _image_pull_locks_lock = threading.Lock()
 
 # Entrypoint script for an EC2 container started from
 # ``localemu/ec2-base:latest``. The base image already ships with
-# openssh-server, iptables, host keys, /run/sshd and /root/.ssh — so
+# openssh-server, iptables, host keys, /run/sshd and /root/.ssh - so
 # this script is configure-and-launch only. NO runtime ``apt-get
 # install`` (which would fail on internal VPC networks because there's
-# no internet — the container would exit and the whole instance would
+# no internet - the container would exit and the whole instance would
 # be unreachable).
 #
 # The fallback ``apk/yum/dnf/apt-get`` install branches are kept as a
@@ -363,7 +363,7 @@ SSHD_ENTRYPOINT_SCRIPT = r"""#!/bin/sh
 # ----- IMDS DNAT (link-local 169.254.169.254 -> sidecar IP) -----
 #
 # Real AWS SDKs, curl, cloud-init, ec2-metadata and most third-party
-# tools hardcode http://169.254.169.254/ — they ignore the
+# tools hardcode http://169.254.169.254/ - they ignore the
 # AWS_EC2_METADATA_SERVICE_ENDPOINT env var, or only honor it for boto3.
 # Without a DNAT rule the connection is refused because nothing inside
 # the container listens on that IP. Install an iptables OUTPUT-chain
@@ -425,7 +425,7 @@ if ! command -v sshd >/dev/null 2>&1; then
     fi
 fi
 
-# Idempotent set-up — no-op when the base image already did this.
+# Idempotent set-up - no-op when the base image already did this.
 ssh-keygen -A >/dev/null 2>&1 || true
 mkdir -p /run/sshd /root/.ssh
 chmod 700 /root/.ssh
@@ -454,7 +454,7 @@ if [ -x /var/lib/localemu/user-data.sh ]; then
     /var/lib/localemu/user-data.sh || true
 fi
 
-# ----- SourceDestCheck: default secure state + marker replay -----
+# ----- SourceDestCheck: default secure state + per-ENI marker replay -----
 #
 # Docker's default FORWARD policy is ACCEPT, which would let any
 # container silently forward packets regardless of the AWS-level
@@ -464,24 +464,68 @@ fi
 # the secure state and matches real EC2's hypervisor-level behaviour.
 #
 # Then, if the Python-side data-plane apply
-# (``services/ec2/docker/source_dest_check.py``) requested SDC=false
-# by writing the marker file, we flip the policy back to ACCEPT and
-# enable kernel forwarding. The marker file is what makes the
-# ``ec2:ModifyInstanceAttribute --no-source-dest-check`` change
-# survive ``docker restart``.
+# (``services/ec2/docker/forward_chain.py``) requested SDC=false on
+# one or more ENIs by writing per-ENI marker files, we re-install
+# the corresponding FORWARD ACCEPT rules and enable kernel
+# forwarding. The marker filenames carry the per-ENI shape:
+#
+#   * ``<iface>`` (no hyphen)            -> separate-iface mode :
+#     one rule  ``iptables -I FORWARD 1 -i <iface> -j ACCEPT``
+#   * ``<iface>-<eni_ip>`` (with hyphen) -> shared-iface mode :
+#     two rules ``-i <iface> -s <eni_ip>/32 -j ACCEPT`` and
+#               ``-i <iface> -d <eni_ip>/32 -j ACCEPT``
+#
+# Backward compat: the legacy single-NIC quiet-router marker (one
+# global ``-P FORWARD ACCEPT`` flip path) is still honored below ;
+# new code never writes it.
 if command -v iptables >/dev/null 2>&1; then
     iptables -P FORWARD DROP 2>/dev/null || true
 fi
+_sdc_any=0
+if [ -d /var/lib/localemu/source-dest-check.d ] \
+    && command -v iptables >/dev/null 2>&1; then
+    for _m in /var/lib/localemu/source-dest-check.d/*; do
+        [ -e "$_m" ] || continue
+        _sdc_any=1
+        _basename=$(basename "$_m")
+        case "$_basename" in
+            *-*)
+                # Shared-iface marker : <iface>-<eni_ip>. Split on the
+                # FIRST hyphen so iface names that contain a hyphen
+                # (unlikely on Docker, but defensive) survive.
+                _iface=${_basename%%-*}
+                _ip=${_basename#*-}
+                iptables -C FORWARD -i "$_iface" -s "$_ip/32" -j ACCEPT 2>/dev/null \
+                    || iptables -I FORWARD 1 -i "$_iface" -s "$_ip/32" -j ACCEPT 2>/dev/null \
+                    || true
+                iptables -C FORWARD -i "$_iface" -d "$_ip/32" -j ACCEPT 2>/dev/null \
+                    || iptables -I FORWARD 1 -i "$_iface" -d "$_ip/32" -j ACCEPT 2>/dev/null \
+                    || true
+                ;;
+            *)
+                # Separate-iface marker : just <iface>.
+                _iface=$_basename
+                iptables -C FORWARD -i "$_iface" -j ACCEPT 2>/dev/null \
+                    || iptables -I FORWARD 1 -i "$_iface" -j ACCEPT 2>/dev/null \
+                    || true
+                ;;
+        esac
+    done
+fi
 if [ -f /var/lib/localemu/source-dest-check-disabled ]; then
-    sysctl -w net.ipv4.ip_forward=1 2>/dev/null \
-        || echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null \
-        || true
+    _sdc_any=1
     if command -v iptables >/dev/null 2>&1; then
         iptables -P FORWARD ACCEPT 2>/dev/null || true
         iptables -C FORWARD -j ACCEPT 2>/dev/null \
             || iptables -I FORWARD 1 -j ACCEPT 2>/dev/null || true
     fi
 fi
+if [ "$_sdc_any" = "1" ]; then
+    sysctl -w net.ipv4.ip_forward=1 2>/dev/null \
+        || echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null \
+        || true
+fi
+unset _sdc_any _m _basename _iface _ip
 
 # ----- Instance-target VPC routes (Quiet Router data plane) -----
 #
@@ -490,7 +534,7 @@ fi
 # ``services/ec2/docker/instance_routes.py`` whenever a route in the
 # subnet's route table points at another instance as its target. On
 # every boot we replay the file so a ``docker restart`` doesn't drop
-# the routes — without this, the route would only apply during the
+# the routes - without this, the route would only apply during the
 # initial CreateRoute window.
 if [ -f /var/lib/localemu/instance-routes.txt ] \
     && command -v ip >/dev/null 2>&1; then
@@ -503,12 +547,12 @@ if [ -f /var/lib/localemu/instance-routes.txt ] \
 fi
 
 # If sshd still isn't installed (bare image + internal network), keep
-# the container alive instead of exiting — IMDS, SG enforcement and
+# the container alive instead of exiting - IMDS, SG enforcement and
 # intra-VPC ping still work even without SSH.
 if command -v sshd >/dev/null 2>&1 && [ -x /usr/sbin/sshd ]; then
     exec /usr/sbin/sshd -D -e
 else
-    echo "[localemu] sshd not available in this image — staying alive without SSH"
+    echo "[localemu] sshd not available in this image - staying alive without SSH"
     exec sh -c 'while true; do sleep 3600; done'
 fi
 """
@@ -663,7 +707,7 @@ class _ImageFallback(Exception):
 # DockerVmManager. Services outside the EC2 provider (autoscaling,
 # future ECS/EKS/SSM integrations) read this via
 # :func:`get_active_vm_manager` rather than importing the provider
-# class directly — keeps the dependency direction one-way.
+# class directly - keeps the dependency direction one-way.
 _ACTIVE_VM_MANAGER: "DockerVmManager | None" = None
 
 
@@ -713,7 +757,7 @@ class DockerVmManager:
         (``localemu/ec2-base:latest``) is BUILT (not pulled) by
         ``base_image.ensure_base_image``. The build runs on the
         LocalEmu host (where internet works) and the resulting image
-        is reused by every EC2 container — including ones on internal
+        is reused by every EC2 container - including ones on internal
         VPC networks where ``apt-get install`` cannot reach the
         package mirrors at runtime.
         """
@@ -747,7 +791,7 @@ class DockerVmManager:
                         self._ensure_image(DEFAULT_IMAGE)
                         raise _ImageFallback(DEFAULT_IMAGE)
                     else:
-                        # Default image is the LocalEmu base — try to build it.
+                        # Default image is the LocalEmu base - try to build it.
                         try:
                             ensure_base_image()
                             return
@@ -876,7 +920,7 @@ class DockerVmManager:
             "AWS_REGION": region,
             "AWS_DEFAULT_REGION": region,
         }
-        # IMDS DNAT target — picked up by SSHD_ENTRYPOINT_SCRIPT to install
+        # IMDS DNAT target - picked up by SSHD_ENTRYPOINT_SCRIPT to install
         # an iptables OUTPUT rule rewriting 169.254.169.254:80 to the right
         # reachable address for this instance. Without this, tools that
         # hardcode the link-local IMDS IP (curl, cloud-init, ec2-metadata,
@@ -924,7 +968,7 @@ class DockerVmManager:
         # Primary network is the shared port-publishing bridge so Docker
         # actually publishes ``-p`` bindings (VPC networks are
         # ``--internal=True`` and Docker silently ignores ``-p`` on
-        # those — see moby/moby#27441). We attach the VPC network as a
+        # those - see moby/moby#27441). We attach the VPC network as a
         # secondary interface right after start so intra-VPC traffic
         # works. SG / NACL iptables still enforce on both interfaces.
         from .vpc_network import ensure_pubport_bridge
@@ -932,8 +976,7 @@ class DockerVmManager:
         secondary_networks: list[str] = []
         if vpc_network:
             secondary_networks.append(vpc_network)
-        # Honour the VPC's DHCP option set's ``domain-name-servers`` —
-        # without this, a malicious ``ec2:CreateDhcpOptions`` /
+        # Honour the VPC's DHCP option set's ``domain-name-servers`` - # without this, a malicious ``ec2:CreateDhcpOptions`` /
         # ``AssociateDhcpOptions`` (the "VPC DNS Hijack" attack) has
         # no observable effect on launched instances. Resolution lives
         # in ``services/ec2/docker/vpc_dns.py`` and silently falls
@@ -1070,13 +1113,13 @@ class DockerVmManager:
                         ipv4_kwarg = str(reserved_vpc_ip)
                     except (UnknownSubnet, InsufficientFreeAddressesInSubnet) as e:
                         LOG.warning(
-                            "EC2 %s: cannot pin IP in subnet %s (%s) — "
+                            "EC2 %s: cannot pin IP in subnet %s (%s) - "
                             "falling back to Docker auto-IPAM",
                             instance_id, subnet_id, e,
                         )
                     except Exception:
                         LOG.warning(
-                            "EC2 %s: allocator reserve raised — falling back",
+                            "EC2 %s: allocator reserve raised - falling back",
                             instance_id, exc_info=True,
                         )
             try:
@@ -1106,7 +1149,7 @@ class DockerVmManager:
         # Handle user data via the LocalEmu cloud-init translator.
         #
         # The raw user-data bytes (after base64-decoding the request
-        # parameter — boto3 / AWS CLI always submit UserData as base64)
+        # parameter - boto3 / AWS CLI always submit UserData as base64)
         # are passed through
         # :func:`localemu.services.ec2.docker.user_data.build_cloud_init_shell`
         # which classifies the payload (shebang / #cloud-config /
@@ -1116,7 +1159,7 @@ class DockerVmManager:
         # * One-shot-guards itself with /var/lib/localemu/user-data-ran
         #   so a ``docker restart`` re-running this same script via the
         #   entrypoint hook (see SSHD_ENTRYPOINT_SCRIPT /
-        #   NO_SSH_ENTRYPOINT_SCRIPT) short-circuits to exit 0 — same
+        #   NO_SSH_ENTRYPOINT_SCRIPT) short-circuits to exit 0 - same
         #   contract as real cloud-init.
         # * Writes the cloud-init standard log paths
         #   /var/log/cloud-init.log (process log) and
@@ -1126,7 +1169,7 @@ class DockerVmManager:
         # We still execute it inline right here (after start_container
         # returned) because the entrypoint may already have completed
         # and dropped into sshd / sleep before the post-start
-        # ``exec_in_container`` could write the script file — so the
+        # ``exec_in_container`` could write the script file - so the
         # entrypoint hook is the second-boot / restart safety net, not
         # the first-boot path.
         console_output = ""
@@ -1186,12 +1229,18 @@ class DockerVmManager:
                         "User data execution failed for %s: %s", instance_id, e,
                     )
 
-        # Inject SSH key if a public key is available
+        # Inject SSH key if a public key is available. Pass ``ami_id`` so
+        # the injector can resolve the AMI's canonical user (ubuntu,
+        # ec2-user, admin, ...) and write ``authorized_keys`` into that
+        # user's home in addition to root - matches every real AWS AMI
+        # convention (see ``ami_canonical_users.py``).
         if key_name and public_key:
-            self._inject_ssh_key(container_name, key_name, public_key)
+            self._inject_ssh_key(
+                container_name, key_name, public_key, ami_id=ami_id,
+            )
 
         # Pre-existing instance-target routes on the subnet's route
-        # table must apply to the new container too — otherwise a
+        # table must apply to the new container too - otherwise a
         # route configured BEFORE the launch would only ever affect
         # instances that happened to exist at the time of CreateRoute.
         if subnet_id:
@@ -1209,17 +1258,17 @@ class DockerVmManager:
                     instance_id, exc_info=True,
                 )
 
-        # Get container IP from Docker — VPC network first, then bridge.
+        # Get container IP from Docker - VPC network first, then bridge.
         # When the container is only attached to a localemu-vpc-* network
         # (the common case for VPC instances), probing "bridge" first
         # would fail; we now walk the attached networks in priority order
         # and only return an address that actually routes. No SHA256
-        # synthetic fallback — see ``_resolve_container_private_ip``.
+        # synthetic fallback - see ``_resolve_container_private_ip``.
         private_ip = _resolve_container_private_ip(container_name, vpc_network)
 
         # Patch moto so DescribeInstances reports the same IP the container
         # actually has on the VPC bridge. Otherwise moto invents an address
-        # from its in-memory subnet pool that doesn't route — every
+        # from its in-memory subnet pool that doesn't route - every
         # cross-instance ping by AWS-reported IP fails.
         if private_ip:
             try:
@@ -1280,7 +1329,7 @@ class DockerVmManager:
         # that the container's primary network is the pubport bridge.
         # Security Group enforcement lives in iptables inside the
         # container (``sg_iptables.py`` + event-driven reapply via
-        # ``sg_reapply.py``) — a single source of truth with correct
+        # ``sg_reapply.py``) - a single source of truth with correct
         # source-IP fidelity. The previous asyncio SG proxy has been
         # removed; it duplicated enforcement and broke source-IP
         # visibility for CIDR-based SG rules.
@@ -1304,7 +1353,7 @@ class DockerVmManager:
 
         # Generate real STS temporary credentials for the instance profile role.
         # This makes IMDS return credentials that IAM enforcement can resolve
-        # back to the role's policies — exactly like real AWS.
+        # back to the role's policies - exactly like real AWS.
         if iam_role_name:
             metadata["iam_role_name"] = iam_role_name
             metadata["instance_profile_arn"] = iam_instance_profile_arn or ""
@@ -1460,7 +1509,7 @@ class DockerVmManager:
         # Start the flow-log sidecar + poller when the operator
         # opted in. The sidecar (ulogd2 on alpine, NFLOG reader in the
         # EC2 container's netns) replaces the dmesg-scraping path the
-        # old ``FlowLogPoller`` used — dmesg returns empty on macOS
+        # old ``FlowLogPoller`` used - dmesg returns empty on macOS
         # Docker Desktop even with CAP_SYSLOG because the LinuxKit VM
         # shares one ring buffer across all containers. NFLOG is
         # netlink-based and per-netns, so it works on macOS AND Linux.
@@ -1509,28 +1558,117 @@ class DockerVmManager:
                  instance_id, container_name, ssh_port, vpc_network or "bridge")
         return info
 
-    def _inject_ssh_key(self, container_name: str, key_name: str, public_key: str) -> None:
-        """Inject SSH public key into the container for key-based authentication."""
+    def _inject_ssh_key(
+        self,
+        container_name: str,
+        key_name: str,
+        public_key: str,
+        ami_id: str | None = None,
+    ) -> None:
+        """Inject SSH public key into the container for key-based auth.
+
+        The key is written into TWO places (matches every real AWS AMI) :
+
+        1. ``/root/.ssh/authorized_keys`` - root SSH is enabled on real
+           Amazon-Linux AMIs with the same key as ``ec2-user``; keeps
+           back-compat for LocalEmu 1.1.x callers that scripted
+           ``ssh root@…``.
+        2. ``~<canonical_user>/.ssh/authorized_keys`` - where the AMI's
+           OS convention expects the key. For the LocalEmu Ubuntu base
+           image this is ``/home/ubuntu/.ssh/authorized_keys``, matching
+           ``ssh ubuntu@<PublicIpAddress>`` from every AWS tutorial. If
+           the AMI has no known canonical user (unknown / custom AMI),
+           the second injection is skipped and root is the only entry
+           point.
+
+        The base64 hop avoids shell interpolation of the key material
+        (defence against command injection via a crafted key comment).
+        """
+        import base64
+        from localemu.services.ec2.docker.ami_canonical_users import (
+            resolve_canonical_user,
+        )
+
+        canonical_user = resolve_canonical_user(ami_id)
+        key_b64 = base64.b64encode(public_key.encode()).decode()
+
+        # Always inject into root first.
         try:
-            # avoid shell interpolation of public key
-            # to prevent command injection via crafted key content
             DOCKER_CLIENT.exec_in_container(
                 container_name,
                 ["sh", "-c", "mkdir -p /root/.ssh && chmod 700 /root/.ssh"],
             )
-            import base64
-            key_b64 = base64.b64encode(public_key.encode()).decode()
             DOCKER_CLIENT.exec_in_container(
                 container_name,
                 [
                     "sh",
                     "-c",
-                    f"echo {key_b64} | base64 -d >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys",
+                    "echo " + key_b64 + " | base64 -d "
+                    ">> /root/.ssh/authorized_keys "
+                    "&& chmod 600 /root/.ssh/authorized_keys",
                 ],
             )
-            LOG.info("Injected SSH public key for key pair %s into container %s", key_name, container_name)
+            LOG.info(
+                "Injected SSH public key for key pair %s into %s "
+                "(/root/.ssh/authorized_keys)",
+                key_name, container_name,
+            )
         except Exception as e:
-            LOG.warning("Failed to inject SSH key %s: %s", key_name, e)
+            LOG.warning(
+                "Failed to inject SSH key %s into root: %s", key_name, e,
+            )
+
+        if not canonical_user or canonical_user == "root":
+            return
+
+        # Inject into the AMI's canonical user's authorized_keys. Best
+        # effort - a missing user (custom AMI missing our expected user
+        # account) is logged INFO and not raised.
+        home = f"/home/{canonical_user}"
+        try:
+            # Verify the user exists before writing to their home; a
+            # missing user makes the whole path pointless and we should
+            # keep root as the only entry point.
+            probe = DOCKER_CLIENT.exec_in_container(
+                container_name,
+                ["sh", "-c", f"id -u {canonical_user} >/dev/null 2>&1"],
+            )
+            # exec_in_container returns a tuple / a code depending on the
+            # docker backend; treat truthy stderr or non-zero rc as
+            # "user missing".
+            if isinstance(probe, tuple) and len(probe) >= 2 and probe[1]:
+                # stderr non-empty → user probably missing
+                LOG.info(
+                    "AMI %s canonical user %s not present in %s; "
+                    "root remains the sole SSH entry point",
+                    ami_id, canonical_user, container_name,
+                )
+                return
+
+            DOCKER_CLIENT.exec_in_container(
+                container_name,
+                [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {home}/.ssh "
+                    f"&& chmod 700 {home}/.ssh "
+                    f"&& echo {key_b64} | base64 -d "
+                    f">> {home}/.ssh/authorized_keys "
+                    f"&& chmod 600 {home}/.ssh/authorized_keys "
+                    f"&& chown -R {canonical_user}:{canonical_user} "
+                    f"{home}/.ssh",
+                ],
+            )
+            LOG.info(
+                "Injected SSH public key for %s into %s "
+                "(%s/.ssh/authorized_keys, user=%s)",
+                key_name, container_name, home, canonical_user,
+            )
+        except Exception as e:
+            LOG.info(
+                "Skipped canonical-user (%s) key injection in %s: %s",
+                canonical_user, container_name, e,
+            )
 
     def stop_instance(self, instance_id: str) -> None:
         """Stop an EC2 instance (Docker stop)."""
@@ -1551,7 +1689,7 @@ class DockerVmManager:
             LOG.warning("Failed to start EC2 instance %s: %s", instance_id, e)
 
     def reboot_instance(self, instance_id: str) -> None:
-        """Reboot an EC2 instance (Docker restart — atomic, preserves
+        """Reboot an EC2 instance (Docker restart - atomic, preserves
         the host port mapping and the container's IPAM assignment).
 
         AWS RebootInstances is graceful (SIGTERM then SIGKILL after
@@ -1586,7 +1724,7 @@ class DockerVmManager:
 
         # Stop the flow-log poller + tear down the sidecar
         # container if we started one. Both operations are best-effort
-        # — a failing sidecar cleanup must not block instance
+        # - a failing sidecar cleanup must not block instance
         # termination.
         poller = self._flow_log_pollers.pop(instance_id, None)
         if poller is not None:
@@ -1616,7 +1754,7 @@ class DockerVmManager:
             # rebuild_mapping_from_docker on next restart.
             if info:
                 # vm_manager doesn't currently store account/region on
-                # Ec2ContainerInfo — iterate the mapping and clear any
+                # Ec2ContainerInfo - iterate the mapping and clear any
                 # entry with this instance_id. Fast enough for the dict
                 # sizes we deal with (bounded by live instances).
                 from localemu.services.ec2.docker.sg_reapply import _sg_mapping, _sg_mapping_lock
@@ -1696,7 +1834,7 @@ class DockerVmManager:
 
     def cleanup_all(self) -> None:
         """Stop and remove all EC2 containers. Called on LocalEmu shutdown
-        when persistence is OFF. Destructive — containers and their
+        when persistence is OFF. Destructive - containers and their
         writable layers are wiped. See ``stop_all`` for the persistence path.
         """
         LOG.info("Cleaning up EC2 Docker containers...")
@@ -1718,8 +1856,7 @@ class DockerVmManager:
         Called on LocalEmu shutdown when ``PERSISTENCE=1``. Containers
         remain registered with Docker, carry their writable layer intact,
         and will be resumed by ``Ec2Provider.on_after_state_load`` on the
-        next boot. We intentionally keep ``self._instances`` populated —
-        if shutdown is interrupted the in-memory state stays consistent,
+        next boot. We intentionally keep ``self._instances`` populated - if shutdown is interrupted the in-memory state stays consistent,
         and on cold-start the new ``DockerVmManager.__init__`` rebuilds
         the dict from Docker labels anyway.
         """
@@ -1777,8 +1914,7 @@ class DockerVmManager:
         container and (when moto says the instance was running) ``docker start``
         it.
 
-        The restore is now a full data-plane reconciliation —
-        the iptables chains from ``apply_sg_to_container`` do NOT survive
+        The restore is now a full data-plane reconciliation - the iptables chains from ``apply_sg_to_container`` do NOT survive
         a Docker daemon restart, so leaving them off means containers
         boot with whatever default policy Docker has (typically ACCEPT)
         while moto keeps reporting the SGs as enforced. We re-apply:
@@ -1794,7 +1930,7 @@ class DockerVmManager:
         labels were added) won't carry those keys; for them we skip the
         steps that depend on the missing labels.
         """
-        # Port — SSH is the one port LocalEmu publishes for EC2.
+        # Port - SSH is the one port LocalEmu publishes for EC2.
         port_bindings = (inspect.get("HostConfig") or {}).get("PortBindings") or {}
         ssh_binding = port_bindings.get("22/tcp") or []
         ssh_port = None
@@ -1804,7 +1940,7 @@ class DockerVmManager:
             except (TypeError, ValueError):
                 ssh_port = None
 
-        # Private IP — first VPC network wins; fall back to default bridge.
+        # Private IP - first VPC network wins; fall back to default bridge.
         # Explicitly ignore ``localemu-pubport-br``: its 172.31.255.x
         # address is an internal LocalEmu port-publishing artefact, not
         # a valid AWS PrivateIpAddress.
@@ -1820,7 +1956,7 @@ class DockerVmManager:
         if not private_ip:
             fallback = (inspect.get("NetworkSettings") or {}).get("IPAddress") or None
             # Only use the top-level IPAddress if it's not the pubport
-            # bridge IP — otherwise we'd return a 172.31.255.x address
+            # bridge IP - otherwise we'd return a 172.31.255.x address
             # that isn't routable from anywhere meaningful.
             pubport_info = networks.get(PUBPORT_BRIDGE_NAME) or {}
             pubport_ip = pubport_info.get("IPAddress") or ""
@@ -1888,7 +2024,7 @@ class DockerVmManager:
                 )
                 if not apply_sg_to_container(container_name, sg_ids, account_id, region):
                     LOG.warning(
-                        "Restore %s: SG iptables re-apply failed — "
+                        "Restore %s: SG iptables re-apply failed - "
                         "container is in fail-closed DROP state",
                         instance_id,
                     )

@@ -2,6 +2,9 @@ import logging
 
 from moto.ec2 import models as ec2_models
 from moto.ec2.models.vpcs import VPCEndPoint
+from moto.ec2.responses.elastic_block_store import (
+    ElasticBlockStore as ElasticBlockStoreResponse,
+)
 from moto.utilities.id_generator import Tags
 
 from localemu.services.ec2.exceptions import (
@@ -273,3 +276,75 @@ def apply_patches():
                 )
 
         return result
+
+    @patch(target=ElasticBlockStoreResponse.describe_snapshots, pass_target=True)
+    def ec2_describe_snapshots_owner_filter(
+        fn, self: ElasticBlockStoreResponse, *args, **kwargs
+    ) -> str:
+        """Honour ``OwnerIds`` on DescribeSnapshots (moto silently drops it).
+
+        Every seeded AMI in the moto EC2 catalog auto-creates a backing
+        snapshot with the AMI's own ``owner_id`` (591542846629, 137112412989
+        "amazon", 099720109477 Canonical, ...). moto's response handler
+        never reads the ``Owner.N`` request field, so a caller like
+        ``describe_snapshots(OwnerIds=['000000000000'])`` gets the whole
+        1177-row seeded catalog. Inventory tools (AWS-Config-style
+        scanners, custom inventory scripts) report thousands of phantom
+        snapshots for a fresh account.
+
+        Real AWS filters by owner : ``OwnerIds=['self']`` resolves to the
+        caller account; ``OwnerIds=['amazon']`` matches AWS-seeded AMIs
+        via their ``owner_alias``; a raw account id matches ``owner_id``.
+        The moto-side ``describe_images`` (Owners=[...]) already applies
+        this contract for images; snapshots did not. This patch closes
+        the asymmetry.
+
+        Behaviour when ``OwnerIds`` is absent : unchanged (returns the
+        full catalog exactly as before). ``SnapshotIds`` and
+        ``RestorableByUserIds`` code paths are unaffected.
+        """
+        owner_ids = self._get_param("OwnerIds", [])
+        if not owner_ids:
+            # No owner filter requested; delegate untouched.
+            return fn(self, *args, **kwargs)
+
+        # Resolve "self" to the caller's account id ; keep raw ids and
+        # named aliases ("amazon", "aws-marketplace") for AMI-alias matching.
+        caller_account = self.current_account
+        resolved = set()
+        for oid in owner_ids:
+            if oid == "self":
+                resolved.add(caller_account)
+            else:
+                resolved.add(oid)
+
+        # Call the moto backend directly the same way the un-patched
+        # handler does, then apply the owner filter, then render.
+        from moto.ec2.responses.elastic_block_store import (
+            DESCRIBE_SNAPSHOTS_RESPONSE,
+        )
+
+        filters = self._filters_from_querystring()
+        snapshot_ids = self._get_param("SnapshotIds", [])
+        snapshots = self.ec2_backend.describe_snapshots(
+            snapshot_ids=snapshot_ids, filters=filters,
+        )
+
+        ami_backend = getattr(self.ec2_backend, "amis", {}) or {}
+
+        def _keep(snap) -> bool:
+            if snap.owner_id in resolved:
+                return True
+            # Aliases like "amazon" and "aws-marketplace" are not stored
+            # on the snapshot directly. The snapshot carries ``from_ami``;
+            # the AMI carries ``owner_alias``. Resolve through that link.
+            ami_id = getattr(snap, "from_ami", None)
+            if ami_id and ami_id in ami_backend:
+                if ami_backend[ami_id].owner_alias in resolved:
+                    return True
+            return False
+
+        snapshots = [s for s in snapshots if _keep(s)]
+
+        template = self.response_template(DESCRIBE_SNAPSHOTS_RESPONSE)
+        return template.render(snapshots=snapshots)

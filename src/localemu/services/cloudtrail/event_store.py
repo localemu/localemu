@@ -3,7 +3,7 @@ Shared CloudTrail event store for LocalEmu.
 
 Records every API request flowing through the gateway with enriched
 CloudTrail-compatible fields.  Both the dashboard and the CloudTrail
-``LookupEvents`` API read from the same store — single source of truth.
+``LookupEvents`` API read from the same store - single source of truth.
 
 Thread-safe, time-indexed, supports attribute filtering and pagination.
 """
@@ -61,7 +61,54 @@ def _is_read_only(operation_name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Resource extraction — service-aware
+# Management vs. Data event classification.
+#
+# Real AWS CloudTrail splits API activity into "Management" events (control
+# plane: CreateQueue, CreateBucket, ...) and "Data" events (high-frequency
+# resource-level operations: S3 object gets/puts, SQS message send/receive,
+# DynamoDB item CRUD, Lambda invokes, SNS publishes, ...). Data events are
+# NOT delivered to the account's default EventBridge bus by CloudTrail's
+# default (free) integration - only Management events are. Without this
+# distinction, high-frequency data-plane polling (e.g. SQS long-polling
+# ReceiveMessage) would flood any catch-all EventBridge rule/archive on the
+# default bus, which never happens on real AWS.
+# ---------------------------------------------------------------------------
+_DATA_EVENT_OPERATIONS: dict[str, frozenset[str]] = {
+    "s3": frozenset({
+        "GetObject", "PutObject", "DeleteObject", "DeleteObjects", "CopyObject",
+        "HeadObject", "RestoreObject", "UploadPart", "UploadPartCopy",
+        "CompleteMultipartUpload", "CreateMultipartUpload", "AbortMultipartUpload",
+        "GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging",
+        "GetObjectAcl", "PutObjectAcl", "SelectObjectContent",
+    }),
+    "sqs": frozenset({
+        "SendMessage", "SendMessageBatch", "ReceiveMessage",
+        "DeleteMessage", "DeleteMessageBatch",
+        "ChangeMessageVisibility", "ChangeMessageVisibilityBatch",
+        "PurgeQueue",
+    }),
+    "sns": frozenset({"Publish", "PublishBatch"}),
+    "lambda": frozenset({"Invoke", "InvokeAsync", "InvokeWithResponseStream"}),
+    "dynamodb": frozenset({
+        "PutItem", "GetItem", "UpdateItem", "DeleteItem",
+        "BatchGetItem", "BatchWriteItem", "Query", "Scan",
+        "TransactGetItems", "TransactWriteItems", "ExecuteStatement",
+        "BatchExecuteStatement", "ExecuteTransaction",
+    }),
+}
+
+
+def _classify_event_category(service_name: str, operation_name: str) -> str:
+    """Return the CloudTrail event category ("Management" or "Data") for an
+    API call, matching AWS's published data-event operation lists."""
+    data_ops = _DATA_EVENT_OPERATIONS.get((service_name or "").lower())
+    if data_ops and operation_name in data_ops:
+        return "Data"
+    return "Management"
+
+
+# ---------------------------------------------------------------------------
+# Resource extraction - service-aware
 # ---------------------------------------------------------------------------
 _SERVICE_RESOURCE_TYPE = {
     "s3": "AWS::S3::Bucket",
@@ -83,7 +130,7 @@ _SERVICE_RESOURCE_TYPE = {
     "cloudformation": "AWS::CloudFormation::Stack",
 }
 
-# Map specific request keys to their resource type — this allows the same
+# Map specific request keys to their resource type - this allows the same
 # service (e.g. IAM) to report the correct resource type based on which key
 # was matched, instead of always falling back to the service-level default.
 _KEY_TO_RESOURCE_TYPE = {
@@ -105,7 +152,7 @@ _KEY_TO_RESOURCE_TYPE = {
 }
 
 # Keys to look for in the parsed service_request to extract the resource name.
-# Order matters — first match wins.
+# Order matters - first match wins.
 _RESOURCE_NAME_KEYS = (
     "Bucket", "BucketName",
     "TableName",
@@ -334,7 +381,7 @@ class CloudTrailEventStore:
         # crossing the threshold and triggering concurrent save_to_disk calls.
         should_save = False
         with self._lock:
-            # If deque is full, the oldest event will be evicted — clean its index entry
+            # If deque is full, the oldest event will be evicted - clean its index entry
             if len(self._events) == self._events.maxlen:
                 oldest = self._events[-1]
                 self._by_request_id.pop(oldest.request_id, None)
@@ -386,7 +433,7 @@ class CloudTrailEventStore:
         stable across concurrent inserts.
 
         Compliance (B6/B7/B9):
-          * At most ONE ``LookupAttribute`` — raises
+          * At most ONE ``LookupAttribute`` - raises
             ``InvalidLookupAttributesError`` on more.
           * ``event_category`` must be ``Management``/``Data``/``Insight``
             when supplied; raises ``InvalidEventCategoryError`` otherwise.
@@ -435,7 +482,7 @@ class CloudTrailEventStore:
                 if filter_fn:
                     snapshot = [e for e in snapshot if filter_fn(e, val)]
 
-        # B7: event-id-based pagination — raise on a token we can't resolve
+        # B7: event-id-based pagination - raise on a token we can't resolve
         # so paginating clients get a clear error instead of duplicate pages
         # or an infinite restart loop.
         offset = 0
@@ -453,7 +500,7 @@ class CloudTrailEventStore:
 
         # E4: clamp MaxResults server-side. Raw HTTP clients can pass 0 or
         # negative values; boto3 clients default to 50. AWS documents the
-        # valid range as 1..50 — enforce it here regardless of caller.
+        # valid range as 1..50 - enforce it here regardless of caller.
         try:
             mr_int = int(max_results) if max_results is not None else 50
         except (TypeError, ValueError):
@@ -477,7 +524,7 @@ class CloudTrailEventStore:
         """Return the most recent events (for dashboard).
 
         E4: clamp ``limit`` to a sane lower bound. 0, negative, or non-int
-        values are raised to 1 — islice treats negative slice sizes as an
+        values are raised to 1 - islice treats negative slice sizes as an
         error and 0 as empty, neither of which is the documented intent.
         The upper bound is not capped: dashboard and S3 log-delivery callers
         legitimately request more than 50 events at a time.
@@ -497,7 +544,7 @@ class CloudTrailEventStore:
             self._by_request_id.clear()
 
     # ------------------------------------------------------------------
-    # QUALITY-03: Persistence — save/load events from disk
+    # QUALITY-03: Persistence - save/load events from disk
     # ------------------------------------------------------------------
     def _persistence_path(self) -> str | None:
         """Return the file path for persisted events, or None if persistence is disabled."""
@@ -516,13 +563,13 @@ class CloudTrailEventStore:
     def save_to_disk(self) -> None:
         """Persist events to disk if PERSISTENCE is enabled.
 
-        E1: writes are atomic — the JSON payload is written to ``<path>.tmp``,
+        E1: writes are atomic - the JSON payload is written to ``<path>.tmp``,
         ``fsync``'d, then ``os.replace``'d over the final path. A crash mid-
         write leaves either the old file or the new file fully intact, never
         a partial truncation that ``load_from_disk`` would silently drop.
 
-        E5: disk I/O is serialized through ``_disk_lock`` — independent of
-        the in-memory ``_lock`` — so overlapping saves (e.g. two record()
+        E5: disk I/O is serialized through ``_disk_lock`` - independent of
+        the in-memory ``_lock`` - so overlapping saves (e.g. two record()
         calls both crossing the roll-over threshold) cannot race over the
         same ``.tmp`` file. The snapshot is taken under ``_lock`` and released
         before the I/O proceeds, so record() is never blocked by disk work.
@@ -788,20 +835,26 @@ def create_event_from_context(
     service_request: dict | None = None,
     response_elements: dict | None = None,
     http_status_code: int = 0,
-    event_category: str = "Management",
+    event_category: str | None = None,
 ) -> CloudTrailEvent:
     """Create a CloudTrailEvent from handler chain context fields.
 
     B11: the previous ``username or access_key_id or "localemu"`` fallback
-    was dead code — ``access_key_id`` is populated on every recorded call
+    was dead code - ``access_key_id`` is populated on every recorded call
     via the ``Authorization`` header extraction in the dashboard hook, so
     the ``"localemu"`` branch never ran. Simplified to the two real values.
     The only way ``username`` is empty is when the recording hook passes
-    empty strings for both the caller-supplied username AND access key —
-    in that case we store the literal ``"anonymous"`` so that downstream
+    empty strings for both the caller-supplied username AND access key - in that case we store the literal ``"anonymous"`` so that downstream
     JSON (``userIdentity.userName``, ``arn``) stays well-formed rather
     than embedding empty strings.
+
+    ``event_category`` defaults to ``None`` so that callers which don't know
+    or care about the distinction get it classified automatically via
+    ``_classify_event_category`` (Management vs. Data), instead of every
+    call silently defaulting to "Management" regardless of operation.
     """
+    if event_category is None:
+        event_category = _classify_event_category(service_name, operation_name)
     return CloudTrailEvent(
         event_id=str(uuid.uuid4()),
         event_time=datetime.now(timezone.utc),

@@ -114,7 +114,7 @@ def _refresh_iam_credentials_if_needed(metadata: dict) -> dict | None:
     cached = metadata.get("iam_credentials")
     iam_role_name = metadata.get("iam_role_name")
     if not iam_role_name:
-        # No role attached — cached must already be None (per the
+        # No role attached - cached must already be None (per the
         # vm_manager mint path); honor 404 contract.
         return cached
     if cached:
@@ -142,25 +142,30 @@ def _refresh_iam_credentials_if_needed(metadata: dict) -> dict | None:
         return cached
 
 
-def _lookup_public_ipv4(metadata: dict) -> str:
+def _lookup_public_ipv4(metadata: dict) -> str | None:
     """Resolve the instance's current public-ipv4 at request time.
 
-    Returns the associated Elastic IP (live lookup against moto's EC2
-    state) if one is attached, otherwise "127.0.0.1" so the existing
-    SSH-via-host-port workflow keeps working. Reading moto on every
-    request is intentional: a user can ``associate-address`` AFTER
-    container boot and expect the next IMDS curl to reflect it
-    without needing to rebuild the metadata snapshot.
+    Resolution order :
+
+    1. Live EIP association from moto (a user can ``associate-address``
+       after the container boot and expect the next IMDS curl to see
+       it - reading moto per-request keeps that promise).
+    2. The container's IP on ``localemu-pubport-br`` (the auto-assigned
+       public IP for instances launched on a subnet with
+       ``MapPublicIpOnLaunch=true``).
+    3. ``None`` - real AWS returns 404 on ``public-ipv4`` when the
+       instance has no public IP ; we do the same by returning ``None``
+       and letting the route handler map it to 404.
     """
     instance_id = metadata.get("instance_id")
     account_id = metadata.get("account_id") or "000000000000"
     region = metadata.get("region") or "us-east-1"
     if not instance_id:
-        return "127.0.0.1"
+        return None
+    # 1. EIP association wins.
     try:
         import moto.backends as moto_backends
         backend = moto_backends.get_backend("ec2")[account_id][region]
-        # ElasticAddressBackend stores attachments under .addresses
         for addr in getattr(backend, "addresses", []):
             inst = getattr(addr, "instance", None)
             if inst is not None and getattr(inst, "id", None) == instance_id:
@@ -168,10 +173,40 @@ def _lookup_public_ipv4(metadata: dict) -> str:
                     return addr.public_ip
     except Exception:
         LOG.debug(
-            "imds: EIP lookup failed for %s; falling back to 127.0.0.1",
+            "imds: EIP lookup failed for %s", instance_id, exc_info=True,
+        )
+    # 2. Container's pubport-bridge IP.
+    try:
+        from localemu.services.ec2.docker.vpc_network import (
+            PUBPORT_BRIDGE_NAME,
+        )
+        from localemu.utils.docker_utils import DOCKER_CLIENT
+        ip = DOCKER_CLIENT.get_container_ipv4_for_network(
+            container_name_or_id=f"localemu-ec2-{instance_id}",
+            container_network=PUBPORT_BRIDGE_NAME,
+        )
+        if ip:
+            return ip
+    except Exception:
+        LOG.debug(
+            "imds: pubport lookup failed for %s",
             instance_id, exc_info=True,
         )
-    return "127.0.0.1"
+    return None
+
+
+def _lookup_public_hostname(metadata: dict) -> str | None:
+    """AWS-shaped public hostname derived from the public IPv4.
+
+    Returns ``ec2-<ip-dashed>.compute-1.amazonaws.com`` when a public
+    IP is available (via EIP or pubport bridge), else ``None`` (the
+    route handler maps that to 404, matching real IMDS on private-only
+    instances).
+    """
+    ip = _lookup_public_ipv4(metadata)
+    if not ip:
+        return None
+    return f"ec2-{ip.replace('.', '-')}.compute-1.amazonaws.com"
 
 
 # ---------------------------------------------------------------------------
@@ -188,10 +223,10 @@ class ImdsRequestHandler(BaseHTTPRequestHandler):
         server: ImdsServer = self.server  # type: ignore[assignment]
 
         # Identification priority:
-        # 1. ``X-Localemu-Instance-Id`` — direct, from per-instance proxy .
-        # 2. ``X-Localemu-Source-Ip`` — VPC IP forwarded by the per-VPC
+        # 1. ``X-Localemu-Instance-Id`` - direct, from per-instance proxy .
+        # 2. ``X-Localemu-Source-Ip`` - VPC IP forwarded by the per-VPC
         # IMDS sidecar so we can map back to instance via _ip_to_instance.
-        # 3. Source IP of the connection — works only when the caller
+        # 3. Source IP of the connection - works only when the caller
         # is reachable to us directly (rare with Docker Desktop NAT).
         stamped_id = self.headers.get(STAMP_HEADER)
         if stamped_id and stamped_id in server.metadata_store:
@@ -278,7 +313,13 @@ class ImdsRequestHandler(BaseHTTPRequestHandler):
             "/latest/meta-data/public-ipv4": _lookup_public_ipv4(metadata),
             "/latest/meta-data/hostname": metadata.get("hostname"),
             "/latest/meta-data/local-hostname": metadata.get("hostname"),
-            "/latest/meta-data/public-hostname": "localhost",
+            # AWS-shaped public hostname derived from the pubport IP.
+            # Falls back to ``None`` (404) when there is no public IP,
+            # matching real AWS's IMDS behaviour for private-only
+            # instances.
+            "/latest/meta-data/public-hostname": _lookup_public_hostname(
+                metadata,
+            ),
             "/latest/meta-data/mac": metadata.get("mac", "02:42:ac:11:00:02"),
             "/latest/meta-data/placement/availability-zone": metadata.get("az"),
             "/latest/meta-data/placement/region": metadata.get("region"),
@@ -344,7 +385,7 @@ class ImdsRequestHandler(BaseHTTPRequestHandler):
         Otherwise resolves the live credentials via
         :func:`_refresh_iam_credentials_if_needed`, which re-mints
         through STS when the cached set is within 15 minutes of
-        expiry. This matches real-AWS IMDS behavior — SDKs poll IMDS
+        expiry. This matches real-AWS IMDS behavior - SDKs poll IMDS
         and expect rotation well before the Expiration timestamp,
         otherwise long-lived workloads inside the instance hit
         ExpiredToken once the cached 6-hour session lapses.
@@ -535,7 +576,7 @@ class ImdsServer:
         main IMDS handler can identify the caller by header, even when
         source-IP identification is unreliable (Docker Desktop's
         gateway NAT). Calling this multiple times for the same
-        instance_id is idempotent — the same port is returned.
+        instance_id is idempotent - the same port is returned.
 
         When ``requested_port`` is non-zero, the proxy tries to bind
         to that specific port first (persistence path: on restore we
@@ -561,7 +602,7 @@ class ImdsServer:
             # Second-check under lock to avoid a race.
             existing = self._proxies.get(instance_id)
             if existing is not None:
-                # Another thread already allocated — throw this one away.
+                # Another thread already allocated - throw this one away.
                 proxy.stop()
                 return existing.port
             self._proxies[instance_id] = proxy
@@ -675,7 +716,7 @@ class PerInstanceImdsPortProxy:
             if self._requested_port:
                 LOG.warning(
                     "Per-instance IMDS proxy for %s: requested port %d unavailable (%s); "
-                    "falling back to a random port — the container's baked-in "
+                    "falling back to a random port - the container's baked-in "
                     "AWS_EC2_METADATA_SERVICE_ENDPOINT will not resolve until the "
                     "instance is re-created",
                     self.instance_id, self._requested_port, exc,

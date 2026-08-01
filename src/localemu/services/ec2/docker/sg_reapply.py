@@ -14,11 +14,11 @@ plane:
   - ``rebuild_mapping_from_docker`` reconstructs the in-memory mapping
     after LocalEmu restart by walking container labels
     (``localemu.sg-ids``, ``localemu.account-id``, ``localemu.region``).
-  - ``reapply_sg_for_sg_id`` is the hook for authorize/revoke — it
+  - ``reapply_sg_for_sg_id`` is the hook for authorize/revoke - it
     walks every instance that has that SG attached and re-runs
     ``apply_sg_to_container``.
   - ``reapply_sg_for_instance`` is the hook for
-    ``ModifyInstanceAttribute`` — it records the new SG set and
+    ``ModifyInstanceAttribute`` - it records the new SG set and
     re-applies immediately.
 
 All failures are best-effort and logged; we never raise into the API
@@ -57,7 +57,7 @@ def record_instance_sgs(
 
 
 def forget_instance(account_id: str, region: str, instance_id: str) -> None:
-    """Drop an instance from the mapping — call at terminate_instance."""
+    """Drop an instance from the mapping - call at terminate_instance."""
     with _sg_mapping_lock:
         _sg_mapping.pop((account_id, region, instance_id), None)
 
@@ -132,7 +132,7 @@ def reapply_sg_for_sg_id(sg_id: str, account_id: str, region: str) -> int:
                 applied += 1
             else:
                 LOG.warning(
-                    "sg_reapply: instance %s SG re-apply returned False — "
+                    "sg_reapply: instance %s SG re-apply returned False - "
                     "container may be in fail-closed DROP state",
                     instance_id,
                 )
@@ -163,6 +163,89 @@ def reapply_sg_for_instance(
     except Exception:
         LOG.exception(
             "sg_reapply: unexpected error re-applying SG to %s after ModifyInstanceAttribute",
+            instance_id,
+        )
+        return False
+
+
+def resolve_union_sgs_for_instance(instance_id: str) -> list[str]:
+    """Union of SG ids across every ENI currently attached to ``instance_id``.
+
+    In real AWS, SGs are attached to ENIs, not to instances. The
+    effective network policy an application on the instance sees is
+    therefore the union of the policies programmed on every ENI it
+    routes through. LocalEmu enforces at the whole-instance
+    ``iptables`` level (``SG_IN`` / ``SG_OUT`` on ``INPUT`` /
+    ``OUTPUT``) so a single applied ruleset per instance is the
+    correct target ; that ruleset is the union of the ENIs' SGs.
+
+    Order-preserving : ENIs are visited in the order the
+    :class:`AddressIndex` records them (device index) and SGs within
+    each ENI are kept in their declared order. Duplicates dropped on
+    first sight. Stable output → stable iptables script → no needless
+    ``docker exec`` when a modify collapses to a no-op.
+    """
+    try:
+        from localemu.services.ec2.docker.address_index import (
+            get_address_index,
+        )
+        enis = get_address_index().get_enis_for_instance(instance_id)
+    except Exception:
+        LOG.debug(
+            "resolve_union_sgs_for_instance: index lookup failed for %s",
+            instance_id, exc_info=True,
+        )
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for eni in enis:
+        for sg in eni.sg_ids:
+            if sg and sg not in seen:
+                seen.add(sg)
+                ordered.append(sg)
+    return ordered
+
+
+def reapply_sgs_for_instance_after_eni_change(
+    instance_id: str, account_id: str, region: str,
+) -> bool:
+    """Recompute the union-of-SGs for ``instance_id`` and re-apply iptables.
+
+    Hook for the ENI-level control-plane operations that can change
+    an instance's effective SG set :
+
+    * ``ModifyNetworkInterfaceAttribute --groups=...`` on an ENI
+      attached to a running instance,
+    * ``AttachNetworkInterface`` (a fresh ENI arrives with its own
+      SGs - union grows),
+    * ``DetachNetworkInterface`` (a removed ENI takes its SGs with
+      it - union shrinks).
+
+    The earlier code only wired ``ModifyInstanceAttribute`` (instance
+    ↔ SG) ; this closes the ENI ↔ SG path that terraform / cdk /
+    console changes actually take.
+
+    Best-effort : returns ``False`` on any container/iptables error
+    but never raises. The API handler must succeed even if the
+    data-plane apply lags (matches the ``reapply_sg_for_sg_id``
+    contract on the authorize/revoke path).
+    """
+    sg_ids = resolve_union_sgs_for_instance(instance_id)
+    record_instance_sgs(account_id, region, instance_id, sg_ids)
+    try:
+        ok = apply_sg_to_container(
+            _container_name(instance_id), sg_ids, account_id, region,
+            instance_id=instance_id,
+        )
+        LOG.debug(
+            "sg_reapply: instance=%s union_sgs=%s applied=%s",
+            instance_id, sg_ids, ok,
+        )
+        return ok
+    except Exception:
+        LOG.exception(
+            "sg_reapply: unexpected error re-applying union SGs to %s "
+            "after ENI attribute change",
             instance_id,
         )
         return False

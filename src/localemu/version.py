@@ -7,5 +7,5 @@ __all__ = [
     "version_tuple",
 ]
 
-__version__ = version = "1.1.0"
-__version_tuple__ = version_tuple = (1, 1, 0)
+__version__ = version = "1.2.0"
+__version_tuple__ = version_tuple = (1, 2, 0)

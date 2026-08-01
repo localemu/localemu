@@ -178,7 +178,7 @@ def _refresh_eip_for_sg(context: "RequestContext", request: dict) -> None:
 
 def _reapply_nacl_for_nacl_id(context: "RequestContext") -> None:
     """Best-effort NACL re-apply on every subnet that's associated with
-    the given NACL. NEVER raises — the moto state change already
+    the given NACL. NEVER raises - the moto state change already
     succeeded, we just want the data plane to catch up."""
     try:
         nacl_id = context.request.values.get("NetworkAclId")
@@ -201,7 +201,7 @@ def _reapply_nacl_for_nacl_id(context: "RequestContext") -> None:
                 subnet_ids.append(sid)
 
         if not subnet_ids:
-            LOG.debug("NACL %s has no subnet associations — nothing to re-apply", nacl_id)
+            LOG.debug("NACL %s has no subnet associations - nothing to re-apply", nacl_id)
             return
 
         from localemu.services.ec2.docker.nacl_enforcer import (
@@ -232,7 +232,7 @@ def _register_subnet_with_allocator(subnet_payload: dict) -> None:
 
     The Docker bridge for the VPC may not exist yet (bridges are
     created lazily on first container launch). In that case we use
-    ``docker_cidr = aws_cidr`` as the optimistic assumption — if the
+    ``docker_cidr = aws_cidr`` as the optimistic assumption - if the
     bridge later lands on a fallback tier, ``vm_manager`` will detect
     the divergence and re-register with the corrected ``docker_cidr``.
     """
@@ -268,13 +268,13 @@ def _register_subnet_with_allocator(subnet_payload: dict) -> None:
     # the VPC bridge's CIDR. AWS guarantees that an ENI's primary IP
     # lies inside its subnet's CidrBlock. If we used the VPC bridge's
     # CIDR here, the allocator would hand out IPs anywhere in the VPC
-    # (e.g. 10.99.0.2 for an ENI in subnet 10.99.1.0/24) — which would
+    # (e.g. 10.99.0.2 for an ENI in subnet 10.99.1.0/24) - which would
     # violate the AWS contract and confuse every tool that reads
     # NetworkInterface.PrivateIpAddress and assumes it's in SubnetId's
     # CIDR.
     #
     # When the VPC bridge already exists and its docker_cidr differs
-    # from the VPC's AWS CIDR (the collision-fallback case — AWS
+    # from the VPC's AWS CIDR (the collision-fallback case - AWS
     # 10.86.0.0/16 might have landed on Docker 10.0.0.0/16), we shift
     # the subnet's network address by the same offset so the pool
     # actually lies inside the bridge's address space. Without this,
@@ -316,7 +316,7 @@ def _register_subnet_with_allocator(subnet_payload: dict) -> None:
     except SubnetCidrConflict:
         # Re-registration with different CIDRs is a programming bug
         # (the user can't change subnet CIDR via the AWS API). Log and
-        # move on — the existing pool is still usable.
+        # move on - the existing pool is still usable.
         LOG.warning(
             "subnet allocator: cidr conflict on re-register of %s",
             subnet_id, exc_info=True,
@@ -340,7 +340,7 @@ def _unregister_subnet_from_allocator(
     if not (config.LOCALEMU_VPC_IP_PINNING and subnet_id):
         return
     try:
-        # Look up the VPC for the subnet — moto's record is gone by now,
+        # Look up the VPC for the subnet - moto's record is gone by now,
         # so we walk the allocator's pools directly.
         from localemu.services.ec2.docker.subnet_allocator import (
             get_subnet_allocator,
@@ -368,7 +368,7 @@ def _reconcile_addressing_state() -> None:
       3. Run the reconciler to converge in-memory state against Docker
          reality (claim IPs Docker reports, drop orphans, log drift).
 
-    All failures are logged and never raise into the caller — the
+    All failures are logged and never raise into the caller - the
     reconciler is best-effort and the upper layers must not depend on
     it for correctness (they get correctness from the per-call hooks).
     """
@@ -421,7 +421,7 @@ def _reconcile_addressing_state() -> None:
                         # not the VPC bridge's CIDR (AWS contract: ENI
                         # IP must lie inside SubnetId's CidrBlock). When
                         # the VPC bridge fell back to a non-AWS CIDR,
-                        # shift the subnet's range to match — same logic
+                        # shift the subnet's range to match - same logic
                         # as ``_register_subnet_with_allocator``.
                         docker_cidr = aws_cidr
                         try:
@@ -454,8 +454,7 @@ def _reconcile_addressing_state() -> None:
                                 az=az,
                             )
                         except SubnetCidrConflict:
-                            # CIDR drift since the snapshot was written —
-                            # use the current docker_cidr as authoritative
+                            # CIDR drift since the snapshot was written - # use the current docker_cidr as authoritative
                             alloc.force_unregister_subnet(vpc_id, subnet_id)
                             alloc.register_subnet(
                                 vpc_id=vpc_id, subnet_id=subnet_id,
@@ -486,6 +485,46 @@ def _reconcile_addressing_state() -> None:
         )
 
 
+def _resolve_pubport_ip_for_instance(instance_id: str | None) -> str | None:
+    """Return the container's IP on ``localemu-pubport-br``, or ``None``.
+
+    Every EC2 container LocalEmu launches with a public IP is attached
+    to the shared ``localemu-pubport-br`` bridge (see
+    ``docker/vpc_network.py:79``, subnet ``172.31.255.0/24``) in
+    addition to its VPC bridge. That pubport IP is the truthful
+    "PublicIpAddress" answer : it is reachable from every other
+    container that has a public IP, and it is what
+    ``DescribeInstances`` should return instead of moto's fabricated
+    ``54.214.x.x``.
+
+    A ``None`` return means the container has no public-IP attachment
+    (private-only instance, ``MapPublicIpOnLaunch=false`` on the
+    subnet AND no EIP associated). Callers must then remove the
+    ``PublicIpAddress`` / ``PublicDnsName`` fields entirely - that is
+    what real AWS ships for such instances.
+    """
+    if not instance_id:
+        return None
+    try:
+        from localemu.services.ec2.docker.vpc_network import (
+            PUBPORT_BRIDGE_NAME,
+        )
+        from localemu.utils.docker_utils import DOCKER_CLIENT
+    except Exception:
+        return None
+    container_name = f"localemu-ec2-{instance_id}"
+    try:
+        ip = DOCKER_CLIENT.get_container_ipv4_for_network(
+            container_name_or_id=container_name,
+            container_network=PUBPORT_BRIDGE_NAME,
+        )
+    except Exception:
+        return None
+    # Empty-string counts as "not attached yet / attach failed" - treat
+    # the same as absent, per the caller contract.
+    return ip or None
+
+
 def _eni_real_enabled() -> bool:
     """The ENI orchestration is gated on both addressing pinning AND the
     ENI flag. Requiring both keeps rollback simple: turning off either
@@ -512,7 +551,7 @@ _ENI_FLAG_WARNED = False
 def _patch_moto_eni(eni_id: str, primary_ip: str, mac: str) -> None:
     """Overwrite the moto NetworkInterface's primary IP and MAC so that
     DescribeNetworkInterfaces reports the values LocalEmu actually
-    pinned. Pattern mirrors _patch_moto_instance_ip — tries the
+    pinned. Pattern mirrors _patch_moto_instance_ip - tries the
     attribute names that have shifted across moto versions, swallows
     individual failures.
     """
@@ -582,7 +621,7 @@ def _resolve_instance_for_eni(
     Reads moto's ENI store directly so the resolver is independent of
     the LocalEmu address-index cache (which may not yet have observed
     a freshly-attached ENI). When the ENI isn't found or has no
-    attachment, returns ``None`` — the caller skips the data-plane
+    attachment, returns ``None`` - the caller skips the data-plane
     apply with no error.
     """
     try:
@@ -611,8 +650,8 @@ def _resolve_primary_eni_for_instance(
     unknown, has no attached primary ENI, or moto's store is in a shape
     we don't recognize.
 
-    Walks ``ec2_backend.enis`` directly — same store the reverse
-    helper above reads — so the resolver is independent of the
+    Walks ``ec2_backend.enis`` directly - same store the reverse
+    helper above reads - so the resolver is independent of the
     LocalEmu address-index cache (which may not yet have observed a
     freshly-attached ENI). One pass, no copies, mutation on the
     returned NIC is safe.
@@ -651,7 +690,7 @@ def _sync_sdc_to_primary_eni(
         feeds the ``DescribeNetworkInterfaces`` enrichment.
 
     AWS treats the instance-level bit as a convenience view of the
-    primary ENI's bit — without this mirror, the three storage cells
+    primary ENI's bit - without this mirror, the three storage cells
     drift, and any tool that reads NIC-level SourceDestCheck (the AWS
     console does) sees the stale value.
 
@@ -771,7 +810,7 @@ def _resolved_user_data_from_moto(
     Reading this AFTER ``call_moto`` for ``RunInstances`` gives us the
     **resolved** user-data: when the request used ``LaunchTemplate``,
     moto's ``add_instances`` merges the template's ``UserData`` into
-    the new instance (see moto ec2/models/instances.py:780 — ``if
+    the new instance (see moto ec2/models/instances.py:780 - ``if
     user_data is None and (template_user_data := tmpl.get("UserData"))``).
     Reading the raw request parameter alone would miss the template
     path entirely and the boot-time user-data executor would silently
@@ -784,8 +823,7 @@ def _resolved_user_data_from_moto(
             for moto_instance in getattr(reservation, "instances", []) or []:
                 if getattr(moto_instance, "id", None) == instance_id:
                     ud = getattr(moto_instance, "user_data", None)
-                    # moto wraps the field in ``Base64EncodedString`` —
-                    # a str subclass that breaks downstream equality
+                    # moto wraps the field in ``Base64EncodedString`` - # a str subclass that breaks downstream equality
                     # checks and base64 decoding against bare ``bytes``.
                     # Cast to a plain ``str`` so the executor sees the
                     # same shape it gets from the raw request param.
@@ -818,7 +856,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         apply_patches()
         # Register the addressing persistence save hook. Gated internally
         # on PERSISTENCE; idempotent. Safe to call even when
-        # LOCALEMU_VPC_IP_PINNING=0 — the save handler will write empty
+        # LOCALEMU_VPC_IP_PINNING=0 - the save handler will write empty
         # state files in that case, which load cleanly on next start.
         try:
             from localemu.services.ec2.docker.addressing_persistence import (
@@ -848,8 +886,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         # the box. Explicit opt-out via EC2_VM_MANAGER=none keeps the
         # historical state-only path for CI environments that don't
         # have access to the Docker daemon. If the default is in effect
-        # but Docker isn't available, fall back to state-only silently —
-        # the user didn't ask for Docker, so we shouldn't warn about it.
+        # but Docker isn't available, fall back to state-only silently - # the user didn't ask for Docker, so we shouldn't warn about it.
         vm_mode = os.environ.get("EC2_VM_MANAGER", "docker").lower()
         explicit_docker = os.environ.get("EC2_VM_MANAGER", "").lower() == "docker"
         if vm_mode == "docker":
@@ -872,7 +909,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             except Exception as e:
                 LOG.warning("Failed to initialize EC2 Docker backend: %s", e)
 
-        # Clean up orphaned Docker resources from previous crashes — but
+        # Clean up orphaned Docker resources from previous crashes - but
         # NOT under persistence. When ``PERSISTENCE=1`` the leftover
         # ``localemu-ec2-*`` containers and ``localemu-vpc-*`` networks
         # are exactly what ``on_after_state_load`` is about to resume.
@@ -917,7 +954,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             # Remove orphaned containers (EC2, NAT, VPC endpoints, IMDS
             # sidecars). The IMDS prefix matters: each VPC's sidecar is
             # the endpoint that pins the VPC bridge against ``docker
-            # network rm`` below — leaving sidecars behind silently
+            # network rm`` below - leaving sidecars behind silently
             # defeats the entire orphan-network cleanup loop.
             for prefix in [
                 "localemu-ec2-", "localemu-nat-", "localemu-vpce-",
@@ -1061,7 +1098,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         each instance's labeled container on the host, and resumes it via
         ``DockerVmManager.restore_instance``. Instances whose container
         no longer exists are logged as data-loss and left in whatever
-        state moto holds — we do NOT pretend a missing container is fine.
+        state moto holds - we do NOT pretend a missing container is fine.
 
         When ``EC2_VM_MANAGER`` is not ``docker`` there's nothing to
         reconcile; moto state alone answers every DescribeInstances call.
@@ -1160,7 +1197,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         orphaned = len(discovered)
         for stale_id in discovered:
             LOG.warning(
-                "Orphan EC2 container %s has no moto record — leaving alone",
+                "Orphan EC2 container %s has no moto record - leaving alone",
                 stale_id,
             )
         LOG.info(
@@ -1169,7 +1206,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         )
 
     # ------------------------------------------------------------------
-    # VPC ops — create/delete Docker networks for real isolation
+    # VPC ops - create/delete Docker networks for real isolation
     # ------------------------------------------------------------------
 
     @handler("CreateVpc", expand=False)
@@ -1205,14 +1242,14 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         return result
 
     # ------------------------------------------------------------------
-    # Internet Gateway — toggle VPC network between internal and public
+    # Internet Gateway - toggle VPC network between internal and public
     # ------------------------------------------------------------------
 
     @handler("AttachInternetGateway", expand=False)
     def attach_internet_gateway(self, context: RequestContext, request: dict) -> dict:
         vpc_id = context.request.values.get("VpcId", "")
 
-        # AWS enforces max 1 IGW per VPC — Moto doesn't check this
+        # AWS enforces max 1 IGW per VPC - Moto doesn't check this
         if vpc_id:
             try:
                 backend = ec2_backends[context.account_id][context.region]
@@ -1272,7 +1309,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         return result
 
     # ------------------------------------------------------------------
-    # VPC Peering — connect/disconnect containers across VPCs
+    # VPC Peering - connect/disconnect containers across VPCs
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -1435,8 +1472,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                         "active/pending pcx %s for pair (%s, %s)",
                         pcx.id, vpc_id, peer_vpc,
                     )
-                    # Build a response that contains the existing pcx —
-                    # call_moto would create a NEW one, which is exactly
+                    # Build a response that contains the existing pcx - # call_moto would create a NEW one, which is exactly
                     # what we're preventing.
                     return {
                         "VpcPeeringConnection": self._serialize_existing_pcx(
@@ -1444,7 +1480,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                         ),
                     }
 
-        # Overlap check — same account + same region only (real AWS
+        # Overlap check - same account + same region only (real AWS
         # permits overlap across account/region with operator warning).
         if req_backend is not None and acc_backend is not None \
                 and peer_owner == context.account_id \
@@ -1581,7 +1617,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         return result
 
     # ------------------------------------------------------------------
-    # NAT Gateway — Docker container bridging private to internet
+    # NAT Gateway - Docker container bridging private to internet
     # ------------------------------------------------------------------
 
     @handler("CreateNatGateway", expand=False)
@@ -1622,7 +1658,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         return result
 
     # ------------------------------------------------------------------
-    # VPC Endpoints — proxy container for private network access
+    # VPC Endpoints - proxy container for private network access
     # ------------------------------------------------------------------
 
     @handler("CreateVpcEndpoint", expand=False)
@@ -1633,8 +1669,12 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         endpoint_id = endpoint.get("VpcEndpointId")
         vpc_id = endpoint.get("VpcId")
         service_name = endpoint.get("ServiceName", "")
+        # AWS only assigns DNS entries (and a reachable ENI/IP) to Interface (and
+        # GatewayLoadBalancer) endpoints. Gateway endpoints route via a prefix-list
+        # route-table entry and never have a DnsEntries value.
+        endpoint_type = (endpoint.get("VpcEndpointType") or "gateway").lower()
 
-        if endpoint_id and vpc_id:
+        if endpoint_id and vpc_id and endpoint_type == "interface":
             try:
                 from localemu.services.ec2.docker.vpc_endpoint import get_vpc_endpoint_manager
                 from localemu.services.ec2.docker.vpc_network import get_vpc_network_manager
@@ -1724,7 +1764,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         return result
 
     # ------------------------------------------------------------------
-    # EIP data plane handlers — make EIPs actually route to containers.
+    # EIP data plane handlers - make EIPs actually route to containers.
     # Closes the "a user can run nginx in EC2 but can't reach it from
     # their host machine" foundation gap.
     # ------------------------------------------------------------------
@@ -1762,7 +1802,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
 
         # Resolve container_name + SGs from the live vm manager.
         # v2 data plane uses ``docker exec`` into the container, so we
-        # don't need a bridge IP — just the container name.
+        # don't need a bridge IP - just the container name.
         try:
             from localemu.services.ec2.docker.vm_manager import (
                 get_active_vm_manager,
@@ -1898,22 +1938,58 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         if self._vm_manager:
             for reservation in result.get("Reservations", []):
                 for inst in reservation.get("Instances", []):
-                    info = self._vm_manager.get_instance_info(inst.get("InstanceId"))
-                    if info and info.ssh_port:
-                        inst.setdefault("Tags", []).append(
-                            {"Key": "localemu:ssh-port", "Value": str(info.ssh_port)}
-                        )
-                        # Only fall back to the 127.0.0.1 + host-port story
-                        # when no Elastic IP has been associated. With an
-                        # EIP attached, moto's response already carries the
-                        # real public IP on the primary ENI; clobbering it
-                        # would hide the user's association from
-                        # DescribeInstances and break the
-                        # public-ip-in-IMDS contract.
-                        if not inst.get("PublicIpAddress"):
-                            inst["PublicDnsName"] = "localhost"
-                            inst["PublicIpAddress"] = "127.0.0.1"
+                    self._surface_localemu_public_ip(inst)
         return result
+
+    @staticmethod
+    def _surface_localemu_public_ip(inst: dict) -> None:
+        """Rewrite ``PublicIpAddress`` / ``PublicDnsName`` on a moto
+        instance record so they name a truthful, in-LocalEmu-reachable
+        address instead of moto's random ``54.214.x.x`` fabrication.
+
+        LocalEmu topology (see ``vpc_network.py:79`` +
+        ``docker/base_image.py``) :
+
+        * Every container with a "public IP" is attached to the shared
+          ``localemu-pubport-br`` Docker network (subnet
+          ``172.31.255.0/24``). That IP is what other instances on that
+          bridge reach the container at.
+        * moto separately fabricates a random ``54.214.x.x`` address in
+          ``random_public_ip`` (see ``moto/ec2/utils.py``). That IP is
+          unreachable from ANY container, from the host, from anywhere.
+          Passing it to a user who tried ``curl`` or ``ssh`` produced
+          the ENGIE-demo silent-timeout failure.
+
+        New contract :
+
+        * If the container has an address on ``localemu-pubport-br`` →
+          surface that as ``PublicIpAddress`` + AWS-shaped
+          ``PublicDnsName``. Reachable from every other public-attached
+          container (matches the AWS "Internet plane").
+        * If no such address (private-only instance) → REMOVE the
+          ``PublicIpAddress`` / ``PublicDnsName`` fields entirely,
+          matching what real AWS ships when
+          ``MapPublicIpOnLaunch=false`` and no EIP is associated.
+
+        The ``localemu:ssh-port`` tag that older LocalEmu releases added
+        here is intentionally NOT re-emitted : LocalEmu 1.2.0 exposes
+        port 22 on port 22 of the instance's own IP inside the
+        LocalEmu-managed Docker networks, no host-side port mapping is
+        visible to the API surface. The host-to-instance path is
+        ``aws ssm start-session`` or the in-VPC bastion pattern.
+        """
+        pub_ip = _resolve_pubport_ip_for_instance(inst.get("InstanceId"))
+        if pub_ip:
+            inst["PublicIpAddress"] = pub_ip
+            # AWS-shaped public DNS name : ec2-<pub-ip-dashed>.compute-1.amazonaws.com.
+            inst["PublicDnsName"] = (
+                f"ec2-{pub_ip.replace('.', '-')}.compute-1.amazonaws.com"
+            )
+        else:
+            # No public IP on the LocalEmu Internet plane. Match AWS's
+            # own contract by not emitting the fields.
+            inst.pop("PublicIpAddress", None)
+            inst.pop("PublicDnsName", None)
 
     def accept_state_visitor(self, visitor: StateVisitor):
         from moto.ec2.models import ec2_backends
@@ -1940,9 +2016,8 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 # at ``add_instances`` time and stamps the base64 string
                 # onto ``Instance.user_data``. Reading the raw request
                 # parameter alone would miss every launch-template path
-                # and the boot-time executor would silently do nothing —
-                # the exact symptom of PR-007's launch-template-poisoning
-                # gap.
+                # and the boot-time executor would silently do nothing,
+                # which was the historical launch-template-poisoning gap.
                 user_data = _resolved_user_data_from_moto(
                     context.account_id, context.region, instance_id,
                 )
@@ -1988,9 +2063,9 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 # ``get_network_for_instance`` returns a network name only
                 # when a real Docker bridge backs the VPC. If the instance
                 # is destined for a VPC (has VpcId, SubnetId, or an ENI
-                # tied to one) but no bridge could be created — e.g. all
+                # tied to one) but no bridge could be created - e.g. all
                 # fallback CIDR pools exhausted by leftover networks from
-                # prior sessions — we must fail this RunInstances call
+                # prior sessions - we must fail this RunInstances call
                 # loudly rather than let ``vm_manager`` silently land the
                 # container on Docker's default bridge. That silent path
                 # produced "instance running but on 172.17/16, TGW can't
@@ -2062,11 +2137,13 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                         iam_role_name=iam_role_name,
                         vpc_network=vpc_network,
                     )
-                    # Add SSH port info to the instance metadata
-                    if info.ssh_port:
-                        instance.setdefault("Tags", []).append(
-                            {"Key": "localemu:ssh-port", "Value": str(info.ssh_port)}
-                        )
+                    # The ``localemu:ssh-port`` tag older LocalEmu releases
+                    # emitted here is intentionally NOT re-added. Port 22
+                    # is on port 22 of the instance's own IP inside every
+                    # LocalEmu-managed Docker network (see the two-tier
+                    # topology in ``docker/vpc_network.py``). The
+                    # host-to-instance path is ``aws ssm start-session``;
+                    # the in-VPC path is standard SSH to the ENI's IP.
                 except Exception as e:
                     LOG.warning("Failed to create Docker container for %s: %s", instance_id, e)
                     # Clean up any partially created container
@@ -2187,7 +2264,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         Previously raised NotImplementedError from the base-class stub
         because no handler existed. Now wires to
         ``DockerVmManager.reboot_instance`` which calls Docker
-        restart_container — the host port mapping, the container's
+        restart_container - the host port mapping, the container's
         IPAM assignment, the SG/NACL iptables, and the writable layer
         all survive across the restart because the netns is preserved.
 
@@ -2576,6 +2653,22 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                         eni_id, exc_info=True,
                     )
             raise _translate_eni_error(exc)
+        # The instance's effective SG set is the union across every
+        # attached ENI ; a fresh ENI joining brings its own SGs into
+        # that union. Reapply so the ``INPUT``/``OUTPUT`` chains
+        # reflect the new posture immediately.
+        try:
+            from localemu.services.ec2.docker.sg_reapply import (
+                reapply_sgs_for_instance_after_eni_change,
+            )
+            reapply_sgs_for_instance_after_eni_change(
+                instance_id, context.account_id, context.region,
+            )
+        except Exception:
+            LOG.debug(
+                "AttachNetworkInterface: SG data-plane reapply failed for %s",
+                instance_id, exc_info=True,
+            )
         return result
 
     @handler("DetachNetworkInterface", expand=False)
@@ -2603,6 +2696,22 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             except Exception:
                 LOG.debug("DetachNetworkInterface: eni lookup failed",
                           exc_info=True)
+        # Remember the instance the ENI was on so we can reapply SGs
+        # to it after the detach clears its sg_ids from the union.
+        instance_id_for_detach = None
+        if eni_id_for_detach:
+            try:
+                from localemu.services.ec2.docker.address_index import (
+                    get_address_index,
+                )
+                entry = get_address_index().get_eni(eni_id_for_detach)
+                if entry is not None:
+                    instance_id_for_detach = entry.instance_id
+            except Exception:
+                LOG.debug(
+                    "DetachNetworkInterface: instance lookup failed",
+                    exc_info=True,
+                )
         result = call_moto(context)
         if not (_eni_real_enabled() and eni_id_for_detach):
             return result
@@ -2613,6 +2722,24 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
             get_eni_manager().detach(eni_id_for_detach)
         except Exception as exc:
             raise _translate_eni_error(exc)
+        # After detach, the departing ENI's SGs must drop out of the
+        # instance's effective policy. Reapply so the ``INPUT`` /
+        # ``OUTPUT`` chains no longer accept traffic that only the
+        # detached ENI's rules would have allowed.
+        if instance_id_for_detach:
+            try:
+                from localemu.services.ec2.docker.sg_reapply import (
+                    reapply_sgs_for_instance_after_eni_change,
+                )
+                reapply_sgs_for_instance_after_eni_change(
+                    instance_id_for_detach,
+                    context.account_id, context.region,
+                )
+            except Exception:
+                LOG.debug(
+                    "DetachNetworkInterface: SG reapply failed for %s",
+                    instance_id_for_detach, exc_info=True,
+                )
         return result
 
     @handler("DeleteNetworkInterface", expand=False)
@@ -2620,7 +2747,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         self, context: RequestContext, request: dict,
     ) -> dict:
         eni_id = request.get("NetworkInterfaceId")
-        # ENI must be detached on AWS — let moto enforce the check (it
+        # ENI must be detached on AWS - let moto enforce the check (it
         # already does). If moto refuses, we never reach the EniManager call.
         if _eni_real_enabled() and eni_id:
             try:
@@ -2661,7 +2788,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                     continue
                 eni["PrivateIpAddress"] = str(entry.primary_ip)
                 eni["MacAddress"] = entry.mac
-                # PrivateIpAddresses[] — primary + all secondaries
+                # PrivateIpAddresses[] - primary + all secondaries
                 pias = [{
                     "Primary": True,
                     "PrivateIpAddress": str(entry.primary_ip),
@@ -2773,7 +2900,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         eni_id = request.get("NetworkInterfaceId")
         result = call_moto(context)
 
-        # AWS exposes attributes in three shapes in the request — the
+        # AWS exposes attributes in three shapes in the request - the
         # API maps each ModifyNetworkInterfaceAttribute call to ONE
         # attribute change. Extract whichever is present. We parse
         # before the real-ENI flag gate so the SDC metadata mirror
@@ -2822,24 +2949,82 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         except Exception as exc:
             raise _translate_eni_error(exc)
 
+        # SG data-plane apply. When ``Groups=`` is written on an ENI,
+        # the AddressIndex now carries the new sg_ids for THAT ENI ;
+        # the owning instance's effective policy is the union across
+        # every attached ENI (see
+        # :func:`resolve_union_sgs_for_instance`). Recompute and
+        # re-run ``SG_IN`` / ``SG_OUT`` on the owning container so
+        # authorize / revoke on the new SG list takes effect while
+        # the instance is running.
+        if groups is not None:
+            try:
+                from localemu.services.ec2.docker.address_index import (
+                    get_address_index,
+                )
+                entry = get_address_index().get_eni(eni_id)
+                owner_iid = entry.instance_id if entry else None
+                if owner_iid:
+                    from localemu.services.ec2.docker.sg_reapply import (
+                        reapply_sgs_for_instance_after_eni_change,
+                    )
+                    reapply_sgs_for_instance_after_eni_change(
+                        owner_iid, context.account_id, context.region,
+                    )
+            except Exception:
+                LOG.debug(
+                    "ModifyNetworkInterfaceAttribute: SG reapply failed "
+                    "for %s", eni_id, exc_info=True,
+                )
+
         # Data-plane apply (kernel ip_forward + iptables FORWARD
-        # policy on the instance's container). The Instance->bit
+        # rule on the instance's container). The Instance->bit
         # metadata mirror has already run above the real-ENI gate;
         # this block only covers the Docker side effect, which
         # depends on the real-ENI subsystem being live.
+        #
+        # Per-ENI semantics: the rule is keyed on THIS ENI's iface
+        # (and IP, in shared-iface mode) so a secondary ENI's modify
+        # does not affect the primary's FORWARD posture, and vice
+        # versa. The legacy ``apply_source_dest_check(instance_id,
+        # ...)`` shim only ever targets the primary ; here we look up
+        # the specific ENI from the address index.
         if source_dest_check is not None:
             try:
-                instance_id = _resolve_instance_for_eni(
-                    eni_id, context.account_id, context.region,
+                from localemu.services.ec2.docker.address_index import (
+                    get_address_index,
                 )
-                if instance_id:
-                    from localemu.services.ec2.docker.source_dest_check import (
-                        apply_source_dest_check,
+                entry = get_address_index().get_eni(eni_id)
+                if (entry is not None
+                        and entry.instance_id
+                        and entry.iface_name
+                        and entry.iface_name != "<pending>"):
+                    from localemu.services.ec2.docker.forward_chain import (
+                        apply_forward_for_eni,
                     )
-                    apply_source_dest_check(
-                        instance_id=instance_id,
+                    apply_forward_for_eni(
+                        instance_id=entry.instance_id,
+                        iface_name=entry.iface_name,
+                        eni_ip=str(entry.primary_ip),
+                        shared_iface=bool(entry.shared_iface),
                         source_dest_check=bool(source_dest_check),
                     )
+                else:
+                    # Address index has no usable entry for this ENI
+                    # (real-ENI flag off, or attach not yet observed).
+                    # Fall back to the legacy primary-ENI shim so
+                    # single-NIC quiet-router scenarios still work.
+                    instance_id = _resolve_instance_for_eni(
+                        eni_id, context.account_id, context.region,
+                    )
+                    if instance_id:
+                        from localemu.services.ec2.docker.source_dest_check import (
+                            apply_source_dest_check,
+                        )
+                        apply_source_dest_check(
+                            instance_id=instance_id,
+                            source_dest_check=bool(source_dest_check),
+                        )
             except Exception:
                 LOG.debug(
                     "SourceDestCheck data-plane apply after "
@@ -2911,8 +3096,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         instance's security-group set (``Groups``), refresh iptables on
         the container so the change reflects in the data plane. When
         the attribute is ``SourceDestCheck``, apply the kernel
-        forwarding knobs so the instance can act as a router (PR-006
-        scenario E4)."""
+        forwarding knobs so the instance can act as a router."""
         result = call_moto(context)
         try:
             instance_id = context.request.values.get("InstanceId")
@@ -2935,7 +3119,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         #   1. Mirror the bit onto the primary ENI in BOTH storage
         #      cells (moto's NIC model and the LocalEmu address
         #      index). On AWS, the instance-level SourceDestCheck is a
-        #      convenience view of the primary ENI's bit — without
+        #      convenience view of the primary ENI's bit - without
         #      the mirror, DescribeInstances.NetworkInterfaces[0] and
         #      DescribeNetworkInterfaces both report the stale value
         #      after an instance-level write.
@@ -2968,6 +3152,20 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                 "ModifyInstanceAttribute failed", exc_info=True,
             )
         return result
+
+    # ------------------------------------------------------------------
+    # DescribePlacementGroups: return the empty-list shape real AWS ships
+    # on accounts with no placement groups instead of moto's InternalFailure.
+    # Prevents inventory / audit tools that fan out over every EC2 read op
+    # from marking the scan as failed. Real placement-group semantics are
+    # out of LocalEmu's scope today.
+    # ------------------------------------------------------------------
+
+    @handler("DescribePlacementGroups", expand=False)
+    def describe_placement_groups(
+        self, context: RequestContext, request: dict,
+    ) -> dict:
+        return {"PlacementGroups": []}
 
     # ------------------------------------------------------------------
     # VPC route-table event hooks: install / remove ``ip route`` entries
@@ -3091,7 +3289,7 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
         self, context: RequestContext, request: dict,
     ) -> dict:
         # Resolve the affected subnet BEFORE moto removes the
-        # association — afterwards the link is gone.
+        # association - afterwards the link is gone.
         affected_subnet_id = _resolve_subnet_for_rt_association(
             association_id=(
                 request.get("AssociationId")
@@ -4537,7 +4735,7 @@ def _register_flow_log_subscriptions(
     """For every FlowLog id moto just minted, build the matching
     ``FlowLogSubscription`` so the recorder can route captured records
     to the user's destination. One subscription per (FlowLog, ResourceId)
-    pair — moto already fans the request out to one FlowLog id per
+    pair - moto already fans the request out to one FlowLog id per
     ResourceId, so we ride that mapping."""
     from localemu.services.ec2.flow_logs import (
         FlowLogSubscription,
@@ -4561,7 +4759,7 @@ def _register_flow_log_subscriptions(
         s3_destination = None
         if destination_type == "s3":
             s3_destination = flow_log.log_destination
-            # No real S3 dispatcher yet — route to a CWL fallback group
+            # No real S3 dispatcher yet - route to a CWL fallback group
             # named after the FlowLog so the records are still visible
             # and the user can find them.
             log_group = f"/aws/vendedlogs/flow-logs/{fl_id}"

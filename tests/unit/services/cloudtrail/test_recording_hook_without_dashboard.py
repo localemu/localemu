@@ -1,10 +1,10 @@
-"""F2 regression: CloudTrail recording hook is installed by the
+"""Regression: CloudTrail recording hook is installed by the
 CloudTrail service itself, not by the dashboard plugin.
 
 Before the fix, ``_activity_handler`` was defined as a closure inside
 ``dashboard.plugins.register_dashboard``. If the dashboard plugin was
 not loaded, no handler was appended to
-``run_custom_response_handlers.handlers`` — so ``LookupEvents`` quietly
+``run_custom_response_handlers.handlers`` - so ``LookupEvents`` quietly
 returned nothing and the S3 delivery thread wrote empty log files.
 
 The fix moves registration into the CloudTrail service's lifecycle so
@@ -34,7 +34,7 @@ def _recorder_is_registered() -> bool:
 
 class TestRecordingHookWithoutDashboard:
     def test_creating_cloudtrail_service_installs_recording_hook(self):
-        """The CloudTrail service must install the hook itself — no
+        """The CloudTrail service must install the hook itself - no
         dashboard import involved."""
         from localemu.aws.handlers import run_custom_response_handlers
         from localemu.services.cloudtrail.recording_hook import (
@@ -65,7 +65,7 @@ class TestRecordingHookWithoutDashboard:
         )
 
     def test_hook_is_named_module_level_function_not_closure(self):
-        """F3 (companion check): the handler must be a real module-level
+        """the handler must be a real module-level
         function carrying the ``_le_handler_tag`` attribute, not a
         closure captured by the dashboard plugin."""
         from localemu.services.cloudtrail.recording_hook import (

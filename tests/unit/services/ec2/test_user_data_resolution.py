@@ -47,15 +47,15 @@ def _moto_account_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Direct UserData path — pre-PR-007 behaviour, must keep working
+# Direct UserData path - the previous behaviour, must keep working
 # ---------------------------------------------------------------------------
 
 
 @mock_aws
 def test_direct_user_data_lands_on_moto_instance():
-    """Without PR-007 this case already worked (provider read the raw
-    request param). The helper must agree with the raw request — moto
-    must hold the same value PR-007 would surface."""
+    """This case already worked before the fix (provider read the raw
+    request param). The helper must agree with the raw request - moto
+    must hold the same value the fix would surface."""
     ec2 = _client()
     script = b"#!/bin/bash\necho RAN > /tmp/m\n"
     payload_b64 = base64.b64encode(script).decode()
@@ -76,13 +76,13 @@ def test_direct_user_data_lands_on_moto_instance():
 
 
 # ---------------------------------------------------------------------------
-# Launch-template UserData — the PR-007 fix
+# Launch-template UserData - the fix
 # ---------------------------------------------------------------------------
 
 
 @mock_aws
 def test_launch_template_user_data_resolves_through_moto():
-    """The literal reproduction in PR-REQUEST-007: CreateLaunchTemplate
+    """The literal reproduction: CreateLaunchTemplate
     with UserData, RunInstances via the template (no direct UserData).
     The helper must return the template's UserData, otherwise the
     boot-time executor never runs and Launch-Template Poisoning (E1)
@@ -176,7 +176,7 @@ def test_returns_none_when_no_user_data_set():
 @mock_aws
 def test_returns_none_for_unknown_instance_id():
     """Lookup for an instance moto doesn't know about must return
-    ``None`` cleanly, never raise — the provider then falls back to
+    ``None`` cleanly, never raise - the provider then falls back to
     the raw request parameter."""
     resolved = _resolved_user_data_from_moto(
         _moto_account_id(), _REGION, "i-deadbeef00000000",

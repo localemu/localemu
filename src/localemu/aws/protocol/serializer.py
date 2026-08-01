@@ -550,7 +550,16 @@ class ResponseSerializer(abc.ABC):
 
     @staticmethod
     def _timestamp_unixtimestamp(value: datetime.datetime) -> float:
-        return value.timestamp()
+        # Truncate (not round) to millisecond precision, matching the CBOR encoder's
+        # `int(timestamp * 1000)` (see localemu.aws.protocol._cbor._encode_aws_datetime) bit
+        # for bit - using round() here would occasionally land 1ms away from what the CBOR
+        # path truncates the exact same value to. Without this, the same underlying value read
+        # via the `json` protocol (full float precision) and via a CBOR-based protocol
+        # (millisecond-truncated) would disagree on sub-millisecond digits, even though they're
+        # the same moment - real AWS is consistently millisecond-precision for
+        # unixtimestamp-formatted shapes (e.g. Kinesis's ApproximateArrivalTimestamp)
+        # regardless of which wire protocol serves the response.
+        return int(value.timestamp() * 1000) / 1000
 
     def _timestamp_rfc822(self, value: datetime.datetime) -> str:
         if isinstance(value, datetime.datetime):
@@ -1364,7 +1373,7 @@ class JSONResponseSerializer(QueryCompatibleProtocolMixin, ResponseSerializer):
                 body["message"] = error_message
 
         if mime_type in self.CBOR_TYPES:
-            response.set_response(cbor2_dumps(body, datetime_as_timestamp=True))
+            response.set_response(cbor2_dumps(body, datetime_as_timestamp=True, timezone=datetime.UTC))
             response.content_type = mime_type
         else:
             response.set_json(body)
@@ -1405,7 +1414,7 @@ class JSONResponseSerializer(QueryCompatibleProtocolMixin, ResponseSerializer):
             self._serialize(body, params, shape, None, mime_type)
 
         if mime_type in self.CBOR_TYPES:
-            return cbor2_dumps(body, datetime_as_timestamp=True)
+            return cbor2_dumps(body, datetime_as_timestamp=True, timezone=datetime.UTC)
         else:
             return json.dumps(body)
 

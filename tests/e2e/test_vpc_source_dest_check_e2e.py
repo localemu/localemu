@@ -1,5 +1,4 @@
-"""End-to-end tests for ``ec2:SourceDestCheck`` data-plane forwarding
-(PR-006 subsystem C).
+"""End-to-end tests for ``ec2:SourceDestCheck`` data-plane forwarding.
 
 Each test:
   1. Creates a VPC / subnet / instance with default ``SourceDestCheck=true``.
@@ -129,13 +128,12 @@ def test_default_instance_has_source_dest_check_enabled(ec2_client):
 
 
 def test_default_instance_has_forward_chain_policy_drop(ec2_client):
-    """The decisive evidence the PR-006 LeadDev asked for: a fresh
+    """The decisive evidence the reviewer asked for: a fresh
     instance's iptables FORWARD chain must be ``-P FORWARD DROP``,
     not the Docker default of ACCEPT.
 
     Without this, the secure (SourceDestCheck=true) and insecure
-    (SourceDestCheck=false) states are indistinguishable on the wire
-    — forwarding works regardless of the attribute, and the Quiet
+    (SourceDestCheck=false) states are indistinguishable on the wire - forwarding works regardless of the attribute, and the Quiet
     Router scenario (E4) is silently always-on.
     """
     vpc, sub = _make_vpc_subnet(ec2_client)
@@ -156,7 +154,7 @@ def test_default_instance_has_forward_chain_policy_drop(ec2_client):
 
 
 def test_modify_instance_attribute_disable_source_dest_check_enables_forwarding(ec2_client):
-    """PR-006 scenario E4 reproduction (Quiet Router)."""
+    """Scenario reproduction (Quiet Router)."""
     vpc, sub = _make_vpc_subnet(ec2_client)
     try:
         iid, cname = _run_instance(ec2_client, sub)
@@ -173,12 +171,12 @@ def test_modify_instance_attribute_disable_source_dest_check_enables_forwarding(
             )
             assert _iptables_forward_policy(cname) == "ACCEPT", (
                 "FORWARD policy must flip to ACCEPT when SourceDestCheck "
-                "is disabled — otherwise the kernel forwards but iptables "
+                "is disabled - otherwise the kernel forwards but iptables "
                 "still drops, and forwarding silently fails"
             )
             assert _has_marker(cname), (
                 "marker file /var/lib/localemu/source-dest-check-disabled was "
-                "not created — restart persistence will be lost"
+                "not created - restart persistence will be lost"
             )
         finally:
             ec2_client.terminate_instances(InstanceIds=[iid])
@@ -210,11 +208,11 @@ def test_toggle_back_to_source_dest_check_true_disables_forwarding(ec2_client):
             )
             assert _iptables_forward_policy(cname) == "DROP", (
                 "FORWARD policy must flip back to DROP when SDC is "
-                "re-enabled — otherwise the previous --no-source-dest-check "
+                "re-enabled - otherwise the previous --no-source-dest-check "
                 "window's ACCEPT state silently survives"
             )
             # The explicit ACCEPT rule the disabled window inserted must
-            # also be gone — otherwise it overrides the DROP policy.
+            # also be gone - otherwise it overrides the DROP policy.
             dump = _iptables_forward_dump(cname)
             assert "-A FORWARD -j ACCEPT" not in dump, (
                 f"residual ``-A FORWARD -j ACCEPT`` rule from a prior "

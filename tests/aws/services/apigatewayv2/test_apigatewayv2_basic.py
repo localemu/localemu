@@ -251,7 +251,7 @@ class TestApiGatewayV2Integrations:
             integration_resp = client.create_integration(
                 ApiId=api_id,
                 IntegrationType="HTTP_PROXY",
-                IntegrationUri="https://httpbin.org/anything",
+                IntegrationUri="http://test.example.internal/anything",
                 IntegrationMethod="ANY",
             )
             integration_id = integration_resp["IntegrationId"]

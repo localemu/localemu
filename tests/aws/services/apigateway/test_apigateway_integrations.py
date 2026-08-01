@@ -21,7 +21,6 @@ from localemu.constants import APPLICATION_JSON
 from localemu.services.lambda_.networking import get_main_endpoint_from_container
 from localemu.testing.aws.util import is_aws_cloud
 from localemu.testing.pytest import markers
-from localemu.testing.pytest.fixtures import PUBLIC_HTTP_ECHO_SERVER_URL
 from localemu.utils.aws import arns
 from localemu.utils.json import json_safe
 from localemu.utils.strings import short_uid, to_bytes, to_str
@@ -112,9 +111,7 @@ class RequestParameterRoute(TypedDict, total=False):
 
 @pytest.fixture
 def status_code_http_server(httpserver: HTTPServer):
-    """Spins up a local HTTP echo server and returns the endpoint URL"""
-    if is_aws_cloud():
-        return f"{PUBLIC_HTTP_ECHO_SERVER_URL}/"
+    """Spins up a local HTTP echo server on 127.0.0.1 and returns its URL."""
 
     def _echo(request: Request) -> Response:
         result = {
@@ -135,7 +132,7 @@ def status_code_http_server(httpserver: HTTPServer):
 @pytest.fixture
 def apigw_echo_http_server(httpserver: HTTPServer):
     """Spins up a local HTTP echo server and returns the endpoint URL
-    Aims at emulating more closely the output of httpbin.org that is used to create the
+    Local echo server whose response shape matches the fixture inputs used to record the
     snapshots
     TODO tests the behavior and outputs of all fields"""
 
@@ -176,12 +173,7 @@ def apigw_echo_http_server(httpserver: HTTPServer):
 
 @pytest.fixture
 def apigw_echo_http_server_post(apigw_echo_http_server):
-    """
-    Returns an HTTP echo server URL for POST requests that work both locally and for parity tests (against real AWS)
-    """
-    if is_aws_cloud():
-        return f"{PUBLIC_HTTP_ECHO_SERVER_URL}/post"
-
+    """POST URL of the local ``apigw_echo_http_server`` (127.0.0.1)."""
     return f"{apigw_echo_http_server}/post"
 
 

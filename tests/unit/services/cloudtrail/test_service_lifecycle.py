@@ -1,4 +1,4 @@
-"""F1 regression: CloudTrail service stops its S3 delivery thread cleanly.
+"""Regression: CloudTrail service stops its S3 delivery thread cleanly.
 
 Before the fix, ``create_cloudtrail_service()`` returned a bare
 ``Service`` with no lifecycle hook. The S3 delivery background thread

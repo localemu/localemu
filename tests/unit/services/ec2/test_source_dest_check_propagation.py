@@ -165,7 +165,7 @@ def _attach_secondary_eni(instance_id: str) -> str:
 
 def _all_three_cells(instance_id: str, eni_id: str):
     """Return ``(instance.source_dest_check, moto_nic.source_dest_check,
-    EniEntry.source_dest_check)`` — the three cells the bug spans."""
+    EniEntry.source_dest_check)`` - the three cells the bug spans."""
     instance = _find_instance(instance_id)
     assert instance is not None, "test setup: instance vanished from moto"
     moto_nic = _backend().enis[eni_id]
@@ -271,7 +271,7 @@ def test_modify_primary_eni_attribute_mirrors_to_instance(_moto_ec2):
     # The metadata mirror is pure-Python state, not Docker side-effect,
     # so it must run in the default LocalEmu mode that any user gets out
     # of the box. Pre-fix, the handler short-circuited before the mirror
-    # whenever those flags were off — and the live BUG-008 repro ran in
+    # whenever those flags were off - and the live repro ran in
     # exactly that mode. Pin the corrected behavior.
     with mock.patch.object(
         ec2_provider, "call_moto",
@@ -290,7 +290,7 @@ def test_modify_primary_eni_attribute_mirrors_to_instance(_moto_ec2):
     # moto cells (instance + NIC) must both reflect False. The
     # EniEntry mirror requires the real-ENI subsystem (it's gated
     # below the metadata mirror by design), so we don't assert on
-    # it here — test #1 already pins that path under the flag-on
+    # it here - test #1 already pins that path under the flag-on
     # scenario.
     instance = _find_instance(inst)
     assert instance.source_dest_check is False

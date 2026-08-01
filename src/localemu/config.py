@@ -185,8 +185,8 @@ class Directories:
         )
 
     def mkdirs(self):
-        # MED-04: the original loop silently skipped ``None`` entries, which
-        # hid real configuration bugs — a typo or missing value meant the
+        # The original loop silently skipped ``None`` entries, which
+        # hid real configuration bugs - a typo or missing value meant the
         # directory was never created and the failure surfaced far later as
         # a cryptic FileNotFoundError. Log every skipped field so the
         # operator can see which directories were not provisioned.
@@ -434,11 +434,11 @@ PERSISTENCE = is_env_true("PERSISTENCE")
 # their subnet's CIDR range and Docker binds the container to that
 # exact address. When disabled, Docker assigns the container address
 # automatically and the recorded private IP is updated to match it.
-# Default: on — without this, two instances in different subnets of the
+# Default: on - without this, two instances in different subnets of the
 # same VPC both land on whatever Docker's IPAM picks (e.g. 10.0.0.3 and
 # 10.0.0.4), outside their own subnet CIDR. That breaks the AWS contract
 # that an ENI's PrivateIpAddress lies inside its SubnetId's CidrBlock,
-# and it breaks every PR-006-style data-plane test that wires routes by
+# and it breaks the VPC data-plane paths that wire routes by
 # instance IP. To revert to Docker auto-IPAM, set the var to a falsy
 # value (the same shape every other LocalEmu opt-out flag uses).
 LOCALEMU_VPC_IP_PINNING = is_env_not_false("LOCALEMU_VPC_IP_PINNING")
@@ -446,10 +446,15 @@ LOCALEMU_VPC_IP_PINNING = is_env_not_false("LOCALEMU_VPC_IP_PINNING")
 # When enabled, Elastic Network Interface operations (create, attach,
 # detach, delete, assign and unassign private IPs, modify attributes,
 # describe) apply real network changes inside the EC2 container instead
-# of returning metadata-only responses. Requires
-# LOCALEMU_VPC_IP_PINNING=1; if set without it, this is treated as off
-# and a warning is logged. Default: off.
-LOCALEMU_ENI_REAL = is_env_true("LOCALEMU_ENI_REAL")
+# of returning metadata-only responses. Requires LOCALEMU_VPC_IP_PINNING
+# (also default-on) ; if that prereq is set false explicitly, this flag
+# is treated as off and a warning is logged.
+#
+# Default-on so multi-ENI workloads work out of the box (the SG live
+# re-apply on ENI attach / detach / modify-groups also depends on this
+# being on). To revert to metadata-only responses set
+# ``LOCALEMU_ENI_REAL=false``.
+LOCALEMU_ENI_REAL = is_env_not_false("LOCALEMU_ENI_REAL")
 
 # the strategy for loading snapshots from disk when `PERSISTENCE=1` is used (on_startup, on_request, manual)
 SNAPSHOT_LOAD_STRATEGY = os.environ.get("SNAPSHOT_LOAD_STRATEGY", "").upper()
@@ -1131,7 +1136,7 @@ WINDOWS_DOCKER_MOUNT_PREFIX = os.environ.get("WINDOWS_DOCKER_MOUNT_PREFIX", "/ho
 # Whether to skip S3 presigned-URL signature validation. The historical
 # default ``is_env_not_false(...)`` returned True when the env var was
 # unset, meaning every freshly-started LocalEmu served tampered presigned
-# URLs without checking the signature — the canonical request could be
+# URLs without checking the signature - the canonical request could be
 # rewritten by any caller after the URL was minted and the server would
 # still serve it. Real S3 always validates the signature; there is no
 # AWS-side knob to disable it. The new default is False (strict, AWS

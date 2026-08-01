@@ -314,6 +314,17 @@ class TargetSender(ABC):
         The service principal defaults to EventBridge ("events") but can be overridden via
         ``caller_service_principal`` so EventBridge Scheduler (and future callers) assume
         roles against the trust policy that actually names them."""
+        # Tag this client as LocalEmu-internal so the CloudTrail recording hook
+        # doesn't self-record target delivery as if it were user-initiated
+        # traffic (see recording_hook.INTERNAL_CALL_USER_AGENT_EXTRA).
+        from botocore.config import Config as BotocoreConfig
+
+        from localemu.services.cloudtrail.recording_hook import (
+            INTERNAL_CALL_USER_AGENT_EXTRA,
+        )
+
+        internal_call_config = BotocoreConfig(user_agent_extra=INTERNAL_CALL_USER_AGENT_EXTRA)
+
         service_principal = ServicePrincipal(self.caller_service_principal)
         role_arn = self.target.get("RoleArn")
         if role_arn:  # required for cross account
@@ -322,9 +333,14 @@ class TargetSender(ABC):
                 role_arn=role_arn,
                 service_principal=service_principal,
                 region_name=self.region,
+                config=internal_call_config,
             )
         else:
-            client_factory = connect_to(aws_access_key_id=self.account_id, region_name=self.region)
+            client_factory = connect_to(
+                aws_access_key_id=self.account_id,
+                region_name=self.region,
+                config=internal_call_config,
+            )
         client = client_factory.get_client(self.service)
         client = client.request_metadata(
             service_principal=service_principal, source_arn=self.rule_arn

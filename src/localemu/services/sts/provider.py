@@ -51,7 +51,7 @@ class InvalidParameterValueError(ServiceException):
     sender_fault = True
 
 
-# Stricter regex — must be iam service and role/ resource type
+# Stricter regex - must be iam service and role/ resource type
 ROLE_ARN_REGEX = re.compile(
     r"^arn:[^:]+:iam:[^:]*:[^:]*:role/[a-zA-Z0-9+=,.@_/-]+$"
 )
@@ -110,7 +110,7 @@ def _get_root_access_keys() -> set[str]:
 def _extract_jwt_issuer(token: str) -> str:
     """Pull the ``iss`` claim out of a JWT without verifying the signature.
 
-    Used only to drive trust-policy matching — the signature trust is
+    Used only to drive trust-policy matching - the signature trust is
     established separately by the IdP-specific endpoint. Returns ""
     on any decode failure; the caller then falls back to the wildcard
     Federated principals.
@@ -152,8 +152,8 @@ def _trust_policy_allows_web_identity(role, issuer: str) -> bool:
     call ``sts:AssumeRoleWithWebIdentity``.
 
     Matches any of:
-      * ``Principal: "*"`` — anonymous federated trust.
-      * ``Principal: {Federated: "*"}`` — same effect, dict form.
+      * ``Principal: "*"`` - anonymous federated trust.
+      * ``Principal: {Federated: "*"}`` - same effect, dict form.
       * ``Principal: {Federated: <provider>}`` where provider is a
         well-known alias (``cognito-idp.amazonaws.com`` etc.) OR a
         substring of the JWT's ``iss`` claim (catches the local
@@ -197,7 +197,7 @@ def _trust_policy_allows_web_identity(role, issuer: str) -> bool:
                 return True
             if f in _FEDERATED_PROVIDER_ALIASES:
                 return True
-            # Match by issuer substring — handles LocalEmu's
+            # Match by issuer substring - handles LocalEmu's
             # ``http://localhost:4566/...`` and full Cognito issuer URLs
             # like ``https://cognito-idp.us-east-1.amazonaws.com/...``.
             if issuer and (f in issuer or issuer in f):
@@ -257,7 +257,7 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
             )
             return False
         effect = statement.get("Effect", "")
-        if effect != "Allow":
+        if (effect or "").lower() != "allow":
             continue
 
         # Check principal
@@ -301,7 +301,7 @@ def _trust_principal_matches(principal, caller_arn: str, caller_account_id: str,
     ``service_principal`` (e.g. ``"lambda"``) lets internal AWS services
     (Lambda, Events, etc.) successfully match ``Service: lambda.amazonaws.com``
     trust statements when assuming a service role. The internal request
-    parameter ``_ServicePrincipal`` is the carrier — see
+    parameter ``_ServicePrincipal`` is the carrier - see
     :mod:`localemu.aws.connect`.
     """
     if principal == "*":
@@ -618,7 +618,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         # ``Principal: {Federated: <provider>}`` matches the JWT issuer
         # AND whose ``Action`` contains ``sts:AssumeRoleWithWebIdentity``
         # (or a wildcard). Before this change the check only verified
-        # the trust policy was non-empty — so a role with
+        # the trust policy was non-empty - so a role with
         # ``Principal: {AWS: alice}`` accepted ANY web-identity token.
         role = _resolve_role(target_account_id, role_arn)
         if role:
@@ -673,7 +673,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             "GetSessionToken"
         )
 
-        # MFA validation — if serial_number provided, token_code must also be provided
+        # MFA validation - if serial_number provided, token_code must also be provided
         if serial_number and not token_code:
             raise ValidationError(
                 "Also provide a value for tokenCode when providing serialNumber."

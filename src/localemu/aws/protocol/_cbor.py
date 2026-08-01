@@ -62,7 +62,15 @@ def _encode_aws_datetime(encoder, value: datetime) -> None:
         # ``encoder.timezone`` (same attribute name as 5.x).
         default_tz = getattr(encoder, "timezone", None)
         if default_tz is not None:
-            value = value.replace(tzinfo=default_tz)
+            # Naive datetimes reaching here are moto-originated (e.g.
+            # kinesis.models.Stream.creation_datetime uses bare
+            # ``datetime.datetime.now()``), i.e. the SYSTEM-LOCAL wall clock,
+            # not UTC. ``astimezone()`` on a naive datetime treats it as
+            # local time and converts it to ``default_tz`` (shifting the
+            # fields); ``replace()`` would instead mislabel the local-time
+            # fields as already being in ``default_tz``, skewing the value
+            # by the host's UTC offset on any non-UTC machine.
+            value = value.astimezone(default_tz)
         else:
             raise CBOREncodeValueError(
                 f"naive datetime {value!r} encountered and no default timezone has been set"

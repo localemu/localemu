@@ -44,10 +44,17 @@ Where it counts, the behavior is real, not stubbed: Lambda runs your code in the
 ## Install
 
 ```bash
-pip install localemu[runtime]
+pip install localemu
 ```
 
 That's it. No Java. No tokens. No accounts. Docker is required for services that emulate by running a real engine in a sidecar (Lambda, ECS, EKS via k3d, RDS, OpenSearch, EC2). Everything else is pure Python and needs no Docker.
+
+> `pip install localemu[runtime]` still works too - every package that used to
+> live behind that extra is now a plain dependency of the base package, so
+> both commands install the exact same thing. The extra is kept only for
+> backward compatibility with existing scripts and will be removed in a
+> future release, at which point `pip install localemu` will be the only
+> documented form.
 
 ## Start
 

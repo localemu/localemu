@@ -57,9 +57,6 @@ from localemu.utils.sync import ShortCircuitWaitException, poll_condition, retry
 
 LOG = logging.getLogger(__name__)
 
-# URL of public HTTP echo server, used primarily for AWS parity/snapshot testing
-PUBLIC_HTTP_ECHO_SERVER_URL = "http://httpbin.org"
-
 WAITER_CHANGE_SET_CREATE_COMPLETE = "change_set_create_complete"
 WAITER_STACK_CREATE_COMPLETE = "stack_create_complete"
 WAITER_STACK_UPDATE_COMPLETE = "stack_update_complete"
@@ -2343,12 +2340,9 @@ def echo_http_server(httpserver: HTTPServer):
 
 @pytest.fixture
 def echo_http_server_post(echo_http_server):
+    """POST URL of the local ``pytest-httpserver`` echo server started
+    by the ``echo_http_server`` fixture (127.0.0.1).
     """
-    Returns an HTTP echo server URL for POST requests that work both locally and for parity tests (against real AWS)
-    """
-    if is_aws_cloud():
-        return f"{PUBLIC_HTTP_ECHO_SERVER_URL}/post"
-
     return f"{echo_http_server}post"
 
 

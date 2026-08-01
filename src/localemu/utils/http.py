@@ -118,11 +118,10 @@ class _RequestsSafe:
     """Wrapper around the requests library that bypasses two LocalEmu-
     specific friction points:
 
-    * ``~/.netrc`` credentials never bleed into the request — useful
+    * ``~/.netrc`` credentials never bleed into the request - useful
       when developers have machine-wide netrc entries that shouldn't
       mask a test's intended unauthenticated call.
-    * SSL verification is off by default for ``https://`` URLs —
-      LocalEmu serves its single port (4566) with a self-signed
+    * SSL verification is off by default for ``https://`` URLs - LocalEmu serves its single port (4566) with a self-signed
       certificate, so every test hitting ``https://<api>.execute-api.
       localhost:4566/...`` would otherwise fail with
       ``SSLCertVerificationError`` and the wrapper's name (``safe``)
@@ -297,42 +296,6 @@ def download(
         s.close()
 
 
-def download_github_artifact(url: str, target_file: str, timeout: int = None):
-    """Download file from main URL or fallback URL (to avoid firewall errors if github.com is blocked).
-    Optionally allows to define a timeout in seconds."""
-
-    def do_download(
-        download_url: str, request_headers: dict | None = None, print_error: bool = False
-    ):
-        try:
-            download(download_url, target_file, timeout=timeout, request_headers=request_headers)
-            return True
-        except Exception as e:
-            if print_error:
-                LOG.error(
-                    "Unable to download Github artifact from %s to %s: %s %s",
-                    url,
-                    target_file,
-                    e,
-                    exc_info=LOG.isEnabledFor(logging.DEBUG),
-                )
-
-    # if a GitHub API token is set, use it to avoid rate limiting issues
-    gh_token = os.environ.get("GITHUB_API_TOKEN")
-    gh_auth_headers = None
-    if gh_token:
-        gh_auth_headers = {"authorization": f"Bearer {gh_token}"}
-    result = do_download(url, request_headers=gh_auth_headers)
-    if not result:
-        # TODO: use regex below to allow different branch names than "master"
-        url = url.replace("https://github.com", "https://cdn.jsdelivr.net/gh")
-        # The URL structure is https://cdn.jsdelivr.net/gh/user/repo@branch/file.js
-        url = url.replace("/raw/master/", "@master/")
-        # Do not send the GitHub auth token to the CDN
-        do_download(url, print_error=True)
-
-
-# TODO move to aws_responses.py?
 def replace_response_content(response, pattern, replacement):
     content = to_str(response.content or "")
     response._content = re.sub(pattern, replacement, content)

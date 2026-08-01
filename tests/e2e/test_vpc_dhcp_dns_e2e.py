@@ -1,4 +1,4 @@
-"""End-to-end tests for VPC DHCP DNS forwarding (PR-006 subsystem A).
+"""End-to-end tests for VPC DHCP DNS forwarding.
 
 Each test exercises the full chain:
   1. Create VPC + subnet.
@@ -114,7 +114,7 @@ def _cleanup_vpc(ec2_client, vpc_id: str, subnet_id: str,
 
 
 def test_instance_resolv_conf_advertises_dhcp_dns_server(ec2_client):
-    """Single custom DNS → /etc/resolv.conf carries it."""
+    """Single custom DNS -> /etc/resolv.conf carries it."""
     vpc, subnet, dopt = _build_vpc_with_dhcp(
         ec2_client, domain_name_servers=["6.6.6.6"],
     )
@@ -152,7 +152,7 @@ def test_instance_resolv_conf_carries_multiple_dns_servers(ec2_client):
 
 def test_no_dhcp_options_leaves_docker_default_dns(ec2_client):
     """When the VPC has no associated DHCP options, the instance keeps
-    Docker's default DNS — the regression guard."""
+    Docker's default DNS - the regression guard."""
     vpc_id = ec2_client.create_vpc(CidrBlock="10.235.0.0/16")["Vpc"]["VpcId"]
     subnet_id = ec2_client.create_subnet(
         VpcId=vpc_id, CidrBlock="10.235.1.0/24",
@@ -180,7 +180,7 @@ def test_no_dhcp_options_leaves_docker_default_dns(ec2_client):
 
 
 def test_vpc_dns_hijack_scenario_end_to_end(ec2_client):
-    """PR-006 E3 reproduction: attacker sets DHCP DNS, every new
+    """Reproduction: attacker sets DHCP DNS, every new
     instance launched in the VPC resolves through the malicious DNS."""
     attacker_dns = "6.6.6.6"
     vpc, subnet, dopt = _build_vpc_with_dhcp(

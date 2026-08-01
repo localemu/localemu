@@ -93,12 +93,17 @@ class TestEncodeAwsDatetime:
             dumps(dt, datetime_as_timestamp=True)
 
     def test_naive_datetime_with_default_timezone_applies_it(self):
+        # Naive datetimes reaching the encoder are system-local wall-clock
+        # time (see _encode_aws_datetime), so the correct conversion is
+        # astimezone(), not a same-fields replace() relabel - replace()
+        # would silently skew the value by the host's UTC offset on any
+        # non-UTC machine.
         dt_naive = datetime(2026, 5, 21, 12, 0, 0)
-        dt_utc = dt_naive.replace(tzinfo=UTC)
+        dt_converted = dt_naive.astimezone(UTC)
         raw = dumps(dt_naive, datetime_as_timestamp=True, timezone=UTC)
         tag_num, payload = _inspect_tag(raw)
         assert tag_num == 1
-        assert payload == int(dt_utc.timestamp() * 1000)
+        assert payload == int(dt_converted.timestamp() * 1000)
 
     def test_non_timestamp_mode_emits_iso_string_tag0(self):
         dt = datetime(2026, 5, 21, 12, 0, 0, tzinfo=UTC)

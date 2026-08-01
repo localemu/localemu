@@ -1,17 +1,15 @@
-"""Athena provider — DuckDB-backed query execution.
+"""Athena provider - DuckDB-backed query execution.
 
 Wraps moto's Athena backend for CRUD (catalogs, workgroups, named
 queries, data catalogs, prepared statements) and intercepts the three
 ops that *actually run a query*:
 
-* ``StartQueryExecution`` — parse, resolve Glue tables, execute on
+* ``StartQueryExecution`` - parse, resolve Glue tables, execute on
   DuckDB, write CSV results to S3, register rows in the registry.
-* ``GetQueryResults``    — return paginated rows from the registry.
-* ``GetQueryExecution``  — return moto's record verbatim; status flips
+* ``GetQueryResults`` - return paginated rows from the registry.
+* ``GetQueryExecution`` - return moto's record verbatim; status flips
   to SUCCEEDED/FAILED synchronously after StartQueryExecution finishes.
-* ``StopQueryExecution`` — best-effort cancel + state=CANCELLED.
-
-Design background: see LocalEmuResearch/28-athena-query-engine-design.md.
+* ``StopQueryExecution`` : best-effort cancel + state=CANCELLED.
 """
 
 from __future__ import annotations
@@ -49,14 +47,14 @@ def _engine_ready() -> bool:
         backend = os.environ.get("ATHENA_BACKEND", "duckdb").strip().lower()
         if backend in ("off", "none", "disabled", "moto"):
             LOG.info(
-                "ATHENA_BACKEND=%s — staying with moto fallback (queries will return empty Rows[]).",
+                "ATHENA_BACKEND=%s - staying with moto fallback (queries will return empty Rows[]).",
                 backend,
             )
             _engine_initialised = True
             _engine_available = False
             return False
         try:
-            import duckdb  # noqa: F401  — probe import only
+            import duckdb  # noqa: F401 - probe import only
             _engine_available = True
             LOG.info("Athena DuckDB engine enabled.")
         except ImportError:
@@ -70,7 +68,7 @@ def _engine_ready() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Query rewriting — replace ``db.table`` (or ``"db"."table"``) with the
+# Query rewriting - replace ``db.table`` (or ``"db"."table"``) with the
 # DuckDB read-function call returned by glue_resolver.
 # ---------------------------------------------------------------------------
 
@@ -94,7 +92,7 @@ def _rewrite_table_refs(
     """Best-effort rewrite of ``[db.]table`` references after ``FROM``/``JOIN``.
 
     Returns the rewritten SQL plus a list of any unresolved
-    ``db.table`` identifiers — the caller fails the query with a
+    ``db.table`` identifiers - the caller fails the query with a
     Glue-style MetadataException when this list is non-empty.
 
     Limitations: regex-based, not a full SQL parser. Handles the common
@@ -141,7 +139,7 @@ def _rewrite_table_refs(
             tbl = _strip(ident)
 
         if not db:
-            # No default database and unqualified identifier — fall through.
+            # No default database and unqualified identifier - fall through.
             out_parts.append(sql[last:m.end()])
             last = m.end()
             continue
@@ -177,7 +175,7 @@ def _handle_start_query_execution(
         return result
 
     if not _engine_ready():
-        return result  # moto path returns empty rows — documented
+        return result  # moto path returns empty rows - documented
 
     try:
         from .engine import execute
@@ -223,7 +221,7 @@ def _handle_start_query_execution(
                 )
             except Exception as exc:
                 LOG.info("Athena CTAS failed exec=%s err=%s", exec_id, exc)
-                _set_failed(execution, exec_id, f"Athena: CTAS failed — {exc}")
+                _set_failed(execution, exec_id, f"Athena: CTAS failed - {exc}")
                 return result
             col_meta = [
                 ColumnMeta(name=name, type=typ, case_sensitive=False)
@@ -246,7 +244,7 @@ def _handle_start_query_execution(
                 )
             except Exception as exc:
                 LOG.info("Athena INSERT INTO failed exec=%s err=%s", exec_id, exc)
-                _set_failed(execution, exec_id, f"Athena: INSERT INTO failed — {exc}")
+                _set_failed(execution, exec_id, f"Athena: INSERT INTO failed - {exc}")
                 return result
             col_meta = [
                 ColumnMeta(name=name, type=typ, case_sensitive=False)
@@ -281,7 +279,7 @@ def _handle_start_query_execution(
                 "Athena query failed exec=%s rewritten=%r err=%s",
                 exec_id, rewritten, exc,
             )
-            _set_failed(execution, exec_id, f"Athena: query failed — {exc}")
+            _set_failed(execution, exec_id, f"Athena: query failed - {exc}")
             return result
 
         col_meta = [
@@ -437,7 +435,7 @@ def _handle_get_query_execution(
     """Pass through to moto and inject StateChangeReason from our registry.
 
     Moto's GetQueryExecution response Status block only includes
-    ``State``, ``SubmissionDateTime``, ``CompletionDateTime`` — it does
+    ``State``, ``SubmissionDateTime``, ``CompletionDateTime`` - it does
     not echo back any reason string. Real AWS returns
     ``Status.StateChangeReason`` on FAILED queries so users can see
     *why*. Pull it from the registry and splice it in.
@@ -492,7 +490,7 @@ def _handle_list_tags_for_resource(
 
     Moto's responses.py::list_tags_for_resource short-circuits to
     ``Athena Resource <arn> Does Not Exist`` whenever the tagger returns
-    a falsy value — which is the *normal* state for a freshly created
+    a falsy value - which is the *normal* state for a freshly created
     workgroup that has no tags yet. Terraform's aws_athena_workgroup
     read step calls ListTagsForResource immediately after CreateWorkGroup
     and fails the whole apply on this 400.
@@ -533,7 +531,7 @@ def _handle_list_tags_for_resource(
             sender_fault=True,
         )
 
-    # Resource exists — pull whatever tags the tagger has, default to [].
+    # Resource exists - pull whatever tags the tagger has, default to [].
     tags = backend.list_tags_for_resource(resource_arn) or {}
     return {"Tags": tags.get("Tags", []) if isinstance(tags, dict) else []}
 

@@ -19,13 +19,13 @@ EventDataStore resources (Create/Get/Update/Delete/List/Restore and
 Start/Stop ingestion) are handled natively in this module.  Data stores
 live in an in-memory registry keyed by ``(account_id, region, arn)``.
 
-**Limitation — metadata only.** CloudTrail Lake is, in real AWS, a
+**Limitation - metadata only.** CloudTrail Lake is, in real AWS, a
 queryable data lake.  We faithfully track the lifecycle of a data store
 (status transitions ``ENABLED``/``STOPPED_INGESTION``/``PENDING_DELETION``,
 termination protection, retention, billing mode, timestamps, advanced
 event selectors, tags) so customer tooling that creates/lists/describes/
 updates/deletes data stores behaves correctly.  We do NOT ingest events
-into the store or execute SQL queries against it — the Query APIs
+into the store or execute SQL queries against it - the Query APIs
 (``StartQuery``, ``GetQueryResults``, ``DescribeQuery``, ...) remain the
 scope of a separate provider agent and still return
 ``501 NotImplementedError``.  Do not rely on querying events from a data
@@ -60,7 +60,7 @@ LOG = logging.getLogger(__name__)
 # Shared S3 log-delivery state (B5).
 #
 # Moto's ``Trail.description()`` rewrites ``LatestDeliveryTime`` to
-# ``utcnow()`` every time it is called — the value is therefore a lie, not
+# ``utcnow()`` every time it is called - the value is therefore a lie, not
 # a measurement of real delivery. This dict is the single source of truth
 # for ``GetTrailStatus.LatestDelivery*`` fields. The S3 delivery thread
 # writes into it after each attempt; ``_handle_get_trail_status`` reads it
@@ -68,7 +68,7 @@ LOG = logging.getLogger(__name__)
 #
 # Key:   (account_id, region, trail_name)
 # Value: dict with:
-#   - "LatestDeliveryTime":              datetime | None  (UTC) — last
+#   - "LatestDeliveryTime":              datetime | None  (UTC) - last
 #                                        successful delivery
 #   - "LatestDeliveryError":             str  ("" on success)
 #   - "LatestDeliveryAttemptTime":       str  (ISO-8601 Z, last attempt)
@@ -252,7 +252,7 @@ def _run_delivery_cycle(stop_event: threading.Event) -> None:
 
     Fixes applied here:
 
-    * **D1** Cursor keyed by ``(account_id, region, trail_name)`` — trails
+    * **D1** Cursor keyed by ``(account_id, region, trail_name)`` - trails
       sharing a name across accounts/regions no longer step on each other.
     * **D2** Cursor is the event's ``event_time`` (a monotonic UTC
       datetime assigned at record time), not an event_id. Even when the
@@ -260,7 +260,7 @@ def _run_delivery_cycle(stop_event: threading.Event) -> None:
       event strictly newer than the cursor is still correctly identified
       as already-delivered and skipped.
     * **D3** Clients are cached per ``(account_id, region)`` via
-      ``_get_delivery_clients`` — no more per-iteration botocore client
+      ``_get_delivery_clients`` - no more per-iteration botocore client
       construction.
     * **D4** Iterate over ``list(ct_backend.trails.items())`` (a snapshot)
       so concurrent ``CreateTrail`` cannot raise
@@ -517,7 +517,7 @@ def _handle_lookup_events(
 
     # B10: clamp MaxResults to [1, 50] server-side. Raw-HTTP clients can
     # send 0 or negative values; boto3 defaults to 50. AWS documents the
-    # valid range as 1..50 — enforce it before hitting the store.
+    # valid range as 1..50 - enforce it before hitting the store.
     if raw_max_results is None:
         max_results = 50
     else:
@@ -543,7 +543,7 @@ def _handle_lookup_events(
         except (ValueError, TypeError):
             end_time = None
 
-    # Query the store — translate typed errors into CommonServiceException.
+    # Query the store - translate typed errors into CommonServiceException.
     try:
         events, new_token = store.query(
             start_time=start_time,
@@ -595,11 +595,11 @@ def _validate_kms_key_id(
 ) -> None:
     """Validate that ``kms_key_id`` resolves to a real KMS key in LocalEmu's
     native KMS store. Accepts a bare key id (UUID), a key ARN, an alias
-    name (``alias/...``) or an alias ARN — mirroring the AWS CloudTrail
+    name (``alias/...``) or an alias ARN - mirroring the AWS CloudTrail
     API surface.
 
-    Raises ``CommonServiceException("KmsKeyNotFoundException")`` — the
-    error code the real CloudTrail service uses for this condition — if
+    Raises ``CommonServiceException("KmsKeyNotFoundException")`` - the
+    error code the real CloudTrail service uses for this condition - if
     the key is absent, or if a key ARN references a region other than
     the trail's region.
     """
@@ -608,7 +608,7 @@ def _validate_kms_key_id(
     try:
         from localemu.services.kms.models import kms_stores
     except Exception:
-        # KMS service not loaded in this build — skip validation rather
+        # KMS service not loaded in this build - skip validation rather
         # than block CreateTrail on an unrelated misconfiguration.
         return
 
@@ -663,7 +663,7 @@ def _validate_kms_key_id(
 
 
 def _patch_moto_topic_check() -> None:
-    """B2 — sibling of :func:`_patch_moto_bucket_check`.
+    """B2 - sibling of :func:`_patch_moto_bucket_check`.
 
     Moto's ``Trail.check_topic_exists`` consults moto's own SNS backend;
     LocalEmu's SNS is native (``localemu.services.sns.models.sns_stores``),
@@ -712,10 +712,43 @@ def _patch_moto_topic_check() -> None:
 # ---------------------------------------------------------------------------
 # B3 / B4: CreateTrail & UpdateTrail intercepts
 # ---------------------------------------------------------------------------
+def _patch_moto_delete_trail_validation() -> None:
+    """B5 - sibling of :func:`_patch_moto_topic_check`.
+
+    Moto's ``CloudTrailBackend.delete_trail`` silently no-ops when the
+    given name doesn't match any known trail::
+
+        def delete_trail(self, name: str) -> None:
+            if name in self.trails:
+                del self.trails[name]
+
+    Real AWS raises ``TrailNotFoundException`` for ``DeleteTrail`` on a
+    nonexistent trail. ``CloudTrailBackend.get_trail`` already raises the
+    correctly-shaped exception (including ARN-vs-name lookup) for other
+    operations - reuse it as the existence check before deleting.
+    Idempotent via the ``_le_patched`` marker.
+    """
+    try:
+        from moto.cloudtrail.models import CloudTrailBackend
+    except Exception:
+        return
+
+    _original = CloudTrailBackend.delete_trail
+    if getattr(_original, "_le_patched", False):
+        return
+
+    def _patched(self: "CloudTrailBackend", name: str) -> None:
+        self.get_trail(name)
+        _original(self, name)
+
+    _patched._le_patched = True  # type: ignore[attr-defined]
+    CloudTrailBackend.delete_trail = _patched  # type: ignore[assignment]
+
+
 def _handle_create_trail(
     context: RequestContext, request: ServiceRequest
 ) -> ServiceResponse:
-    """B3 — validate ``KmsKeyId`` against LocalEmu's native KMS before
+    """B3 - validate ``KmsKeyId`` against LocalEmu's native KMS before
     delegating to moto. Bucket and SNS-topic existence are already
     enforced by moto's ``Trail.__init__`` via our patched
     ``check_bucket_exists`` / ``check_topic_exists`` hooks."""
@@ -728,7 +761,7 @@ def _handle_create_trail(
 def _handle_update_trail(
     context: RequestContext, request: ServiceRequest
 ) -> ServiceResponse:
-    """B4 — moto's ``update_trail`` does not re-run
+    """B4 - moto's ``update_trail`` does not re-run
     ``check_bucket_exists`` or ``check_topic_exists``, so a trail can be
     silently mutated to point at a bucket or topic that does not exist.
 
@@ -770,7 +803,7 @@ def _handle_update_trail(
 
 
 # ---------------------------------------------------------------------------
-# B5: GetTrailStatus — overlay real delivery state on moto's response
+# B5: GetTrailStatus - overlay real delivery state on moto's response
 # ---------------------------------------------------------------------------
 def _handle_get_trail_status(
     context: RequestContext, request: ServiceRequest
@@ -782,7 +815,7 @@ def _handle_get_trail_status(
     moto's ``utcnow()`` lie.
 
     When no delivery has been recorded yet (freshly created trail) the
-    delivery fields are returned empty — parity with real AWS for trails
+    delivery fields are returned empty - parity with real AWS for trails
     that have just started logging.
     """
     response = _proxy_moto(context, request) or {}
@@ -828,12 +861,12 @@ def _handle_get_trail_status(
 
 
 # ---------------------------------------------------------------------------
-# StartLogging / StopLogging — ARN-to-name normalisation
+# StartLogging / StopLogging - ARN-to-name normalisation
 #
 # Real AWS accepts either the trail name OR the full trail ARN as the ``Name``
 # parameter. Terraform's ``aws_cloudtrail`` resource passes the ARN. Moto's
 # ``start_logging``/``stop_logging`` do a raw ``self.trails[name]`` dict
-# lookup keyed by bare name, and KeyError out when handed an ARN — surfacing
+# lookup keyed by bare name, and KeyError out when handed an ARN - surfacing
 # as a 500 InternalError to the caller. Intercept to resolve the ARN to the
 # bare trail name before proxying to moto.
 # ---------------------------------------------------------------------------
@@ -852,7 +885,7 @@ def _proxy_moto_with_normalized_trail_name(
     field: str = "Name",
 ) -> ServiceResponse:
     """Normalise ``request[field]`` from ARN to bare name, then forward to
-    moto via ``call_moto_with_request`` — which (unlike ``_proxy_moto``)
+    moto via ``call_moto_with_request`` - which (unlike ``_proxy_moto``)
     actually rebuilds the HTTP request with the mutated body, so moto sees
     the corrected parameter.
     """
@@ -914,7 +947,7 @@ def _handle_get_insight_selectors(
 
 
 # ---------------------------------------------------------------------------
-# CloudTrail Lake — Query APIs
+# CloudTrail Lake - Query APIs
 # ---------------------------------------------------------------------------
 def _handle_start_query(
     context: RequestContext, request: ServiceRequest
@@ -1157,7 +1190,7 @@ def _handle_generate_query(
 # store moves to ``PENDING_DELETION`` and can be restored within 7 days.
 # We keep the store in the registry and evaluate expiry lazily.
 #
-# NOTE: This implementation is metadata-only — it does NOT ingest events
+# NOTE: This implementation is metadata-only - it does NOT ingest events
 # into the store.  The Lake Query APIs (StartQuery/GetQueryResults/...)
 # are handled separately above.
 
@@ -1612,7 +1645,7 @@ _INTERCEPTED_OPS = {
     "GetEventSelectors": _handle_get_event_selectors,
     "PutInsightSelectors": _handle_put_insight_selectors,
     "GetInsightSelectors": _handle_get_insight_selectors,
-    # CloudTrail Lake — EventDataStore
+    # CloudTrail Lake - EventDataStore
     "CreateEventDataStore": _handle_create_event_data_store,
     "GetEventDataStore": _handle_get_event_data_store,
     "UpdateEventDataStore": _handle_update_event_data_store,
@@ -1621,7 +1654,7 @@ _INTERCEPTED_OPS = {
     "ListEventDataStores": _handle_list_event_data_stores,
     "StartEventDataStoreIngestion": _handle_start_event_data_store_ingestion,
     "StopEventDataStoreIngestion": _handle_stop_event_data_store_ingestion,
-    # CloudTrail Lake — Query APIs
+    # CloudTrail Lake - Query APIs
     "StartQuery": _handle_start_query,
     "CancelQuery": _handle_cancel_query,
     "DescribeQuery": _handle_describe_query,
@@ -1659,7 +1692,7 @@ def CloudTrailDispatcher(service_model) -> DispatchTable:
 
 def _patch_moto_bucket_check() -> None:
     """Moto's ``Trail.check_bucket_exists`` consults moto's own S3 backend.
-    In LocalEmu, S3 is NOT moto-backed — it's our own provider with its own
+    In LocalEmu, S3 is NOT moto-backed - it's our own provider with its own
     store. As a result, a bucket that clearly exists per ``s3api list-buckets``
     was invisible to moto's CloudTrail, breaking ``CreateTrail`` with
     ``S3BucketDoesNotExistException``.
@@ -1696,13 +1729,13 @@ def _patch_moto_bucket_check() -> None:
 
 
 class CloudTrailLifecycleHook(ServiceLifecycleHook):
-    """Lifecycle hook owned by the CloudTrail service (F1 + F2).
+    """Lifecycle hook owned by the CloudTrail service.
 
     * ``on_before_start`` registers the activity-recording response handler
-      so recording works even when the dashboard plugin is disabled (F2).
+      so recording works even when the dashboard plugin is disabled.
     * ``on_before_stop`` stops the S3 log-delivery background thread
       cleanly on service restart, rather than waiting for interpreter
-      shutdown (F1). It also unregisters the recording hook so a
+      shutdown. It also unregisters the recording hook so a
       subsequent start re-installs a fresh one without duplicates.
     """
 
@@ -1760,11 +1793,15 @@ def create_cloudtrail_service() -> Service:
     # B2: sibling patch so moto's ``Trail.check_topic_exists`` consults
     # LocalEmu's native SNS store.
     _patch_moto_topic_check()
+    # B5: sibling patch so moto's ``delete_trail`` raises
+    # ``TrailNotFoundException`` for a nonexistent trail instead of
+    # silently no-op'ing.
+    _patch_moto_delete_trail_validation()
 
     # Start S3 log delivery background thread
     _start_s3_log_delivery()
 
-    # F2: register the activity-recording response handler via the
+    # Register the activity-recording response handler via the
     # CloudTrail service itself. This used to live in
     # dashboard/plugins.py, which meant CloudTrail silently broke when
     # the dashboard was disabled. The dashboard can still READ from the

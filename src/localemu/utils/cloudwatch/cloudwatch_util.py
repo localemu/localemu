@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from itertools import islice
 from typing import TypedDict
 
+from botocore.config import Config as BotocoreConfig
 from werkzeug import Response as WerkzeugResponse
 
 from localemu.aws.connect import connect_to
@@ -12,6 +13,22 @@ from localemu.utils.strings import to_str
 from localemu.utils.time import now_utc
 
 LOG = logging.getLogger(__name__)
+
+
+def _internal_call_config() -> BotocoreConfig:
+    """Config tagging a client as LocalEmu-internal service-to-service traffic.
+
+    These functions publish LocalEmu's own service-generated CloudWatch
+    metrics (e.g. AWS/SQS queue depth, AWS/Lambda invocation counts) - real
+    AWS publishes the equivalent metrics from inside its own control plane,
+    invisible to the customer's CloudTrail. Tag the client so the CloudTrail
+    recording hook doesn't self-record these as user-initiated PutMetricData
+    calls. Imported lazily to avoid a module-load-order dependency on the
+    cloudtrail service from this low-level shared util.
+    """
+    from localemu.services.cloudtrail.recording_hook import INTERNAL_CALL_USER_AGENT_EXTRA
+
+    return BotocoreConfig(user_agent_extra=INTERNAL_CALL_USER_AGENT_EXTRA)
 
 
 # ---------------
@@ -35,7 +52,9 @@ def publish_lambda_metric(
     # publish metric only if CloudWatch service is available
     if not is_api_enabled("cloudwatch"):
         return
-    cw_client = connect_to(aws_access_key_id=account_id, region_name=region_name).cloudwatch
+    cw_client = connect_to(
+        aws_access_key_id=account_id, region_name=region_name, config=_internal_call_config()
+    ).cloudwatch
     try:
         cw_client.put_metric_data(
             Namespace="AWS/Lambda",
@@ -65,7 +84,9 @@ def publish_sqs_metric_batch(
     if not is_api_enabled("cloudwatch"):
         return
 
-    cw_client = connect_to(region_name=region, aws_access_key_id=account_id).cloudwatch
+    cw_client = connect_to(
+        region_name=region, aws_access_key_id=account_id, config=_internal_call_config()
+    ).cloudwatch
     metric_data = []
     timestamp = datetime.utcnow().replace(tzinfo=timezone.utc)
     # to be on the safe-side: check the size of the data again and only insert up to 1000 data metrics at once
@@ -115,7 +136,9 @@ def publish_sqs_metric(
     """
     if not is_api_enabled("cloudwatch"):
         return
-    cw_client = connect_to(region_name=region, aws_access_key_id=account_id).cloudwatch
+    cw_client = connect_to(
+        region_name=region, aws_access_key_id=account_id, config=_internal_call_config()
+    ).cloudwatch
     try:
         cw_client.put_metric_data(
             Namespace="AWS/SQS",

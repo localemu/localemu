@@ -21,7 +21,7 @@ import moto.backends as moto_backends
 
 from localemu.aws.api import RequestContext, ServiceRequest, ServiceResponse
 from localemu.aws.skeleton import DispatchTable, Skeleton
-from localemu.services.moto import _proxy_moto, call_moto
+from localemu.services.moto import _proxy_moto, call_moto, call_moto_with_request
 from localemu.services.plugins import Service, ServiceLifecycleHook
 
 LOG = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def _init_task_manager():
         if _task_manager is not None:
             return _task_manager
 
-        # Opt-out instead of opt-in — enabled by default when Docker is available
+        # Opt-out instead of opt-in - enabled by default when Docker is available
         if os.environ.get("ECS_DOCKER_BACKEND", "").strip() == "0":
             return None
 
@@ -93,7 +93,7 @@ def _ensure_synthetic_instance(context: RequestContext, cluster_name: str, launc
     Moto's ``register_container_instance`` validates the ``ec2_instance_id``
     against the EC2 backend, so we must create a real Moto EC2 instance first.
 
-    The call is idempotent — if the cluster already has instances, this is a
+    The call is idempotent - if the cluster already has instances, this is a
     no-op.
 
     For FARGATE launch type, skip synthetic instance creation since
@@ -144,13 +144,33 @@ def _handle_run_task(
     # Extract launch type to distinguish FARGATE from EC2
     launch_type = request.get("launchType", "EC2")
 
+    # Real AWS treats `securityGroups` as optional in `awsvpcConfiguration`
+    # (falls back to the VPC's default security group when omitted). Moto's
+    # Task constructor does `net_conf["securityGroups"]` with no `.get()`
+    # fallback (moto/ecs/models.py), so an awsvpc task launched without an
+    # explicit security group list crashes moto with a raw KeyError instead
+    # of using a default. Normalise before moto ever sees the request.
+    #
+    # call_moto() dispatches from the ORIGINAL raw HTTP request, not this
+    # already-parsed `request` dict, so mutating `request` alone has no
+    # effect on what moto receives - call_moto_with_request() is required
+    # to actually forward the normalised value.
+    net_conf = (request.get("networkConfiguration") or {}).get("awsvpcConfiguration")
+    normalized_request = request
+    if net_conf is not None and "securityGroups" not in net_conf:
+        net_conf["securityGroups"] = []
+        normalized_request = dict(request)
+
     # Ensure Moto has a container instance so its run_task check passes.
     mgr = _init_task_manager()
     if mgr:
         cluster = request.get("cluster") or "default"
         _ensure_synthetic_instance(context, cluster, launch_type=launch_type)
 
-    result = call_moto(context)
+    if normalized_request is not request:
+        result = call_moto_with_request(context, normalized_request)
+    else:
+        result = call_moto(context)
 
     if not mgr:
         return result
@@ -442,7 +462,7 @@ def _handle_stop_task(
     context: RequestContext, request: ServiceRequest
 ) -> ServiceResponse:
     """StopTask: let Moto update the record, then stop Docker containers."""
-    # ECS uses JSON protocol — parameters are in the parsed `request` dict,
+    # ECS uses JSON protocol - parameters are in the parsed `request` dict,
     # NOT in context.request.values (which is empty for JSON bodies).
     task_arn = request.get("task") or ""
     cluster = request.get("cluster", "default")
@@ -699,7 +719,7 @@ def _handle_update_service(
         LOG.info("ECS service %s scaled up: %d -> %d tasks", service_arn, current_count, desired_count)
 
     elif desired_count < current_count:
-        # Scale down — stop excess tasks
+        # Scale down - stop excess tasks
         to_stop = current_count - desired_count
         with _service_tasks_lock:
             arns_to_stop = _service_tasks.get(service_arn, [])[-to_stop:]
@@ -751,6 +771,29 @@ def _handle_delete_service(
     return result
 
 
+def _handle_list_services(
+    context: RequestContext, request: ServiceRequest
+) -> ServiceResponse:
+    """ListServices: Moto's list_services returns every service ARN in the
+    cluster regardless of status, including ones DeleteService only marked
+    INACTIVE rather than removing (moto/ecs/models.py delete_service: "A
+    service is not immediately removed - just marked as inactive"). Real ECS
+    excludes INACTIVE services from ListServices, so filter them out here.
+    """
+    result = call_moto(context)
+
+    ecs_backend = _get_ecs_backend(context)
+    inactive_arns = {
+        service.arn for service in ecs_backend.services.values() if service.status == "INACTIVE"
+    }
+    if inactive_arns:
+        result["serviceArns"] = [
+            arn for arn in result.get("serviceArns", []) if arn not in inactive_arns
+        ]
+
+    return result
+
+
 def _run_service_tasks(
     context: RequestContext,
     cluster_name: str,
@@ -762,13 +805,13 @@ def _run_service_tasks(
     """Run N tasks for a service, returning the task ARNs created.
 
     ``_resolve_full_task_definition`` only exposes top-level
-    task-def fields (networkMode, cpu, memory, volumes) — *not* the container
+    task-def fields (networkMode, cpu, memory, volumes) - *not* the container
     definitions. Before this fix we pulled ``containerDefinitions`` out of
     that dict and got an empty list every time, so CreateService/UpdateService
     would create moto task records but never launch a Docker container. Use
     ``_resolve_task_definition`` for the per-container details and the full-td
     helper strictly for top-level attributes. Also forward the service's
-    ``networkConfiguration`` to moto's ``run_task`` — moto requires it on
+    ``networkConfiguration`` to moto's ``run_task`` - moto requires it on
     awsvpc task definitions and would otherwise raise.
     """
     task_arns = []
@@ -802,7 +845,7 @@ def _run_service_tasks(
                 if not container_defs:
                     LOG.warning(
                         "Service task %s: could not resolve containerDefinitions "
-                        "for %s — no Docker container will be launched",
+                        "for %s - no Docker container will be launched",
                         task_arn, task_def_arn,
                     )
                     continue
@@ -850,6 +893,7 @@ _INTERCEPTED_OPS = {
     "CreateService": _handle_create_service,
     "UpdateService": _handle_update_service,
     "DeleteService": _handle_delete_service,
+    "ListServices": _handle_list_services,
 }
 
 
@@ -893,17 +937,17 @@ def _ecs_on_after_state_load() -> None:
        ``_service_tasks`` mappings from moto (these are runtime caches,
        not persisted state).
     2. Resume every task whose containers still exist on the host via
-       ``docker start`` — their writable layer, env vars, and port
+       ``docker start`` - their writable layer, env vars, and port
        bindings all survive the restart.
 
     Tasks whose containers are missing (user ran ``docker rm``, image
     pruned) are logged as data-loss; moto's record is left as-is so
     ``DescribeTasks`` still returns the persisted view. Re-launching
-    from the task definition is possible future work — for now we
+    from the task definition is possible future work - for now we
     prefer honest "container gone" over silently starting a fresh
     container that doesn't match what the user left behind.
     """
-    # Clear module-level caches — moto rewrote the state under us.
+    # Clear module-level caches - moto rewrote the state under us.
     _task_def_cache.clear()
     _full_td_cache.clear()
     _synthetic_instances.clear()
@@ -911,10 +955,10 @@ def _ecs_on_after_state_load() -> None:
 
     # Force-init the task manager (it re-scans Docker labels on __init__
     # via `_recover_orphaned_containers`). ``ECS_DOCKER_BACKEND=0`` short-
-    # circuits this — in that mode there are no containers to reconcile.
+    # circuits this - in that mode there are no containers to reconcile.
     mgr = _init_task_manager()
     if not mgr:
-        LOG.debug("ECS Docker backend disabled — skipping post-load reconcile")
+        LOG.debug("ECS Docker backend disabled - skipping post-load reconcile")
         return
 
     # Step 1: rebuild synthetic EC2 instance mapping from moto.
@@ -994,7 +1038,7 @@ def _resume_task_containers(task_info) -> bool:
             running = bool((inspect.get("State") or {}).get("Running"))
         except Exception:
             LOG.warning(
-                "ECS container %s missing during restore — marking stopped",
+                "ECS container %s missing during restore - marking stopped",
                 docker_name,
             )
             container.status = "STOPPED"
@@ -1010,7 +1054,7 @@ def _resume_task_containers(task_info) -> bool:
             LOG.info("Resumed ECS container %s", docker_name)
         except Exception as exc:
             LOG.warning(
-                "docker start %s failed: %s — container left stopped",
+                "docker start %s failed: %s - container left stopped",
                 docker_name, exc,
             )
             container.status = "STOPPED"
@@ -1118,7 +1162,7 @@ def _patch_moto_resource_requirements_none_safe() -> None:
     ``TypeError: unsupported operand type(s) for +=: 'int' and 'NoneType'``
     and bubbling up as a 500 InternalError on RunTask.
 
-    Idempotent — guarded by a module flag so re-imports / hot-reload do
+    Idempotent - guarded by a module flag so re-imports / hot-reload do
     not stack the patch.
     """
     try:

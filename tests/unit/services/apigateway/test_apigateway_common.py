@@ -134,7 +134,7 @@ class TestApiGatewayPaths:
         integration = {
             "type": "HTTP_PROXY",
             "httpMethod": "ANY",
-            "uri": "https://httpbin.org/anything/{proxy}",
+            "uri": "http://test.example.internal/anything/{proxy}",
             "requestParameters": {"integration.request.path.proxy": "method.request.path.proxy"},
             "passthroughBehavior": "WHEN_NO_MATCH",
             "timeoutInMillis": 29000,
@@ -143,12 +143,12 @@ class TestApiGatewayPaths:
         }
 
         uri = apply_request_parameters(
-            uri="https://httpbin.org/anything/{proxy}",
+            uri="http://test.example.internal/anything/{proxy}",
             integration=integration,
             path_params={"proxy": "foo/bar/baz"},
             query_params={"param": "foobar"},
         )
-        assert uri == "https://httpbin.org/anything/foo/bar/baz?param=foobar"
+        assert uri == "http://test.example.internal/anything/foo/bar/baz?param=foobar"
 
 
 class TestApiGatewayRequestValidator(unittest.TestCase):

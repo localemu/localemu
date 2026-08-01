@@ -1,9 +1,10 @@
 """Tests for the IMDS public-ipv4 dynamic lookup.
 
-Closes the EIP loop: when a user calls ``associate-address`` AFTER
-container boot, the next ``curl http://169.254.169.254/latest/meta-data/public-ipv4``
-must reflect the new EIP — not the stale "127.0.0.1" baked into the
-metadata snapshot at register-time.
+When there is no EIP association and no pubport-bridge IP resolves,
+``_lookup_public_ipv4`` returns ``None`` (PublicIpAddress honesty ;
+the historical ``"127.0.0.1"`` fallback was removed because real AWS
+never reports 127.0.0.1). When an EIP IS associated, its public IP is
+returned. When it's disassociated, the lookup reverts to ``None``.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ class TestLookupPublicIpv4:
             "account_id": "123456789012",
             "region": "us-east-1",
         }
-        assert _lookup_public_ipv4(meta) == "127.0.0.1"
+        assert _lookup_public_ipv4(meta) is None
 
     def test_associated_eip_is_returned(self):
         ec2, iid = self._launch()
@@ -66,15 +67,15 @@ class TestLookupPublicIpv4:
         }
         assert _lookup_public_ipv4(meta) == eip["PublicIp"]
 
-        # Now detach — IMDS must revert to localhost
+        # Now detach - IMDS must revert to localhost
         ec2.disassociate_address(AssociationId=assoc["AssociationId"])
-        assert _lookup_public_ipv4(meta) == "127.0.0.1"
+        assert _lookup_public_ipv4(meta) is None
 
     def test_missing_instance_id_returns_fallback_without_raising(self):
         # No instance_id key at all
-        assert _lookup_public_ipv4({}) == "127.0.0.1"
+        assert _lookup_public_ipv4({}) is None
         # Empty string
-        assert _lookup_public_ipv4({"instance_id": ""}) == "127.0.0.1"
+        assert _lookup_public_ipv4({"instance_id": ""}) is None
 
     def test_eip_lookup_is_per_instance(self):
         """Two instances; only one gets an EIP. Each instance's IMDS
@@ -99,4 +100,4 @@ class TestLookupPublicIpv4:
         meta_a = {"instance_id": iid_a, "account_id": "123456789012", "region": "us-east-1"}
         meta_b = {"instance_id": iid_b, "account_id": "123456789012", "region": "us-east-1"}
         assert _lookup_public_ipv4(meta_a) == eip["PublicIp"]
-        assert _lookup_public_ipv4(meta_b) == "127.0.0.1"
+        assert _lookup_public_ipv4(meta_b) is None

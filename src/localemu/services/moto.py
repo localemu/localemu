@@ -110,6 +110,42 @@ def MotoOnlyDispatcher(service_model) -> DispatchTable:
     return {op: _proxy_moto for op in service_model.operation_names}
 
 
+#: Both CBOR content types LocalEmu's own request parser understands (see
+#: ``localemu.aws.protocol.parser`` / ``localemu.constants``) but that moto cannot: the
+#: Smithy ``rpc-v2-cbor`` protocol's ``application/cbor``, and Kinesis's older
+#: content-negotiated CBOR variant of the classic ``json`` protocol, ``application/x-amz-cbor-1.1``.
+_MOTO_INCOMPATIBLE_CBOR_MIMETYPES = (
+    constants.APPLICATION_CBOR,
+    constants.APPLICATION_AMZ_CBOR_1_1,
+)
+
+
+def _rebuild_request_for_moto(context: RequestContext) -> Request:
+    """
+    Moto has no support for CBOR-encoded request bodies at all - it only understands the
+    classic ``json``-protocol JSON body shape, and crashes trying to UTF-8-decode binary CBOR
+    (``moto/core/responses.py``: ``self.body.decode("utf-8")`` raises ``UnicodeDecodeError``).
+    This affects both the newer Smithy ``rpc-v2-cbor`` protocol and Kinesis's older
+    content-negotiated ``application/x-amz-cbor-1.1`` variant of the ``json`` protocol.
+
+    LocalEmu has already parsed the incoming request into ``context.service_request`` by the
+    time this runs (see ``localemu.aws.protocol.parser``, which already handles both CBOR
+    variants), so instead of forwarding the original CBOR-encoded request, we re-serialize those
+    same parameters as plain ``json`` - the wire format moto's dispatcher actually understands.
+    """
+    local_context = create_aws_request_context(
+        service_name=context.service.service_name,
+        action=context.operation.name,
+        parameters=context.service_request,
+        region=context.region,
+        protocol="json",
+    )
+    headers = copy.deepcopy(context.request.headers)
+    headers.update(local_context.request.headers)
+    local_context.request.headers = headers
+    return local_context.request
+
+
 def dispatch_to_moto(context: RequestContext) -> Response:
     """
     Internal method to dispatch the request to moto without changing moto's dispatcher output.
@@ -118,6 +154,9 @@ def dispatch_to_moto(context: RequestContext) -> Response:
     """
     service = context.service
     request = context.request
+
+    if request.mimetype.lower() in _MOTO_INCOMPATIBLE_CBOR_MIMETYPES:
+        request = _rebuild_request_for_moto(context)
 
     # Werkzeug might have an issue (to be determined where the responsibility lies) with proxied requests where the
     # HTTP location is a full URI and not only a path.

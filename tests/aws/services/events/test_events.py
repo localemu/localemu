@@ -573,7 +573,8 @@ class TestEventBus:
             aws_client.events.describe_event_bus(Name=bus_name)
         snapshot.match("describe-not-existing-event-bus-error", e.value.response)
 
-        aws_client.events.delete_event_bus(Name=bus_name)
+        with pytest.raises(aws_client.events.exceptions.ResourceNotFoundException) as e:
+            aws_client.events.delete_event_bus(Name=bus_name)
         snapshot.match("delete-not-existing-event-bus", e.value.response)
 
     @markers.aws.validated

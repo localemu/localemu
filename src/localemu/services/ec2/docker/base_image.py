@@ -14,7 +14,7 @@ Why we need this
 LocalEmu's VPC networks are created with ``--internal=True`` (matches
 AWS VPC isolation: no internet without an IGW). A bare ``ubuntu:22.04``
 container on such a network cannot ``apt-get install`` anything at
-runtime — the package mirrors are unreachable. The previous startup
+runtime - the package mirrors are unreachable. The previous startup
 script tried to install openssh + iptables on every boot, hit the
 no-internet wall, exited, and the container died. Every SG / NACL /
 IMDS / Flow-Log feature that depends on a running container then
@@ -27,7 +27,7 @@ Lifecycle
 process-wide lock so concurrent ``RunInstances`` calls only build the
 image once. The build runs ON the LocalEmu host (which DOES have
 internet), so the inability of VPC-attached containers to reach the
-public internet is irrelevant — the image is fetched once, baked once,
+public internet is irrelevant - the image is fetched once, baked once,
 and reused for every EC2 instance container thereafter.
 """
 
@@ -42,21 +42,33 @@ from localemu.utils.docker_utils import DOCKER_CLIENT
 
 LOG = logging.getLogger(__name__)
 
-BASE_IMAGE_TAG = "localemu/ec2-base:v3"
+BASE_IMAGE_TAG = "localemu/ec2-base:v4"
 
 # NOTE on awscli: Ubuntu 22.04's ``apt install awscli`` ships v1.22.34
 # with botocore 1.23 (2021). That version predates the AWS_ENDPOINT_URL
 # environment-variable support (added in botocore 1.28 / awscli 1.29.72,
 # May 2023). Without it, ``aws s3 ls`` from inside an EC2 container
-# still talks to the real ``s3.amazonaws.com`` — defeating the whole
+# still talks to the real ``s3.amazonaws.com`` - defeating the whole
 # point of LocalEmu. We therefore install awscli via pip so we get a
 # recent version that honours AWS_ENDPOINT_URL.
+#
+# NOTE on the ``ubuntu`` user (v4 change): real AWS Ubuntu AMIs ship
+# with a ``ubuntu`` user (uid 1000, sudo NOPASSWD, /home/ubuntu). Every
+# tutorial in the world uses ``ssh ubuntu@<PublicIpAddress>``. Prior
+# LocalEmu images had root only, which forced users to know a LocalEmu
+# quirk ("SSH as root, not ubuntu"). v4 adds the user so ``--key-name``
+# combined with ``ssh ubuntu@…`` matches real AWS behaviour without
+# LocalEmu-specific knowledge. Amazon-Linux-style AMIs (``ec2-user``),
+# Debian (``admin``), etc. resolve to their canonical user via
+# ``ami_canonical_users.py``; the key is injected into that user's home
+# AND ``/root/.ssh/`` so both idioms work.
 _DOCKERFILE = """\
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq \\
     && apt-get install -y -qq --no-install-recommends \\
         openssh-server \\
+        sudo \\
         iptables \\
         iproute2 \\
         iputils-ping \\
@@ -73,12 +85,17 @@ RUN apt-get update -qq \\
     && pip3 install --no-cache-dir 'awscli>=1.32' \\
     && apt-get clean \\
     && rm -rf /var/lib/apt/lists/* ~/.cache/pip \\
-    && mkdir -p /run/sshd /root/.ssh \\
-    && chmod 700 /root/.ssh \\
+    && useradd -m -s /bin/bash -u 1000 ubuntu \\
+    && usermod -aG sudo ubuntu \\
+    && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-cloud-init-users \\
+    && chmod 0440 /etc/sudoers.d/90-cloud-init-users \\
+    && mkdir -p /run/sshd /home/ubuntu/.ssh /root/.ssh \\
+    && chown -R ubuntu:ubuntu /home/ubuntu/.ssh \\
+    && chmod 700 /home/ubuntu/.ssh /root/.ssh \\
     && ssh-keygen -A
 LABEL org.localemu.image-role="ec2-base"
 LABEL org.opencontainers.image.source="https://github.com/localemu/localemu"
-LABEL org.opencontainers.image.description="LocalEmu-managed EC2 base image (ubuntu+sshd+iptables+net tooling+awscli v1.32+)"
+LABEL org.opencontainers.image.description="LocalEmu-managed EC2 base image (ubuntu+sshd+iptables+net tooling+awscli v1.32+, ubuntu user)"
 """
 
 _build_lock = threading.Lock()

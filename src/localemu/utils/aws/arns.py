@@ -583,7 +583,18 @@ def sqs_queue_url_for_arn(queue_arn: str) -> str:
         region_name = None
         queue_name = queue_arn
 
-    sqs_client = connect_to(region_name=region_name).sqs
+    # This is LocalEmu's own internal ARN-to-URL resolution (e.g. EventBridge
+    # resolving a target's queue before delivery) - real AWS resolves this
+    # inside its own control plane, invisible to the customer's CloudTrail.
+    # Tag the client so it doesn't self-record as a user-initiated GetQueueUrl.
+    from botocore.config import Config as BotocoreConfig
+
+    from localemu.services.cloudtrail.recording_hook import INTERNAL_CALL_USER_AGENT_EXTRA
+
+    sqs_client = connect_to(
+        region_name=region_name,
+        config=BotocoreConfig(user_agent_extra=INTERNAL_CALL_USER_AGENT_EXTRA),
+    ).sqs
     result = sqs_client.get_queue_url(QueueName=queue_name, QueueOwnerAWSAccountId=account_id)[
         "QueueUrl"
     ]

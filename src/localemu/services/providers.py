@@ -116,6 +116,16 @@ def ec2():
     return Service.for_provider(provider, dispatch_table_factory=MotoFallbackDispatcher)
 
 
+@aws_provider(api="ec2-instance-connect")
+def ec2_instance_connect():
+    from localemu.services.ec2_instance_connect.provider import (
+        Ec2InstanceConnectProvider,
+    )
+
+    provider = Ec2InstanceConnectProvider()
+    return Service.for_provider(provider)
+
+
 @aws_provider()
 def es():
     from localemu.services.es.provider import EsProvider
@@ -497,7 +507,7 @@ def backup():
 
 @aws_provider()
 def pipes():
-    """Real Pipes runtime — see :mod:`localemu.services.pipes.provider`.
+    """Real Pipes runtime - see :mod:`localemu.services.pipes.provider`.
 
     Replaces the previous moto-only stub. The custom provider intercepts
     every API verb, owns a per-pipe background poller that long-polls
@@ -564,7 +574,7 @@ def cloudtrail():
 
 @aws_provider()
 def sesv2():
-    """Real SESv2 provider — see :mod:`localemu.services.sesv2.provider`.
+    """Real SESv2 provider - see :mod:`localemu.services.sesv2.provider`.
 
     Replaces the moto-only stub. Overrides SendEmail so the message
     actually reaches the v1 retrospection mailbox at ``/_aws/ses``; all
@@ -674,7 +684,7 @@ def codepipeline():
 @aws_provider()
 def comprehend():
     # moto's comprehend backend exists but skips DetectDominantLanguage /
-    # DetectSentiment / DetectEntities / etc. — the stub provider fills
+    # DetectSentiment / DetectEntities / etc. - the stub provider fills
     # those gaps and falls through to moto for everything else.
     from localemu.services.stub_providers import create_stub_service
 

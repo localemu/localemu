@@ -91,6 +91,55 @@ LOG = logging.getLogger(__name__)
 PARAM_PREFIX_SECRETSMANAGER = "/aws/reference/secretsmanager"
 
 
+def _resolve_session_type(
+    document_name: str, parameters: dict | list | None,
+) -> tuple[str, dict | None]:
+    """Map ``StartSession`` (DocumentName, Parameters) → (session_type,
+    session_properties) for the SSM Session Manager handshake.
+
+    AWS documents recognised here :
+
+    * ``AWS-StartPortForwardingSession`` : TCP forwarding to a port on
+      the target instance. Reads ``portNumber`` (+ optional
+      ``localPortNumber``, ``localConnectionType``) from
+      ``Parameters``. See
+      https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html#sessions-start-port-forwarding
+    * default (empty, ``SSM-SessionManagerRunShell``) : interactive
+      shell over a PTY.
+
+    ``Parameters`` may arrive as ``{"portNumber": ["8000"]}`` (list
+    values, matching the AWS wire encoding) or ``{"portNumber": "8000"}``
+    (already flattened). We accept both.
+    """
+    def _first(v):
+        if isinstance(v, list):
+            return v[0] if v else ""
+        return v or ""
+
+    def _param(name: str) -> str:
+        if isinstance(parameters, dict):
+            return str(_first(parameters.get(name)) or "").strip()
+        if isinstance(parameters, list):
+            for entry in parameters:
+                if isinstance(entry, dict):
+                    if entry.get("Name") == name:
+                        return str(_first(entry.get("Values")) or "").strip()
+        return ""
+
+    if document_name == "AWS-StartPortForwardingSession":
+        port_number = _param("portNumber")
+        props = {
+            "portNumber": port_number,
+            "type": "LocalPortForwarding",
+        }
+        local_port = _param("localPortNumber")
+        if local_port:
+            props["localPortNumber"] = local_port
+        return "Port", props
+
+    return "Standard_Stream", None
+
+
 def _resolve_targets_to_instance_ids(
     context: RequestContext, targets: list,
 ) -> list[str]:
@@ -125,7 +174,7 @@ def _resolve_targets_to_instance_ids(
                 if v in values:
                     out.append(getattr(inst, "id", ""))
         else:
-            LOG.debug("SSM target key %s not supported — skipped", key)
+            LOG.debug("SSM target key %s not supported - skipped", key)
     # De-dup while preserving order.
     seen = set()
     uniq = []
@@ -159,9 +208,8 @@ class SsmProvider(SsmApi, ABC):
         visitor.visit(ssm_backends)
 
     # ------------------------------------------------------------------
-    # SendCommand / GetCommandInvocation — execute via docker exec on
-    # the target EC2 instance's Docker container (no SSM agent in guest).
-    # See LocalEmuResearch/DockerEmulation/DESIGN_SSM_EC2.md.
+    # SendCommand / GetCommandInvocation, executed via ``docker exec``
+    # on the target EC2 instance's container (no in-guest SSM agent).
     # ------------------------------------------------------------------
 
     @handler("SendCommand", expand=False)
@@ -227,7 +275,7 @@ class SsmProvider(SsmApi, ABC):
     def describe_instance_information(self, context: RequestContext, request: dict = None, **kwargs):
         """Return every running EC2 Docker container as an SSM-managed
         instance. Moto's SSM backend does NOT implement this operation
-        at all, so we own the entire response — no moto passthrough."""
+        at all, so we own the entire response - no moto passthrough."""
         info_list: list[dict] = []
         try:
             from localemu.services.ec2.docker.vm_manager import (
@@ -270,7 +318,7 @@ class SsmProvider(SsmApi, ABC):
 
         Returns the AWS-shaped ``SessionId`` / ``TokenValue`` /
         ``StreamUrl`` triple. The ``StreamUrl`` points at the LocalEmu
-        WebSocket bridge — the AWS CLI's SessionManagerPlugin will dial
+        WebSocket bridge - the AWS CLI's SessionManagerPlugin will dial
         it, present the TokenValue, and end up with a real shell inside
         the target instance's Docker container.
 
@@ -312,12 +360,39 @@ class SsmProvider(SsmApi, ABC):
         from localemu.services.ssm.session_manager import get_session_registry
         from localemu.services.ssm.session_ws_server import get_ws_server
 
+        # Parse the DocumentName + Parameters. The default shell session
+        # (SSM-SessionManagerRunShell or no document at all) yields a
+        # Standard_Stream / PTY session ; ``AWS-StartPortForwardingSession``
+        # yields a "Port" TCP-tunnel session multiplexed via SMUX v1.
+        req = request or {}
+        document_name = (
+            kwargs.get("document_name")
+            or req.get("DocumentName") or ""
+        ).strip()
+        parameters = kwargs.get("parameters") or req.get("Parameters") or {}
+        session_type, session_properties = _resolve_session_type(
+            document_name, parameters,
+        )
+        if session_type == "Port":
+            if not session_properties.get("portNumber"):
+                raise CommonServiceException(
+                    code="InvalidParameters",
+                    message=(
+                        "AWS-StartPortForwardingSession requires the "
+                        "portNumber parameter."
+                    ),
+                    status_code=400,
+                    sender_fault=True,
+                )
+
         ws_port = get_ws_server().start()
         sess = get_session_registry().create(
             target_instance_id=target,
             container_name=container_name,
             account_id=context.account_id,
             region=context.region,
+            session_type=session_type,
+            session_properties=session_properties,
         )
         # Surface the bridge URL. ``localhost`` is the canonical host
         # for clients running on the same machine as LocalEmu; for
@@ -361,7 +436,7 @@ class SsmProvider(SsmApi, ABC):
         from localemu.services.ssm.session_manager import get_session_registry
 
         state = (kwargs.get("state") or (request or {}).get("State") or "").strip()
-        # AWS exposes "Active" and "History" — we only have active records.
+        # AWS exposes "Active" and "History" - we only have active records.
         if state and state.lower() == "history":
             return {"Sessions": []}
         sessions = [
@@ -459,7 +534,7 @@ class SsmProvider(SsmApi, ABC):
     def delete_parameter(
         self, context: RequestContext, name: PSParameterName, **kwargs
     ) -> DeleteParameterResult:
-        # Delegate to moto first — it validates the parameter exists and raises
+        # Delegate to moto first - it validates the parameter exists and raises
         # ParameterNotFound otherwise. Emitting the Delete event only after a
         # successful deletion prevents spurious notifications for missing params.
         call_moto(context)  # Return type is an empty type.
@@ -669,7 +744,7 @@ class SsmProvider(SsmApi, ABC):
         try:
             secret_info = client.get_secret_value(SecretId=resource_name)
             secret_info.pop("ResponseMetadata", None)
-            # Use UTC epoch conversion — time.mktime() interprets the struct as
+            # Use UTC epoch conversion - time.mktime() interprets the struct as
             # local time, producing incorrect timestamps on non-UTC hosts.
             created_date_timestamp = calendar.timegm(
                 secret_info["CreatedDate"].utctimetuple()

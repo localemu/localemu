@@ -1,5 +1,4 @@
-// KMS key drill -- tabbed drill via DASH.drills.framework.
-// Implements the design from /tmp/le-audit2-15-crypto-secrets.md.
+// KMS key drill: tabbed drill via DASH.drills.framework.
 //
 // Tabs: General | Key policy | Cryptographic config | Aliases |
 // Grants | Rotation | Public key (asymmetric only) |

@@ -235,9 +235,14 @@ class IamProvider(IamApi):
             response_role.pop("PermissionsBoundary", None)
             response_role.pop("Tags", None)
             response_roles.append(response_role)
-            # L-04: Always URL-encode the trust policy document for consistency
+            # L-04: Always URL-encode the trust policy document for consistency.
+            # moto stores assume_role_policy_document as the raw JSON string the caller
+            # submitted (see moto.iam.models.Role), so it must be quoted directly -
+            # wrapping it in json.dumps() here would double-encode it, leaving botocore's
+            # client-side json_decode_policies handler unable to fully decode it back to
+            # a dict (it only unquotes+json.loads once).
             response_role["AssumeRolePolicyDocument"] = quote(
-                json.dumps(moto_role.assume_role_policy_document or {})
+                moto_role.assume_role_policy_document or "{}"
             )
 
         result = ListRolesResponse(Roles=response_roles, IsTruncated=is_truncated)

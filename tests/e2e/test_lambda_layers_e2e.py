@@ -1,4 +1,4 @@
-"""End-to-end tests for Lambda layer mounting (PR-004 Phase 1).
+"""End-to-end tests for Lambda layer mounting.
 
 Each test:
   1. Builds a layer ZIP in-memory.
@@ -14,7 +14,7 @@ Coverage:
 
 * python: ``/opt/python/<name>.py`` is on ``PYTHONPATH``.
 * python: a layer can override built-in import order (two layers with
-  the same top-level module — later one wins, real-AWS semantics).
+  the same top-level module - later one wins, real-AWS semantics).
 * python: ``/opt/python/lib/python3.12/site-packages/<name>.py`` is also
   on ``PYTHONPATH`` (the runtime-versioned site-packages path).
 """
@@ -170,7 +170,7 @@ def test_python_layer_top_level_import(lambda_client, lambda_role):
 
 
 # ---------------------------------------------------------------------------
-# Test 2: ordering — later layer overwrites earlier
+# Test 2: ordering - later layer overwrites earlier
 # ---------------------------------------------------------------------------
 
 
@@ -257,7 +257,7 @@ def test_python_layer_runtime_versioned_site_packages_path(lambda_client, lambda
 
 
 # ---------------------------------------------------------------------------
-# Test 4: no-layer baseline — no /opt mount when no layers attached
+# Test 4: no-layer baseline - no /opt mount when no layers attached
 # ---------------------------------------------------------------------------
 
 

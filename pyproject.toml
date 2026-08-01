@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localemu"
-version = "1.1.1"
+version = "1.2.0"
 authors = [
     { name = "LocalEmu Contributors", email = "info@localemu.cloud" }
 ]
@@ -26,6 +26,64 @@ dependencies = [
     "rich>=12.3.0",
     "requests>=2.20.0",
     "semver>=2.10",
+    # --- merged from the former [base-runtime]/[runtime] extras so that
+    # `pip install localemu` alone is enough to run `localemu start` -
+    # previously these were opt-in, so a bare install produced a package
+    # whose only entry point crashed with ModuleNotFoundError. See the
+    # (now empty, kept for backward compatibility) base-runtime / runtime
+    # extras below. ---
+    # pinned / updated by ASF update action
+    "boto3==1.42.59",
+    # pinned / updated by ASF update action
+    "botocore==1.42.59",
+    # transitive dependency of botocore, added to avoid specific version
+    "awscrt>=0.13.14,!=0.27.1",
+    # cbor2 6.x ships C-only. LocalEmu uses cbor2's public per-call hook
+    # API (semantic_decoders=, encoders=) via aws/protocol/_cbor.py to
+    # apply the AWS Kinesis epoch-millis quirk; no private modules.
+    "cbor2>=6.0",
+    "dill==0.3.6",
+    "docker>=6.1.1",
+    "jsonpatch>=1.24",
+    "jsonpointer>=3.0.0",
+    "jsonschema>=4.25.1",
+    "hypercorn>=0.14.4",
+    "Twisted[tls]>=26.4.0",
+    "openapi-core>=0.19.2",
+    "pydantic>=2.11.9",
+    "pyopenssl>=23.0.0",
+    "python-dateutil>=2.9.0",
+    "readerwriterlock>=1.0.7",
+    "requests-aws4auth>=1.0",
+    # explicitly set urllib3 to force its usage / ensure compatibility
+    "urllib3>=2.7.0",
+    "Werkzeug>=3.1.3",
+    "xmltodict>=0.13.0",
+    "rolo>=0.8.1",
+    # pinned / updated by ASF update action
+    "awscli==1.44.49",
+    "airspeed-ext>=0.6.3",
+    # antlr4-python3-runtime: exact pin because antlr4 runtime is tightly coupled to the generated parser code
+    "antlr4-python3-runtime==4.13.2",
+    "apispec>=5.1.1",
+    # pinning it to a higher version than what moto-ext requires
+    "aws-sam-translator>=1.105.0",
+    "crontab>=0.22.6",
+    "jinja2>=3.1.6",
+    "jsonpath-ng==1.7.0",
+    "jsonpath-rw>=1.4.0",
+    # kclpy-ext removed: KCL-based Kinesis consumption requires Java at runtime
+    # and is only used for Firehose KinesisStreamAsSource (rarely needed in local dev)
+    "moto-ext[all]>=5.1.22",
+    "opensearch-py>=2.4.1",
+    # Athena DuckDB-backed query engine. ~25 MB wheel, MIT-licensed.
+    # Without it the Athena provider returns empty Rows[] (matches the
+    # historic moto-only behaviour). sqlglot is used for the small
+    # number of dialect rewrites that the regex shim cannot handle.
+    "duckdb>=1.0",
+    "sqlglot>=23",
+    "pymongo>=4.2.0",
+    "responses>=0.25.8",
 ]
 dynamic = ["entry-points", "readme"]
 classifiers = [
@@ -48,70 +106,16 @@ Repository = "https://github.com/localemu/localemu.git"
 Issues = "https://github.com/localemu/localemu/issues"
 
 [project.optional-dependencies]
-# minimal required to actually run localemu on the host for services natively implemented in python
-base-runtime = [
-    # pinned / updated by ASF update action
-    "boto3==1.42.59",
-    # pinned / updated by ASF update action
-    "botocore==1.42.59",
-    # transitive dependency of botocore, added to avoid specific version
-    "awscrt>=0.13.14,!=0.27.1",
-    # cbor2 6.x ships C-only. LocalEmu uses cbor2's public per-call hook
-    # API (semantic_decoders=, encoders=) via aws/protocol/_cbor.py to
-    # apply the AWS Kinesis epoch-millis quirk; no private modules.
-    "cbor2>=6.0",
-    "dill==0.3.6",
-    "dnspython>=1.16.0",
-    "docker>=6.1.1",
-    "jsonpatch>=1.24",
-    "jsonpointer>=3.0.0",
-    "jsonschema>=4.25.1",
-    "hypercorn>=0.14.4",
-    "Twisted[tls]>=26.4.0",
-    "openapi-core>=0.19.2",
-    "pydantic>=2.11.9",
-    "pyopenssl>=23.0.0",
-    "python-dateutil>=2.9.0",
-    "readerwriterlock>=1.0.7",
-    "requests-aws4auth>=1.0",
-    # explicitly set urllib3 to force its usage / ensure compatibility
-    "urllib3>=2.7.0",
-    "Werkzeug>=3.1.3",
-    "xmltodict>=0.13.0",
-    "rolo>=0.8.1",
-]
-
-# required to actually run localemu on the host
-runtime = [
-    "localemu[base-runtime]",
-    # pinned / updated by ASF update action
-    "awscli==1.44.49",
-    "airspeed-ext>=0.6.3",
-    # antlr4-python3-runtime: exact pin because antlr4 runtime is tightly coupled to the generated parser code
-    "antlr4-python3-runtime==4.13.2",
-    "apispec>=5.1.1",
-    # pinning it to a higher version than what moto-ext requires
-    "aws-sam-translator>=1.105.0",
-    "crontab>=0.22.6",
-    "cryptography>=46.0.7",
-    "jinja2>=3.1.6",
-    "jsonpath-ng==1.7.0",
-    "jsonpath-rw>=1.4.0",
-    # kclpy-ext removed: KCL-based Kinesis consumption requires Java at runtime
-    # and is only used for Firehose KinesisStreamAsSource (rarely needed in local dev)
-    "moto-ext[all]>=5.1.22",
-    "opensearch-py>=2.4.1",
-    # Athena DuckDB-backed query engine. ~25 MB wheel, MIT-licensed.
-    # Without it the Athena provider returns empty Rows[] (matches the
-    # historic moto-only behaviour). sqlglot is used for the small
-    # number of dialect rewrites that the regex shim cannot handle.
-    "duckdb>=1.0",
-    "sqlglot>=23",
-    "pymongo>=4.2.0",
-    "PyJWT[crypto]>=2.8.0",
-    "pyopenssl>=23.0.0",
-    "responses>=0.25.8",
-]
+# DEPRECATED, kept as no-ops for backward compatibility only. Every package
+# that used to live in these two extras is now a plain base dependency (see
+# `dependencies` above), so `pip install localemu` alone is fully functional
+# - these are only here so that `pip install localemu[base-runtime]` and
+# `pip install localemu[runtime]`, as documented on localemu.cloud today,
+# keep working without error during the transition. Will be removed in a
+# future release once the docs are updated to just say `pip install
+# localemu`.
+base-runtime = []
+runtime = []
 
 # for running tests and coverage analysis
 test = [
@@ -125,14 +129,13 @@ test = [
     "pytest-split>=0.8.0",
     "pytest-httpserver>=1.1.2",
     "pytest-rerunfailures>=12.0",
-    "pytest-tinybird>=0.5.0",
     "aws-cdk-lib>=2.88.0",
     "websocket-client>=1.7.0",
     "deepdiff",
     "jsonpath-ng>1.6",
     # Wire-protocol clients used by service-backend E2E tests:
-    #   pika           — AMQP for the MQ (RabbitMQ) round-trip.
-    #   kafka-python   — Apache Kafka producer / consumer for the MSK
+    #   pika - AMQP for the MQ (RabbitMQ) round-trip.
+    #   kafka-python - Apache Kafka producer / consumer for the MSK
     #                    round-trip against the apache/kafka container.
     "pika>=1.3",
     "kafka-python>=2.0",

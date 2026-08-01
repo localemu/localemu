@@ -1,4 +1,4 @@
-"""SSM Session Manager — session registry + binary ClientMessage codec.
+"""SSM Session Manager - session registry + binary ClientMessage codec.
 
 Implements just enough of the AWS Session Manager protocol to give an
 interactive ``Standard_Stream`` shell from ``aws ssm start-session
@@ -9,15 +9,15 @@ https://github.com/aws/session-manager-plugin
 
 ClientMessage binary frame layout (big-endian, 116-byte fixed header):
 
-* ``HeaderLength`` uint32 (4)              — always 116
+* ``HeaderLength`` uint32 (4) - always 116
 * ``MessageType`` 32 bytes ASCII, null-padded
-* ``SchemaVersion`` uint32 (4)             — 1
-* ``CreatedDate`` uint64 (8)               — epoch ms
-* ``SequenceNumber`` int64 (8)             — monotonic per-direction
-* ``Flags`` uint64 (8)                     — bit0=SYN, bit1=FIN
+* ``SchemaVersion`` uint32 (4) - 1
+* ``CreatedDate`` uint64 (8) - epoch ms
+* ``SequenceNumber`` int64 (8) - monotonic per-direction
+* ``Flags`` uint64 (8) - bit0=SYN, bit1=FIN
 * ``MessageId`` 16 raw UUID bytes
 * ``PayloadDigest`` 32 SHA-256 of payload
-* ``PayloadType`` uint32 (4)               — see PayloadType enum
+* ``PayloadType`` uint32 (4) - see PayloadType enum
 * ``PayloadLength`` uint32 (4)
 * ``Payload`` variable bytes
 """
@@ -40,10 +40,20 @@ LOG = logging.getLogger(__name__)
 
 # --- ClientMessage codec ---------------------------------------------------
 
-# 4 (HeaderLength) + 32 (MessageType) + 4 (SchemaVersion) + 8 (CreatedDate) +
-# 8 (SequenceNumber) + 8 (Flags) + 16 (MessageId) + 32 (PayloadDigest) +
-# 4 (PayloadType) + 4 (PayloadLength) = 120.
-_HEADER_LEN = 120
+# The full binary header (up to and including PayloadLength) is 120 bytes:
+#   4 (HeaderLength) + 32 (MessageType) + 4 (SchemaVersion) + 8 (CreatedDate) +
+#   8 (SequenceNumber) + 8 (Flags) + 16 (MessageId) + 32 (PayloadDigest) +
+#   4 (PayloadType) + 4 (PayloadLength) = 120.
+_TOTAL_HEADER_BYTES = 120
+
+# The HeaderLength field on the wire carries the OFFSET at which PayloadLength
+# starts (i.e. 120 minus the 4 bytes of PayloadLength itself). Real
+# amazon-ssm-agent's Serialize writes AgentMessage_PayloadLengthOffset = 116;
+# the plugin reads Payload = input[headerLength + PayloadLengthLength(4) :],
+# so writing anything other than 116 shifts the plugin's payload slice and
+# breaks SHA-256 payload-digest verification. Source:
+#   aws/amazon-ssm-agent/agent/session/contracts/agentmessage.go
+_WIRE_HEADER_LEN = 116
 _MESSAGE_TYPE_LEN = 32
 _SCHEMA_VERSION = 1
 
@@ -91,7 +101,7 @@ class ClientMessage:
         mtype = mtype.ljust(_MESSAGE_TYPE_LEN, b"\x00")
         digest = hashlib.sha256(self.payload).digest()
         header = struct.pack(
-            ">I", _HEADER_LEN,
+            ">I", _WIRE_HEADER_LEN,
         ) + mtype + struct.pack(
             ">I Q q Q",
             _SCHEMA_VERSION,
@@ -101,23 +111,36 @@ class ClientMessage:
         ) + self.message_id + digest + struct.pack(
             ">I I", self.payload_type, len(self.payload),
         )
-        assert len(header) == _HEADER_LEN, len(header)
+        assert len(header) == _TOTAL_HEADER_BYTES, len(header)
         return header + self.payload
 
     @classmethod
     def deserialize(cls, data: bytes) -> "ClientMessage":
-        if len(data) < _HEADER_LEN:
-            raise ValueError(f"frame too short: {len(data)} < {_HEADER_LEN}")
+        if len(data) < _TOTAL_HEADER_BYTES:
+            raise ValueError(
+                f"frame too short: {len(data)} < {_TOTAL_HEADER_BYTES}",
+            )
         (header_len,) = struct.unpack(">I", data[0:4])
-        if header_len != _HEADER_LEN:
+        if header_len != _WIRE_HEADER_LEN:
             raise ValueError(f"unexpected HeaderLength {header_len}")
-        mtype = data[4:4 + _MESSAGE_TYPE_LEN].rstrip(b"\x00").decode("ascii", "replace")
+        # MessageType is a 32-byte fixed field. The real session-manager-plugin
+        # right-pads with SPACE (0x20) bytes (see plugin src/message/messageparser.go
+        # putString: writes into a make([]byte, ...)-initialised slice, so bytes past
+        # the copy remain 0x00 on the agent side, but the plugin's own outbound
+        # serialize path emits space padding). Strip BOTH so comparisons like
+        # ``msg.message_type == "input_stream_data"`` hold regardless of which
+        # padding style arrives on the wire.
+        mtype = (
+            data[4:4 + _MESSAGE_TYPE_LEN]
+            .rstrip(b"\x00 ")
+            .decode("ascii", "replace")
+        )
         off = 4 + _MESSAGE_TYPE_LEN
         (_schema, created, seq, flags) = struct.unpack(">I Q q Q", data[off:off + 28])
         off += 28
         message_id = data[off:off + 16]
         off += 16
-        # digest is data[off:off+32] — caller can verify if it wants.
+        # digest is data[off:off+32] - caller can verify if it wants.
         off += 32
         (payload_type, payload_len) = struct.unpack(">I I", data[off:off + 8])
         off += 8
@@ -149,13 +172,24 @@ def acknowledge_frame(received: ClientMessage, ack_seq: int) -> ClientMessage:
     )
 
 
-def handshake_request_frame(seq: int) -> ClientMessage:
+def handshake_request_frame(
+    seq: int,
+    session_type: str = "Standard_Stream",
+    properties: Optional[dict] = None,
+) -> ClientMessage:
     """First frame the server sends after the JSON open-channel auth.
 
     Plugin will not accept stdin until ``HandshakeComplete`` arrives, so
     the sequence is: server sends HandshakeRequest → plugin ACKs it →
     plugin sends HandshakeResponse → server ACKs it → server sends
     HandshakeComplete → plugin ACKs it.
+
+    :param session_type: ``"Standard_Stream"`` (interactive shell,
+        the default) or ``"Port"`` (TCP port forwarding, see
+        ``AWS-StartPortForwardingSession`` in the AWS documentation).
+    :param properties: ActionParameters.Properties JSON. For
+        ``Port`` this is the port-parameters object
+        ``{"portNumber": "<n>", "type": "LocalPortForwarding"}``.
     """
     body = json.dumps({
         "AgentVersion": "3.3.0.0-localemu",
@@ -163,8 +197,8 @@ def handshake_request_frame(seq: int) -> ClientMessage:
             {
                 "ActionType": "SessionType",
                 "ActionParameters": {
-                    "SessionType": "Standard_Stream",
-                    "Properties": None,
+                    "SessionType": session_type,
+                    "Properties": properties,
                 },
             },
         ],
@@ -232,6 +266,8 @@ class Session:
     container_name: str
     account_id: str
     region: str
+    session_type: str = "Standard_Stream"
+    session_properties: Optional[dict] = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -248,6 +284,8 @@ class SessionRegistry:
         container_name: str,
         account_id: str,
         region: str,
+        session_type: str = "Standard_Stream",
+        session_properties: Optional[dict] = None,
     ) -> Session:
         # Mirrors AWS shape: ``user-<random-hex>``. The CLI doesn't parse
         # the format; it's purely informational.
@@ -260,6 +298,8 @@ class SessionRegistry:
             container_name=container_name,
             account_id=account_id,
             region=region,
+            session_type=session_type,
+            session_properties=session_properties,
         )
         with self._lock:
             self._sessions[session_id] = sess

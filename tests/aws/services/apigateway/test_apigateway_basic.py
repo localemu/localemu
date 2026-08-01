@@ -194,7 +194,7 @@ class TestAPIGateway:
             resourceId=root,
             httpMethod="GET",
             type="HTTP",
-            uri="http://httpbin.org/robots.txt",
+            uri="http://test.example.internal/robots.txt",
             integrationHttpMethod="POST",
         )
         create_rest_api_integration_response(

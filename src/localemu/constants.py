@@ -25,21 +25,12 @@ LOCALHOST_HOSTNAME = "localhost"
 # User-agent string used in outgoing HTTP requests made by LocalEmu
 USER_AGENT_STRING = f"localemu/{VERSION}"
 
-# URL of localemu's artifacts repository on GitHub
-ARTIFACTS_REPO = "https://github.com/localemu/localemu-artifacts"
-
-# Artifacts endpoint
-ASSETS_ENDPOINT = "https://assets.localemu.cloud"
-
-# Hugging Face endpoint for localemu
-HUGGING_FACE_ENDPOINT = "https://huggingface.co/localemu"
-
 # Host to bind to when starting services INSIDE the LocalEmu Docker container.
 # This is 0.0.0.0 because inside the container we need to accept connections
 # from other containers/the docker bridge; the actual host-side exposure is
 # controlled by the user's docker run / docker-compose port mapping (default
 # binds only to 127.0.0.1 unless the user opts in). Do NOT use this value for
-# binding services on the host directly — use GATEWAY_LISTEN / LOCALEMU_HOST
+# binding services on the host directly - use GATEWAY_LISTEN / LOCALEMU_HOST
 # Config instead.
 BIND_HOST = "0.0.0.0"
 

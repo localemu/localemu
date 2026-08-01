@@ -29,7 +29,7 @@ _start_time = time.time()
 
 
 # ---------------------------------------------------------------------------
-# Moto backend iteration helper — iterates ALL accounts and ALL regions
+# Moto backend iteration helper - iterates ALL accounts and ALL regions
 # ---------------------------------------------------------------------------
 
 def _iter_moto_backends(service_name: str):
@@ -50,12 +50,12 @@ def _iter_moto_backends(service_name: str):
     # (account, region, backend) tuples AND is naturally service-scoped, so
     # we use it as the canonical source.
     #
-    # We must not trigger lazy instantiation of new backends — reading
+    # We must not trigger lazy instantiation of new backends - reading
     # ``backend_dict[account][region]`` on an absent key DOES create an
     # empty backend in moto, which pollutes ``_instances`` with ghosts.
     # So we iterate only already-materialised entries.
 
-    # ``BackendDict`` subclasses ``dict`` for the account layer — if it has
+    # ``BackendDict`` subclasses ``dict`` for the account layer - if it has
     # already been touched by CreateX handlers, its keys are the instantiated
     # account IDs. Iterating it via ``.items()`` does NOT lazily create new
     # backends, but reading a missing key would. Use ``.items()`` safely.
@@ -744,7 +744,7 @@ def _get_dashboard_html() -> str:
 
 
 class OverviewResource:
-    """``GET /_localemu/api/overview`` — system summary.
+    """``GET /_localemu/api/overview`` - system summary.
 
     ETag-based conditional GET: the dashboard polls this on a 60 s
     safety interval and pushes invalidation via SSE in between. With
@@ -819,7 +819,7 @@ class RegistryResource:
 
 
 class ResourcesResource:
-    """``GET /_localemu/api/resources/<service>`` — per-service resource list.
+    """``GET /_localemu/api/resources/<service>`` - per-service resource list.
 
     Per-service ETag from the bus's ``resources:<svc>`` tag. The bus
     bumps the generation on every state-mutating event for ``<svc>``,
@@ -1789,7 +1789,7 @@ class ResourcesResource:
 
     @staticmethod
     def _list_pipes() -> list[dict]:
-        """EventBridge Pipes — moto metadata + runtime worker state."""
+        """EventBridge Pipes - moto metadata + runtime worker state."""
         from localemu.services.pipes.pipe_manager import PipeManager
 
         runtime_state: dict[str, str] = {}
@@ -2155,7 +2155,7 @@ def _default_db_name(engine: str) -> str:
 
 
 class VpcDetailResource:
-    """``GET /_localemu/api/resources/vpc/<vpc_id>`` — full VPC topology.
+    """``GET /_localemu/api/resources/vpc/<vpc_id>`` - full VPC topology.
 
     Returns the same row data the list endpoint emits plus every related
     object the user would expect on a VPC detail page on real AWS:
@@ -3876,7 +3876,7 @@ class KmsKeyDetailResource:
 
 
 class LogEventsResource:
-    """``GET /_localemu/api/resources/logs/<log_group>`` — log events for a group."""
+    """``GET /_localemu/api/resources/logs/<log_group>`` - log events for a group."""
 
     def on_get(self, request: Request, log_group: str = ""):
         LOG.debug("Dashboard API request: GET /resources/logs/%s from %s", log_group, request.remote_addr)
@@ -3934,7 +3934,7 @@ def _s3_object_row(key: str, obj, version_id):
 
 
 class S3ObjectsResource:
-    """``GET /_localemu/api/resources/s3/<bucket>`` — objects in a specific S3 bucket."""
+    """``GET /_localemu/api/resources/s3/<bucket>`` - objects in a specific S3 bucket."""
 
     def on_get(self, request: Request, bucket: str = ""):
         LOG.debug("Dashboard API request: GET /resources/s3/%s from %s", bucket, request.remote_addr)
@@ -3973,7 +3973,7 @@ class S3ObjectsResource:
 
 
 class DynamoDBItemsResource:
-    """``GET /_localemu/api/resources/dynamodb/<table>`` — items in a DynamoDB table."""
+    """``GET /_localemu/api/resources/dynamodb/<table>`` - items in a DynamoDB table."""
 
     def on_get(self, request: Request, table: str = ""):
         LOG.debug("Dashboard API request: GET /resources/dynamodb/%s from %s", table, request.remote_addr)
@@ -4225,7 +4225,7 @@ class EventBridgeRulesResource:
 
 
 class CloudTrailDetailResource:
-    """``GET /_localemu/api/cloudtrail/<request_id>`` — full detail for a single CloudTrail event."""
+    """``GET /_localemu/api/cloudtrail/<request_id>`` - full detail for a single CloudTrail event."""
 
     def on_get(self, request: Request, request_id: str = ""):
         LOG.debug("Dashboard API request: GET /cloudtrail/%s from %s", request_id, request.remote_addr)
@@ -4264,7 +4264,7 @@ class CloudTrailDetailResource:
 
 
 class CloudTrailResource:
-    """``GET /_localemu/api/cloudtrail`` — CloudTrail-formatted event history.
+    """``GET /_localemu/api/cloudtrail`` - CloudTrail-formatted event history.
 
     Reads from the shared CloudTrail event store (same data that
     ``aws cloudtrail lookup-events`` returns).
@@ -4364,7 +4364,7 @@ class CloudTrailResource:
 
 
 class ActivityResource:
-    """``GET /_localemu/api/activity`` — recent API activity feed.
+    """``GET /_localemu/api/activity`` - recent API activity feed.
 
     Two modes:
 
@@ -4434,7 +4434,7 @@ class ActivityResource:
 
 
 class StaticResource:
-    """``GET /_localemu/dashboard/static/<path:path>`` — serve dashboard static assets."""
+    """``GET /_localemu/dashboard/static/<path:path>`` - serve dashboard static assets."""
 
     def on_get(self, request: Request, path: str = ""):
         import localemu.dashboard.static as static_module
@@ -4445,8 +4445,62 @@ class StaticResource:
             return Response("Not found", status=404)
 
 
+class CognitoMessagesResource:
+    """``GET /_localemu/api/cognito-messages/<pool_id>/<username>``.
+
+    Return the buffered Cognito messages for one user.
+
+    LocalEmu does not send real emails / SMS ; instead, code-bearing
+    Cognito messages (SignUp confirmation, ForgotPassword reset,
+    AdminCreateUser temp password, ...) are stored in an in-memory
+    buffer by ``services/cognito_idp/messages.py``. This endpoint
+    surfaces the buffer so tests and tutorials can read what would
+    have been delivered.
+
+    Loopback-restricted by the same ``_GatedResource`` wrapper used
+    for every other dashboard endpoint.
+
+    Query params : ``account_id`` (default ``000000000000``) and
+    ``region`` (default ``us-east-1``) to disambiguate when the same
+    pool id has been used across accounts (rare ; the pool id usually
+    encodes the region).
+    """
+
+    def on_get(self, request: Request, pool_id: str = "", user: str = ""):
+        from localemu.services.cognito_idp import messages
+        from urllib.parse import unquote
+
+        pool_id = unquote(pool_id or "")
+        username = unquote(user or "")
+        account_id = request.args.get("account_id", "000000000000")
+        region = request.args.get("region", "us-east-1")
+
+        msgs = messages.get_messages(account_id, region, pool_id, username)
+        out = []
+        for m in msgs:
+            out.append({
+                "trigger_source": m.trigger_source,
+                "delivery_medium": m.delivery_medium,
+                "code_plain": m.code_plain,
+                "code_encrypted_b64": m.code_encrypted_b64,
+                "sms_message": m.sms_message,
+                "email_message": m.email_message,
+                "email_subject": m.email_subject,
+                "sent_via_sender_lambda": m.sent_via_sender_lambda,
+                "timestamp": m.timestamp,
+            })
+        return _json_response({
+            "pool_id": pool_id,
+            "username": username,
+            "account_id": account_id,
+            "region": region,
+            "messages": out,
+            "count": len(out),
+        })
+
+
 class EcrRepositoryDetailResource:
-    """``GET /_localemu/api/resources/ecr/<name>`` — one ECR repository.
+    """``GET /_localemu/api/resources/ecr/<name>`` - one ECR repository.
 
     Returns repo metadata plus the image list (digest + tags + pushed-at
     + manifest media type). The dashboard renders a Connection / docker
@@ -4495,7 +4549,7 @@ class EcrRepositoryDetailResource:
 
 
 class BatchDetailResource:
-    """``GET /_localemu/api/resources/batch/<name>`` — Batch resource detail.
+    """``GET /_localemu/api/resources/batch/<name>`` - Batch resource detail.
 
     ``<name>`` can be a compute-env name, job-queue name, job-definition
     name, or a job ID. The first match wins. The response always carries
@@ -4586,7 +4640,7 @@ class BatchDetailResource:
 
 
 class PipeDetailResource:
-    """``GET /_localemu/api/resources/pipes/<name>`` — one pipe.
+    """``GET /_localemu/api/resources/pipes/<name>`` - one pipe.
 
     Combines moto metadata (source/target/parameters) with the live
     PipeWorker state from PipeManager so the user can see whether the
@@ -5206,7 +5260,7 @@ def _glue_action_to_dict(a):
 
 
 class DashboardResource:
-    """``GET /_localemu/dashboard`` — serve the main dashboard HTML.
+    """``GET /_localemu/dashboard`` - serve the main dashboard HTML.
 
     The dashboard is a development inspector served on loopback. Always
     serve a fresh copy so a LocalEmu upgrade is picked up on the next
@@ -5233,7 +5287,7 @@ class DashboardResource:
 
 
 class AccountsResource:
-    """``GET / POST /_localemu/api/accounts`` — multi-account registry.
+    """``GET / POST /_localemu/api/accounts`` - multi-account registry.
 
     GET returns every account this LocalEmu instance has ever seen (or
     that was explicitly registered through Organizations or the admin
@@ -5282,7 +5336,7 @@ class AccountsResource:
 
 
 class AccountResource:
-    """``GET / DELETE /_localemu/api/accounts/<account_id>`` — single account.
+    """``GET / DELETE /_localemu/api/accounts/<account_id>`` - single account.
 
     GET returns the AccountRecord; 404 if unknown.
     DELETE removes the account from the registry. Resources in other
@@ -5318,7 +5372,7 @@ class AccountResource:
 
 
 class AccountSummaryResource:
-    """``GET /_localemu/api/accounts/<account_id>/summary`` — per-account counts.
+    """``GET /_localemu/api/accounts/<account_id>/summary`` - per-account counts.
 
     Returns the resource count this account currently owns in every
     moto-backed service. Used by the dashboard Accounts panel to render

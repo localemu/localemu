@@ -84,24 +84,19 @@ def main():
     # Add all original arguments
     cmd.extend(sys.argv[1:])
 
-    # Intercept: awsemu ssm start-session --target <instance-id>
-    if len(sys.argv) >= 4 and sys.argv[1] == "ssm" and sys.argv[2] == "start-session":
-        target = None
-        for i, arg in enumerate(sys.argv):
-            if arg == "--target" and i + 1 < len(sys.argv):
-                target = sys.argv[i + 1]
-                break
-        if target:
-            container_name = f"localemu-ec2-{target}"
-            # Prefer bash when present, fall back to sh. Alpine (the
-            # default LocalEmu AMI) ships no bash; ubuntu / amazon-linux
-            # do. One wrapper handles both.
-            os.execvp("docker", [
-                "docker", "exec", "-it", container_name,
-                "/bin/sh", "-c",
-                "if command -v bash >/dev/null 2>&1; "
-                "then exec bash -i; else exec sh -i; fi",
-            ])
+    # NB: prior LocalEmu releases intercepted
+    # ``awsemu ssm start-session --target <i-...>`` here and replaced it
+    # with a straight ``docker exec -it localemu-ec2-<id>``. That was
+    # ~useful when the real ``aws ssm start-session`` WebSocket bridge
+    # was broken (LocalEmu 1.1.x) but it was a Docker shortcut
+    # masquerading as SSM ; source IPs, IAM enforcement, session
+    # bookkeeping, and Session Manager document semantics were all
+    # bypassed. LocalEmu 1.2.0 makes the real
+    # ``aws ssm start-session --target <i-...>`` work end to end
+    # (session_manager.py wire fix + session_ws_server.py sequence /
+    # padding fixes), so this interception is gone. Users get the real
+    # AWS Session Manager path, and ``awsemu`` stays a thin
+    # ``--endpoint-url`` prefix for the real ``aws`` CLI.
 
     # Replace this process with the aws CLI
     os.execvp("aws", cmd)

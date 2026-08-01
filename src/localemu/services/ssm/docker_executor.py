@@ -4,7 +4,7 @@ Intercepts ``SendCommand`` in the SSM provider and runs the command
 directly against the target EC2 instance's Docker container via
 ``docker exec``. No guest-side SSM agent is required or installed.
 
-Design notes (see ``LocalEmuResearch/DockerEmulation/DESIGN_SSM_EC2.md``):
+Design notes :
 
 - Script is written to a temp file **inside** the container with a
   POSIX ``#!/bin/sh`` shebang so the same path works on Alpine (no
@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 LOG = logging.getLogger(__name__)
 
-# Max inline content per AWS contract — larger spills to S3 if
+# Max inline content per AWS contract - larger spills to S3 if
 # OutputS3BucketName was provided.
 MAX_INLINE_BYTES = 24_000
 # Default execution timeout when caller does not pass one.
@@ -102,7 +102,7 @@ class SsmDockerExecutor:
     ) -> None:
         """Run the command on every resolved instance, asynchronously."""
         if document_name in STUBBED_DOCUMENTS:
-            # Synthesize Success immediately and return — no exec.
+            # Synthesize Success immediately and return - no exec.
             for iid in instance_ids:
                 self._finalize_stub(command_id, iid, account_id, region, document_name)
             return
@@ -136,7 +136,7 @@ class SsmDockerExecutor:
         # POSIX sh, not bash: Alpine (and many minimal Linux images) ship
         # only /bin/sh. Real AWS SSM RunCommand executes the user's
         # commands verbatim with no implicit `set -e` / `set -o pipefail`,
-        # so we match that — adding fail-fast would break common probe
+        # so we match that - adding fail-fast would break common probe
         # patterns like `which foo; do_something_else`.
         script = "#!/bin/sh\n" + "\n".join(resolved) + "\n"
 
@@ -161,7 +161,7 @@ class SsmDockerExecutor:
             self._in_flight[command_id] = futures
 
     def cancel_in_flight(self, command_id: str) -> None:
-        """Best-effort cancel — running docker-execs will still complete."""
+        """Best-effort cancel - running docker-execs will still complete."""
         with self._lock:
             futs = self._in_flight.pop(command_id, [])
         for f in futs:

@@ -6,7 +6,7 @@ Each test:
   2. Calls ``ec2.run_instances`` with a user-data payload
   3. Waits for the LocalEmu instance container to be running
   4. ``docker exec`` into the container and asserts the side-effect of
-     the user-data — the file the script wrote, the package it installed,
+     the user-data - the file the script wrote, the package it installed,
      the user it created, ...
 
 They cover the full cloud-init compatible translator
@@ -20,7 +20,7 @@ They cover the full cloud-init compatible translator
 * the one-shot guard (a second run is a no-op)
 
 The tests skip cleanly if Docker isn't available so they don't fail the
-suite on host machines without it. They run lazily — each test creates
+suite on host machines without it. They run lazily - each test creates
 its own instance and tears it down on teardown.
 """
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _run_instance(ec2, subnet_id: str, user_data: bytes, *, ami: str = "ami-ubun
     """RunInstances with the given user-data bytes; return (instance_id, container_name).
 
     ``user_data`` is the raw bytes; boto3 auto-base64-encodes when given a
-    bytes value, matching the AWS-CLI default and the PR-003 reproduction.
+    bytes value, matching the AWS-CLI default and the reproduction.
     """
     r = ec2.run_instances(
         ImageId=ami, InstanceType="t2.micro",
@@ -127,12 +127,12 @@ def _terminate(ec2, iid: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Shebang script (the PR-003 reproduction case)
+# Shebang script (the reproduction case)
 # ---------------------------------------------------------------------------
 
 
 def test_shebang_user_data_executes_and_writes_marker(ec2_client, vpc_and_subnet):
-    """The PR-003 reproduction: ``#!/bin/bash; echo PWNED > /tmp/pwned``."""
+    """The reproduction: ``#!/bin/bash; echo PWNED > /tmp/pwned``."""
     _vpc, subnet = vpc_and_subnet
     tag = uuid.uuid4().hex[:8]
     ud = f"#!/bin/bash\necho PWNED-{tag} > /tmp/pwned_marker\n".encode()
@@ -152,7 +152,7 @@ def test_shebang_user_data_executes_and_writes_marker(ec2_client, vpc_and_subnet
 
 
 def test_shebang_writes_cloud_init_standard_log_paths(ec2_client, vpc_and_subnet):
-    """The PR-003 spec requires cloud-init-style log paths."""
+    """The spec requires cloud-init-style log paths."""
     _vpc, subnet = vpc_and_subnet
     tag = uuid.uuid4().hex[:8]
     ud = f"#!/bin/sh\necho LOG-{tag}\n".encode()
@@ -349,7 +349,7 @@ def test_mime_multipart_with_shellscript_and_cloud_config_parts(ec2_client, vpc_
 
 
 def test_cloud_config_archive_runs_each_entry(ec2_client, vpc_and_subnet):
-    """Single archive part with multiple inner entries — verifies recursion."""
+    """Single archive part with multiple inner entries - verifies recursion."""
     _vpc, subnet = vpc_and_subnet
     tag = uuid.uuid4().hex[:8]
     archive = json.dumps([

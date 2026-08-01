@@ -1,4 +1,4 @@
-"""Regression tests for PARITY-C1: CloudTrail -> EventBridge forwarding.
+"""Regression tests for CloudTrail -> EventBridge forwarding.
 
 On real AWS, every CloudTrail management event is also delivered to the
 default EventBridge bus with:
@@ -14,9 +14,9 @@ These tests exercise the forwarding helper and the activity handler in
 * The ``Source`` field is lowercase ``aws.<service>``.
 * ``DetailType`` is exactly the literal string documented above.
 * Emission is SKIPPED when the originating service is EventBridge itself
-  (recursion guard — ``put_events`` recording its own call would loop).
+  (recursion guard - ``put_events`` recording its own call would loop).
 * Emission is SKIPPED when no trail is logging.
-* A failure in ``put_events`` is swallowed — the original request path
+* A failure in ``put_events`` is swallowed - the original request path
   must never be impacted by broken forwarding.
 """
 
@@ -221,7 +221,7 @@ def _run_activity_handler(service_name="s3", operation_name="CreateBucket"):
                 handler = h
                 break
         if handler is None:
-            # Register by triggering the hook body manually — but we don't
+            # Register by triggering the hook body manually - but we don't
             # want to register the dashboard routes for a unit test.  Instead
             # rebuild a handler equivalent by importing the module-level
             # function closure.  The activity handler is defined inside

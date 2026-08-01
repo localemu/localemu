@@ -60,7 +60,7 @@ def pytest_runtestloop(session):
         # The pre-install hooks for opensearch/es are optional: their test modules
         # (``test_opensearch.py``, ``test_es.py``) may have been removed from the
         # tree even though the snapshot/validation JSONs remain. When the module
-        # isn't importable, skip the pre-install — the targeted backend tests
+        # isn't importable, skip the pre-install - the targeted backend tests
         # will install lazily at test time, or skip themselves if the backend
         # is unavailable.
         parent_name = str(item.parent).lower()
@@ -81,16 +81,6 @@ def pytest_runtestloop(session):
                 pass
             else:
                 test_init_functions.add(es_install_async)
-
-        if "transcribe" in parent_name:
-            try:
-                from tests.aws.services.transcribe.test_transcribe import (
-                    install_async as transcribe_install_async,
-                )
-            except ImportError:
-                pass
-            else:
-                test_init_functions.add(transcribe_install_async)
 
     for fn in test_init_functions:
         fn()

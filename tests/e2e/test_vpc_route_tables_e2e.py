@@ -1,8 +1,7 @@
-"""End-to-end tests for VPC route-table data plane (PR-006 subsystem B).
+"""End-to-end tests for VPC route-table data plane.
 
 These tests run against a live LocalEmu + Docker. The decisive
-evidence — the same shape the PR-006 LeadDev asked for on SDC —
-is the direct ``ip route`` table dump inside each container:
+evidence is the direct ``ip route`` table dump inside each container:
 
 * After ``CreateRoute`` to an instance target, every OTHER container
   in the subnet has the route installed via ``ip route``.
@@ -47,7 +46,7 @@ def _wait_running(cname: str, timeout: float = 90.0) -> None:
 
 
 def _ip_routes(cname: str) -> str:
-    """``ip route show`` inside the container — the decisive evidence."""
+    """``ip route show`` inside the container - the decisive evidence."""
     r = subprocess.run(
         ["docker", "exec", cname, "ip", "route"],
         capture_output=True, text=True, timeout=10,
@@ -103,7 +102,7 @@ def _run_instance(ec2, sub):
 
 
 def test_create_route_to_instance_target_installs_route_in_other_containers(ec2_client):
-    """The PR-006 E4 reproduction — Quiet Router data plane.
+    """The reproduction: Quiet Router data plane.
 
     Two instances in the same subnet: ``victim`` and ``router``.
     ``CreateRoute --instance-id router --destination 10.99.0.0/16``
@@ -197,7 +196,7 @@ def test_route_survives_container_restart(ec2_client):
             _wait_running(v_cname)
             time.sleep(2)
             assert "10.97.0.0/16" in _ip_routes(v_cname), (
-                "route did not survive ``docker restart`` — marker file "
+                "route did not survive ``docker restart`` - marker file "
                 "replay block in the entrypoint is broken"
             )
         finally:
@@ -218,13 +217,13 @@ def test_newly_launched_instance_picks_up_existing_routes(ec2_client):
             DestinationCidrBlock="10.96.0.0/16",
             InstanceId=r_iid,
         )
-        # Step 2: now launch the victim — it must inherit the route.
+        # Step 2: now launch the victim - it must inherit the route.
         v_iid, v_cname = _run_instance(ec2_client, sub)
         try:
             time.sleep(2)
             assert "10.96.0.0/16" in _ip_routes(v_cname), (
                 "newly-launched instance did not pick up the existing "
-                "instance-target route — RunInstances → on_instance_launch "
+                "instance-target route - RunInstances -> on_instance_launch "
                 "hook is broken"
             )
         finally:

@@ -37,6 +37,7 @@ import socketserver
 import struct
 import termios
 import threading
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import wsproto
@@ -51,8 +52,10 @@ from wsproto.events import (
     TextMessage,
 )
 
+from localemu.services.ssm.port_mux_bridge import PortMuxBridge
 from localemu.services.ssm.session_manager import (
     ClientMessage,
+    MT_ACKNOWLEDGE,
     MT_INPUT_STREAM_DATA,
     PT_HANDSHAKE_RESPONSE,
     PT_OUTPUT,
@@ -147,7 +150,7 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
         if not session_id:
             self._reject(sock, ws, 400, "missing sessionId")
             return None
-        # Role check is informational — AWS only uses publish_subscribe.
+        # Role check is informational - AWS only uses publish_subscribe.
         qs = parse_qs(parsed.query)
         role = (qs.get("role") or [""])[0]
         if role and role != "publish_subscribe":
@@ -186,7 +189,17 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
     def _authenticate(
         self, sock: socket.socket, ws: wsproto.WSConnection, session_id: str,
     ):
-        """Read one TEXT frame with ``OpenDataChannelInput``, validate token."""
+        """Read one TEXT frame with ``OpenDataChannelInput``, validate token.
+
+        Also responds to WebSocket Ping control frames with Pong. The
+        session-manager-plugin fires ``StartPings`` immediately after the
+        WebSocket upgrade completes (see aws/session-manager-plugin
+        src/communicator/websocketchannel.go#StartPings), so the first
+        Ping typically arrives BEFORE the client's OpenDataChannel auth
+        text frame. ``wsproto`` does not auto-Pong. If we swallow the
+        Ping the plugin's ReadDeadline eventually fires and the session
+        stalls.
+        """
         sock.settimeout(15.0)
         buf = ""
         while True:
@@ -205,6 +218,11 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
                             self._close_ws(sock, ws, 4401, "invalid token")
                             return None
                         return sess
+                elif isinstance(evt, Ping):
+                    try:
+                        sock.sendall(ws.send(Pong(payload=evt.payload)))
+                    except OSError:
+                        return None
                 elif isinstance(evt, CloseConnection):
                     return None
             chunk = sock.recv(4096)
@@ -217,14 +235,63 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
     # ------------------------------------------------------------------
 
     def _bridge(self, sock: socket.socket, ws: wsproto.WSConnection, sess) -> None:
-        """Bidirectional pipe: WS binary ↔ docker exec PTY."""
+        """Bidirectional pipe: WS binary ↔ docker exec PTY.
+
+        Sequence-number contract (matches real amazon-ssm-agent /
+        session-manager-plugin, verified against
+        aws/session-manager-plugin src/datachannel/streaming.go) :
+
+        * ``output_stream_data`` frames the server sends to the plugin
+          carry a strictly monotonic sequence number starting at 0.
+          The plugin's ``HandleOutputMessage`` gates dispatch on
+          ``outputMessage.SequenceNumber == ExpectedSequenceNumber``;
+          any gap parks the frame in an IncomingMessageBuffer and no
+          handler runs. That means ``handshake_complete`` MUST arrive
+          at seq=1 (the next after ``handshake_request`` at seq=0),
+          shell output at seq=2, and so on. If we mixed ACK sequence
+          numbers into this counter the plugin would freeze waiting
+          for a seq that never arrives.
+
+        * ``acknowledge`` frames the server sends back for the plugin's
+          own frames carry ``SequenceNumber = 0`` unconditionally
+          (see plugin ``SerializeClientMessageWithAcknowledgeContent``).
+          They are dispatched by MessageId in ``HandleAcknowledgeMessage``,
+          not by sequence.
+        """
+        session_type = getattr(sess, "session_type", "Standard_Stream")
+        session_properties = getattr(sess, "session_properties", None)
+
+        # Port sessions get a dedicated bridge : the plugin's MUX port
+        # forwarder wraps every tunnel byte in SMUX v1 framing, so we
+        # cannot reuse the shell path's single-fd tunnel. See
+        # :mod:`port_mux_bridge` for the protocol implementation.
+        if session_type == "Port":
+            self._bridge_port(sock, ws, sess, session_properties)
+            return
+        self._bridge_shell(sock, ws, sess, session_type, session_properties)
+
+    def _bridge_shell(
+        self,
+        sock: socket.socket,
+        ws: wsproto.WSConnection,
+        sess,
+        session_type: str,
+        session_properties: Optional[dict],
+    ) -> None:
+        """The ``Standard_Stream`` shell path : WS ↔ ``docker exec -it`` PTY."""
         pid, pty_fd = self._spawn_docker_exec(sess.container_name)
         try:
-            out_seq = 0
+            stream_out_seq = 0  # strictly monotonic, output_stream_data only
             in_seq_ack = 0
-            # Send handshake-request, expect handshake-response, send complete.
-            sock.sendall(ws.send(BytesMessage(handshake_request_frame(out_seq).serialize())))
-            out_seq += 1
+            # Send handshake-request as the first output_stream_data frame.
+            sock.sendall(ws.send(BytesMessage(
+                handshake_request_frame(
+                    stream_out_seq,
+                    session_type=session_type,
+                    properties=session_properties,
+                ).serialize(),
+            )))
+            stream_out_seq += 1
 
             sock.setblocking(False)
             sock.settimeout(None)
@@ -247,22 +314,33 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
                     ws.receive_data(chunk)
                     for evt in ws.events():
                         if isinstance(evt, BytesMessage):
-                            # message_finished may arrive in fragments; we
-                            # rely on wsproto to coalesce.
                             try:
                                 msg = ClientMessage.deserialize(evt.data)
                             except Exception:
                                 continue
-                            # ACK every received frame (plugin gates on it).
+                            # The plugin's own outbound ``acknowledge``
+                            # frames must NOT be ACK'd back (real
+                            # amazon-ssm-agent doesn't either - ACKs
+                            # are fire-and-forget on both ends,
+                            # matched by MessageId+SequenceNumber, not
+                            # by counter-ACK). ACKing an ACK triggers
+                            # a plugin ``SetOnMessage`` re-entry that
+                            # dereferences ``portSessionType`` state
+                            # before it is fully initialised - the
+                            # WS receive goroutine panics and no
+                            # further messages get processed.
+                            if msg.message_type == MT_ACKNOWLEDGE:
+                                continue
                             sock.sendall(ws.send(BytesMessage(
-                                acknowledge_frame(msg, out_seq).serialize(),
+                                acknowledge_frame(msg, 0).serialize(),
                             )))
-                            out_seq += 1
                             if msg.payload_type == PT_HANDSHAKE_RESPONSE:
                                 sock.sendall(ws.send(BytesMessage(
-                                    handshake_complete_frame(out_seq).serialize(),
+                                    handshake_complete_frame(
+                                        stream_out_seq,
+                                    ).serialize(),
                                 )))
-                                out_seq += 1
+                                stream_out_seq += 1
                                 handshake_done = True
                                 continue
                             if not handshake_done:
@@ -291,23 +369,23 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
                         break
                     if not data:
                         break
-                    frame = output_data_frame(out_seq, data)
+                    frame = output_data_frame(stream_out_seq, data)
                     sock.sendall(ws.send(BytesMessage(frame.serialize())))
-                    out_seq += 1
+                    stream_out_seq += 1
 
-                # Reap the exec child when it exits — drains remaining
-                # PTY output above before this check.
+                # Reap the exec child when it exits.
                 try:
                     wpid, _status = os.waitpid(pid, os.WNOHANG)
                     if wpid == pid:
-                        # final flush
                         try:
                             data = os.read(pty_fd, 65536)
                             if data:
                                 sock.sendall(ws.send(BytesMessage(
-                                    output_data_frame(out_seq, data).serialize(),
+                                    output_data_frame(
+                                        stream_out_seq, data,
+                                    ).serialize(),
                                 )))
-                                out_seq += 1
+                                stream_out_seq += 1
                         except OSError:
                             pass
                         break
@@ -331,6 +409,128 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
             except (OSError, ProcessLookupError):
                 pass
 
+    def _bridge_port(
+        self,
+        sock: socket.socket,
+        ws: wsproto.WSConnection,
+        sess,
+        session_properties: Optional[dict],
+    ) -> None:
+        """``Port`` (SMUX v1 mux) path : plugin wraps every tunnel byte
+        in an ``xtaci/smux`` header and multiplexes multiple local
+        connections onto one WebSocket. We speak the same wire.
+
+        Layout, from the plugin (verified against
+        ``session-manager-plugin/src/sessionmanagerplugin/session/portsession/muxportforwarding.go``
+        + ``xtaci/smux/frame.go``) :
+
+            | ver(1) | cmd(1) | length(2 LE) | sid(4 LE) | payload |
+
+        Commands: SYN=0, FIN=1, PSH=2, NOP=3. Each new local TCP
+        connection on the plugin side is a fresh ``sid``. We open a
+        ``docker exec -i nc 127.0.0.1 <port>`` per ``sid``, splice its
+        stdout into PSH frames, and its stdin from received PSH data.
+        """
+        target_port = int((session_properties or {}).get("portNumber", "0"))
+        bridge = PortMuxBridge(
+            container_name=sess.container_name,
+            target_port=target_port,
+        )
+        try:
+            stream_out_seq = 0
+            in_seq_ack = 0
+            sock.sendall(ws.send(BytesMessage(
+                handshake_request_frame(
+                    stream_out_seq,
+                    session_type="Port",
+                    properties=session_properties,
+                ).serialize(),
+            )))
+            stream_out_seq += 1
+
+            sock.setblocking(False)
+            sock.settimeout(None)
+
+            handshake_done = False
+
+            while True:
+                stream_fds = bridge.readable_fds()
+                rlist, _, _ = select.select(
+                    [sock, *stream_fds], [], [], 1.0,
+                )
+
+                # WS -> bridge
+                if sock in rlist:
+                    chunk = b""
+                    try:
+                        chunk = sock.recv(65536)
+                    except BlockingIOError:
+                        chunk = b""
+                    if not chunk:
+                        break
+                    ws.receive_data(chunk)
+                    for evt in ws.events():
+                        if isinstance(evt, BytesMessage):
+                            try:
+                                msg = ClientMessage.deserialize(evt.data)
+                            except Exception:
+                                continue
+                            # See ``_bridge_shell`` for the rationale.
+                            # For Port sessions the drop-ACK-on-ACK
+                            # rule is not optional : ACKing an ACK
+                            # tickles a nil-deref panic in the
+                            # plugin's ``MuxPortForwarding``
+                            # ``SetOnMessage`` handler while its
+                            # ``muxClient`` is still being wired up.
+                            if msg.message_type == MT_ACKNOWLEDGE:
+                                continue
+                            sock.sendall(ws.send(BytesMessage(
+                                acknowledge_frame(msg, 0).serialize(),
+                            )))
+                            if msg.payload_type == PT_HANDSHAKE_RESPONSE:
+                                sock.sendall(ws.send(BytesMessage(
+                                    handshake_complete_frame(
+                                        stream_out_seq,
+                                    ).serialize(),
+                                )))
+                                stream_out_seq += 1
+                                handshake_done = True
+                                continue
+                            if not handshake_done:
+                                continue
+                            if msg.message_type == MT_INPUT_STREAM_DATA \
+                                    and msg.payload_type == PT_OUTPUT:
+                                # Feed the mux decoder ; may spawn new
+                                # streams, forward data, or close streams.
+                                bridge.feed_from_plugin(msg.payload)
+                                in_seq_ack = max(in_seq_ack, msg.sequence_number)
+                        elif isinstance(evt, CloseConnection):
+                            return
+                        elif isinstance(evt, Ping):
+                            sock.sendall(ws.send(Pong(payload=evt.payload)))
+
+                # streams -> WS
+                if handshake_done:
+                    for outbound in bridge.drain_stream_reads(rlist):
+                        sock.sendall(ws.send(BytesMessage(
+                            output_data_frame(
+                                stream_out_seq, outbound,
+                            ).serialize(),
+                        )))
+                        stream_out_seq += 1
+        finally:
+            bridge.close_all()
+            try:
+                sock.sendall(ws.send(BytesMessage(
+                    channel_closed_frame(
+                        0, sess.session_id, "session ended",
+                    ).serialize(),
+                )))
+                sock.sendall(ws.send(CloseConnection(code=1000, reason="bye")))
+            except OSError:
+                pass
+            get_session_registry().remove(sess.session_id)
+
     @staticmethod
     def _close_ws(sock: socket.socket, ws: wsproto.WSConnection, code: int, reason: str) -> None:
         try:
@@ -343,7 +543,7 @@ class _WsConnectionHandler(socketserver.BaseRequestHandler):
         """``pty.fork`` + ``docker exec -it`` so the shell sees a real TTY."""
         pid, fd = pty.fork()
         if pid == 0:
-            # Child — replace with docker exec
+            # Child - replace with docker exec
             try:
                 os.execvp("docker", [
                     "docker", "exec", "-it", container_name,

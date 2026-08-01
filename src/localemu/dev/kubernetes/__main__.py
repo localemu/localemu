@@ -24,111 +24,45 @@ class MountPoint:
 
 
 def generate_mount_points(
-    pro: bool = False, mount_moto: bool = False, mount_entrypoints: bool = False
+    mount_moto: bool = False, mount_entrypoints: bool = False
 ) -> list[MountPoint]:
     mount_points = []
     # host paths
     root_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
     localemu_code_path = os.path.join(root_path, "src", "localemu")
-    pro_path = os.path.join(root_path, "..", "localemu")
 
     # container paths
     target_path = "/opt/code/localemu/"
     venv_path = os.path.join(target_path, ".venv", "lib", "python3.13", "site-packages")
 
-    # Community code
-    if pro:
-        # Pro installs community code as a package, so it lives in the venv site-packages
-        mount_points.append(
-            MountPoint(
-                name="localemu",
-                host_path=os.path.normpath(localemu_code_path),
-                node_path="/code/localemu",
-                container_path=os.path.join(venv_path, "localemu"),
-                # Read only has to be false here, as we mount the pro code into this mount, as it is the entire namespace package
-                read_only=False,
-            )
+    # Community code: the code is not installed as a package, it lives directly in `/opt/code/localemu`
+    mount_points.append(
+        MountPoint(
+            name="localemu",
+            host_path=os.path.normpath(localemu_code_path),
+            node_path="/code/localemu",
+            container_path=os.path.join(target_path, "src", "localemu"),
         )
-    else:
-        # Community does not install the localemu package in the venv, but has the code directly in `/opt/code/localemu`
-        mount_points.append(
-            MountPoint(
-                name="localemu",
-                host_path=os.path.normpath(localemu_code_path),
-                node_path="/code/localemu",
-                container_path=os.path.join(target_path, "src", "localemu"),
-            )
-        )
-
-    # Pro code
-    if pro:
-        mount_points.append(
-            MountPoint(
-                name="localemu",
-                node_path="/code/localemu",
-                container_path=os.path.join(venv_path, "localemu", "pro", "core"),
-            )
-        )
+    )
 
     # entrypoints
     if mount_entrypoints:
-        if pro:
-            # Community entrypoints in pro image
-            # TODO actual package version detection
-            print(
-                "WARNING: Package version detection is not implemented."
-                "You need to adapt the version in the .egg-info paths to match the package version installed in the used localemu image."
+        # In the community image, the code is not installed as package, so the paths are predictable
+        egg_path = os.path.join(root_path, "src", "localemu_core.egg-info/entry_points.txt")
+        mount_points.append(
+            MountPoint(
+                name="entry-points-community",
+                host_path=os.path.normpath(egg_path),
+                node_path="/code/entry-points-community",
+                container_path=os.path.join(
+                    target_path,
+                    "src",
+                    "localemu_core.egg-info",
+                    "entry_points.txt",
+                ),
+                volume_type="File",
             )
-            community_version = "4.1.1.dev14"
-            pro_version = "4.1.1.dev16"
-            egg_path = os.path.join(
-                root_path, "src", "localemu_core.egg-info/entry_points.txt"
-            )
-            mount_points.append(
-                MountPoint(
-                    name="entry-points-community",
-                    host_path=os.path.normpath(egg_path),
-                    node_path="/code/entry-points-community",
-                    container_path=os.path.join(
-                        venv_path, f"localemu-{community_version}.egg-info", "entry_points.txt"
-                    ),
-                    volume_type="File",
-                )
-            )
-            # Pro entrypoints in pro image
-            egg_path = os.path.join(
-            )
-            mount_points.append(
-                MountPoint(
-                    name="entry-points-pro",
-                    host_path=os.path.normpath(egg_path),
-                    node_path="/code/entry-points-pro",
-                    container_path=os.path.join(
-                        venv_path, f"localemu_ext-{pro_version}.egg-info", "entry_points.txt"
-                    ),
-                    volume_type="File",
-                )
-            )
-        else:
-            # Community entrypoints in community repo
-            # In the community image, the code is not installed as package, so the paths are predictable
-            egg_path = os.path.join(
-                root_path, "src", "localemu_core.egg-info/entry_points.txt"
-            )
-            mount_points.append(
-                MountPoint(
-                    name="entry-points-community",
-                    host_path=os.path.normpath(egg_path),
-                    node_path="/code/entry-points-community",
-                    container_path=os.path.join(
-                        target_path,
-                        "src",
-                        "localemu_core.egg-info",
-                        "entry_points.txt",
-                    ),
-                    volume_type="File",
-                )
-            )
+        )
 
     if mount_moto:
         moto_path = os.path.join(root_path, "..", "moto", "moto")
@@ -203,9 +137,7 @@ def snake_to_kebab_case(string: str):
     return string.lower().replace("_", "-")
 
 
-def generate_k8s_helm_overrides(
-    mount_points: list[MountPoint], pro: bool = False, env: list[str] | None = None
-):
+def generate_k8s_helm_overrides(mount_points: list[MountPoint], env: list[str] | None = None):
     volumes = [
         {
             "name": mount_point.name,
@@ -233,38 +165,6 @@ def generate_k8s_helm_overrides(
                     "value": rhs,
                 }
             )
-
-    if pro:
-        extra_env_vars += [
-            {
-                "name": "CONTAINER_RUNTIME",
-                "value": "kubernetes",
-            },
-            {
-                "name": "RDS_MYSQL_DOCKER",
-                "value": "1",
-            },
-            {
-                "name": "ENABLE_DMS",
-                "value": "1",
-            },
-            {
-                "name": "ENABLE_BEDROCK",
-                "value": "1",
-            },
-            {
-                "name": "DOCDB_PROXY_CONTAINER",
-                "value": "1",
-            },
-            {
-                "name": "GLUE_JOB_EXECUTOR_PROVIDER",
-                "value": "v2",
-            },
-            {
-                "name": "CLOUDFRONT_LAMBDA_EDGE",
-                "value": "1",
-            },
-        ]
 
     image_repository = "localemu/localemu"
 
@@ -328,9 +228,6 @@ def execute_deployment(config_file_path: str, overrides_file_path: str):
 
 @click.command("run")
 @click.option(
-    "--pro", is_flag=True, default=None, help="Mount the localemu code into the cluster."
-)
-@click.option(
     "--mount-moto", is_flag=True, default=None, help="Mount the moto code into the cluster."
 )
 @click.option(
@@ -379,7 +276,6 @@ def execute_deployment(config_file_path: str, overrides_file_path: str):
 )
 @click.argument("command", nargs=-1, required=False)
 def run(
-    pro: bool = None,
     mount_moto: bool = False,
     mount_entrypoints: bool = False,
     write: bool = False,
@@ -394,11 +290,11 @@ def run(
     """
     A tool for localemu developers to generate the kubernetes cluster configuration file and the overrides to mount the localemu code into the cluster.
     """
-    mount_points = generate_mount_points(pro, mount_moto, mount_entrypoints)
+    mount_points = generate_mount_points(mount_moto, mount_entrypoints)
 
     config = generate_k8s_cluster_config(mount_points, port=port)
 
-    overrides = generate_k8s_helm_overrides(mount_points, pro=pro, env=env)
+    overrides = generate_k8s_helm_overrides(mount_points, env=env)
 
     output_dir = output_dir or os.getcwd()
     overrides_file = overrides_file or "overrides.yml"

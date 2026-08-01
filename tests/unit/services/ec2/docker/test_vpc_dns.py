@@ -2,7 +2,7 @@
 
 The resolver reads moto's ``DHCPOptionsSet`` + ``Vpc`` + ``Subnet``
 structures, so the tests use real moto backends (lazy-imported) and
-construct each scenario via the standard moto API — no boto, no
+construct each scenario via the standard moto API - no boto, no
 gateway, no Docker.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _make_dhcp_options(ec2_backend, *, domain_name_servers):
     """Create a DHCP options set with the given DNS list (or None).
 
     ``EC2Backend.create_dhcp_options`` (the in-process method, NOT
-    the wire-protocol entry point) takes keyword arguments — the
+    the wire-protocol entry point) takes keyword arguments - the
     ``[{"Key", "Values"}, ...]`` list-of-dicts shape only lives at
     the response layer.
     """
@@ -130,7 +130,7 @@ def test_multiple_dns_servers_preserved_in_order(ec2_backend):
 
 
 def test_dns_hijack_attack_scenario(ec2_backend):
-    """Reproduction of PR-006 E3 — malicious DHCP options redirect DNS."""
+    """Reproduction of the scenario: - malicious DHCP options redirect DNS."""
     backend, account_id, region = ec2_backend
     vpc, subnet = _make_subnet(backend)
 
@@ -199,12 +199,12 @@ def test_mixed_amazon_provided_and_real_keeps_only_real(ec2_backend):
 
 
 # ---------------------------------------------------------------------------
-# DHCP changed after instance launch — verify resolution is point-in-time
+# DHCP changed after instance launch - verify resolution is point-in-time
 # ---------------------------------------------------------------------------
 
 
 def test_re_association_changes_resolved_value(ec2_backend):
-    """The resolver reads current moto state — re-associating a new
+    """The resolver reads current moto state - re-associating a new
     option set immediately changes what the next launching instance sees."""
     backend, account_id, region = ec2_backend
     vpc, subnet = _make_subnet(backend)

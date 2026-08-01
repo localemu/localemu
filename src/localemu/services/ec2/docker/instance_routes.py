@@ -5,13 +5,11 @@ in a subnet sees its packets transparently steered to the configured
 gateways, NAT gateways, instance targets, peering connections, etc.
 LocalEmu emulates this by installing concrete ``ip route`` entries
 inside each EC2 container, so a route whose target is another instance
-("instance-target route" — the building block for the Quiet Router /
+("instance-target route" - the building block for the Quiet Router /
 MITM scenarios) actually redirects traffic the way the route table
 says it should.
 
-Scope (PR-006 subsystem B):
-
-* **Instance-target routes**. Routes whose ``Target`` is another EC2
+Scope: * **Instance-target routes**. Routes whose ``Target`` is another EC2
   instance. Other target types (IGW, NAT-GW, TGW, peering, VPC
   endpoint, virtual-private-gateway, carrier-gateway, egress-only IGW)
   already have their own LocalEmu data planes; this module deliberately
@@ -33,13 +31,13 @@ Scope (PR-006 subsystem B):
 * **Newly-launched instances**. When ``ec2:RunInstances`` lands a
   fresh container in a subnet that already has instance-target routes
   on its route table, those routes are installed on the new container
-  too — without this, a route configured before the launch would only
+  too - without this, a route configured before the launch would only
   ever apply to instances that happened to exist at the moment the
   route was created.
 
 Concurrency: each container operation is best-effort, idempotent
 (``ip route replace`` and ``-D`` are both safe to repeat), and never
-raises — a missing tool inside the container must not fail the AWS
+raises - a missing tool inside the container must not fail the AWS
 API call that triggered the apply.
 """
 from __future__ import annotations
@@ -54,7 +52,7 @@ _MARKER_PATH = "/var/lib/localemu/instance-routes.txt"
 
 
 # ---------------------------------------------------------------------------
-# Lookup helpers — moto-side state inspection
+# Lookup helpers - moto-side state inspection
 # ---------------------------------------------------------------------------
 
 
@@ -77,7 +75,7 @@ def get_subnets_for_route_table(
     """All subnets bound to ``route_table_id``.
 
     Explicit associations come first; subnets without an explicit
-    association fall back to the VPC's main route table — the same
+    association fall back to the VPC's main route table - the same
     rule real AWS applies. Returns an empty list when the route table
     is unknown.
     """
@@ -212,7 +210,7 @@ def remove_route_from_container(
 def reset_routes_on_container(container_name: str) -> bool:
     """Drop every LocalEmu-managed route + clear the marker.
 
-    Used when a subnet's route-table binding changes — we wipe the
+    Used when a subnet's route-table binding changes - we wipe the
     previous binding's routes before applying the new ones.
     """
     if not _container_running(container_name):
@@ -385,8 +383,7 @@ def _resolve_route_table_for_subnet(
 
 
 def _subnets_inheriting_main_route_table(backend, main_rt) -> list[str]:
-    """Subnets in the same VPC that have no explicit association anywhere
-    — they inherit the main route table."""
+    """Subnets in the same VPC that have no explicit association anywhere - they inherit the main route table."""
     vpc_id = getattr(main_rt, "vpc_id", None)
     if not vpc_id:
         return []

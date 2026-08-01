@@ -1,4 +1,4 @@
-"""Pin BUG-006: PutBucketReplication's destination-versioning check must
+"""PutBucketReplication's destination-versioning check must
 walk the cross-account bucket resolver, not just the source account's
 local bucket dict.
 
@@ -11,8 +11,8 @@ returned None and the validator raised
 even when the destination was genuinely versioned (and
 ``GetBucketVersioning`` on it returned ``Enabled``).
 
-The fix routes through ``_get_cross_account_bucket`` — the same
-resolver every other cross-account read path uses — which walks
+The fix routes through ``_get_cross_account_bucket`` - the same
+resolver every other cross-account read path uses - which walks
 ``global_bucket_map`` (a ``CrossAccountAttribute`` shared across every
 account's S3 store) to find the owning account's store. This pin
 ensures the two layers stay aligned.
@@ -33,7 +33,7 @@ _REGION = "us-east-1"
 def _client(svc: str, ak: str, sk: str = "any"):
     """Build a boto3 client against the in-process moto layer. We use
     moto's ``mock_aws`` decorator in each test instead of a module-level
-    server — the S3Provider helpers we exercise need a live store
+    server - the S3Provider helpers we exercise need a live store
     backing the access keys, but moto's in-process intercept is enough.
     """
     return boto3.client(
@@ -72,7 +72,7 @@ def _make_rule(dest_bucket_arn: str, dest_account: str | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tests use the in-process S3Provider directly with a live moto store —
+# Tests use the in-process S3Provider directly with a live moto store -
 # the wire layer (HTTP) is not what's being pinned; the validator's
 # bucket resolution is.
 # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ def _make_rule(dest_bucket_arn: str, dest_account: str | None = None) -> dict:
 
 class _FakeContext:
     """Minimal RequestContext stand-in for the provider's helpers.
-    Provides only ``account_id`` and ``region`` — the two fields
+    Provides only ``account_id`` and ``region`` - the two fields
     ``_get_cross_account_bucket`` reads."""
     def __init__(self, account_id: str, region: str = _REGION):
         self.account_id = account_id
@@ -97,7 +97,7 @@ def _make_bucket(account_id: str, name: str, *, versioning: bool):
     store = s3_stores[account_id][_REGION]
     # The ``owner`` field is required by S3Bucket.__init__ and used for
     # display-only purposes (Owner.ID + Owner.DisplayName in ListBuckets
-    # responses). Synthesise a minimal one — the validator never reads
+    # responses). Synthesise a minimal one - the validator never reads
     # it, so a fixed placeholder keeps the test reproducible.
     owner = {"ID": account_id, "DisplayName": f"acct-{account_id}"}
     bucket = S3Bucket(
@@ -117,7 +117,7 @@ def _make_bucket(account_id: str, name: str, *, versioning: bool):
 
 
 def test_cross_account_versioned_destination_is_accepted():
-    """The exact shape of BUG-006: source in account A, destination in
+    """The exact shape: source in account A, destination in
     account B with versioning enabled, and ``Destination.Account``
     names B. After the fix this must succeed without raising."""
     from localemu.services.s3.provider import S3Provider
@@ -142,7 +142,7 @@ def test_cross_account_versioned_destination_is_accepted():
 
 
 def test_same_account_versioned_destination_still_accepted():
-    """Control case from the bug doc — the pre-fix path that worked
+    """Control case from the bug doc - the pre-fix path that worked
     must keep working. Source and versioned destination both in
     account A."""
     from localemu.services.s3.provider import S3Provider
@@ -159,7 +159,7 @@ def test_same_account_versioned_destination_still_accepted():
 
 def test_cross_account_unversioned_destination_is_rejected():
     """The fix must not loosen the AWS rule. Destination owned by
-    account B but versioning OFF — same InvalidRequest as before."""
+    account B but versioning OFF - same InvalidRequest as before."""
     from localemu.services.s3.provider import S3Provider
     from localemu.aws.api import CommonServiceException
 
@@ -180,7 +180,7 @@ def test_cross_account_unversioned_destination_is_rejected():
 
 def test_missing_destination_bucket_is_rejected_with_aws_shaped_error():
     """AWS collapses 'destination does not exist' and 'destination
-    unversioned' into the same ``InvalidRequest`` — we preserve that
+    unversioned' into the same ``InvalidRequest`` - we preserve that
     parity even when the resolution path was widened to cross-account."""
     from localemu.services.s3.provider import S3Provider
 
@@ -197,7 +197,7 @@ def test_missing_destination_bucket_is_rejected_with_aws_shaped_error():
 
 
 def test_same_account_unversioned_destination_is_rejected():
-    """The original pre-fix rejection case for completeness — source
+    """The original pre-fix rejection case for completeness - source
     and destination in account A, destination unversioned."""
     from localemu.services.s3.provider import S3Provider
 
@@ -215,7 +215,7 @@ def test_same_account_unversioned_destination_is_rejected():
 
 
 # ---------------------------------------------------------------------------
-# Sanity pin for the resolver itself — the layer the validator relies on
+# Sanity pin for the resolver itself - the layer the validator relies on
 # ---------------------------------------------------------------------------
 
 

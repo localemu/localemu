@@ -1,20 +1,20 @@
 """Apply EC2 ``SourceDestCheck`` semantics to an instance's container.
 
 Real EC2 instances ship with the source/destination check enabled
-(``SourceDestCheck=true``) — the AWS network plane drops packets whose
+(``SourceDestCheck=true``) - the AWS network plane drops packets whose
 destination isn't the instance's own IP. Setting the attribute to
 ``false`` is the prerequisite for using the instance as a
-router / NAT / MITM ("Quiet Router" — PR-006 scenario E4).
+router / NAT / MITM ("Quiet Router").
 
 LocalEmu has no separate hypervisor layer, so we approximate the
 AWS-side packet drop via the container's own iptables FORWARD chain.
 Docker's default FORWARD policy is ACCEPT, so a fresh container would
-forward anything that managed to enter its netns — which would
+forward anything that managed to enter its netns - which would
 silently make the secure (SDC=true) and insecure (SDC=false) states
 indistinguishable. Two pieces close that gap:
 
 1. **At every boot, default the FORWARD policy to DROP.** The
-   entrypoint scripts run this before the marker check — so a
+   entrypoint scripts run this before the marker check - so a
    container created without the marker is secure-by-default.
 2. **Switch the policy explicitly on attribute change.** This module
    sets ``-P FORWARD DROP`` when SDC is enabled and
@@ -49,7 +49,7 @@ Knob summary:
 The application is best-effort: if the container is not running yet
 (``ModifyInstanceAttribute`` arrived during a restart), we no-op and
 the entrypoint script reads the marker file at next boot. The function
-never raises — a failed sysctl must not block the AWS API call that
+never raises - a failed sysctl must not block the AWS API call that
 asked for it.
 """
 from __future__ import annotations
@@ -82,11 +82,50 @@ def apply_source_dest_check(
 
     Never raises: failure to apply the kernel knob must not fail the
     AWS API call. Errors are logged.
+
+    Two modes, switched on whether the LocalEmu real-ENI subsystem has
+    seen this instance's ENIs:
+
+    * **Real-ENI mode** (the address index has at least one ENI for
+      this instance): delegate to ``forward_chain.apply_forward_for_eni``
+      for the primary ENI, which installs per-iface (or per-IP in
+      shared-iface mode) FORWARD rules. The default container policy
+      stays ``-P FORWARD DROP`` and per-ENI ACCEPT rules selectively
+      open the gate. This is the per-ENI semantics 1.2.0 introduces.
+    * **Legacy mode** (no address-index entries; typical for default
+      LocalEmu without ``LOCALEMU_ENI_REAL=1``): keep the original
+      global ``-P FORWARD ACCEPT/DROP`` policy flip. Existing single-
+      NIC quiet-router callers and their pinning unit tests rely on
+      this exact shape.
     """
     cname = container_name or container_name_for_instance(instance_id)
+
+    # Real-ENI mode: try to resolve the primary ENI from the address
+    # index. When found, the per-ENI path supersedes the global policy.
+    primary = _resolve_primary_eni_entry(instance_id)
+    if primary is not None and primary.iface_name and primary.iface_name != "<pending>":
+        try:
+            from localemu.services.ec2.docker.forward_chain import (
+                apply_forward_for_eni,
+            )
+            return apply_forward_for_eni(
+                instance_id=instance_id,
+                iface_name=primary.iface_name,
+                eni_ip=str(primary.primary_ip),
+                shared_iface=bool(primary.shared_iface),
+                source_dest_check=source_dest_check,
+                container_name=container_name,
+            )
+        except Exception:
+            LOG.debug(
+                "apply_source_dest_check: per-ENI path failed, falling "
+                "back to legacy global policy", exc_info=True,
+            )
+
+    # Legacy mode: original global ``-P FORWARD`` policy flip.
     if not _container_running(cname):
         # Persist the marker file too if the container exists but is
-        # paused / stopped — the entrypoint script honours it on next
+        # paused / stopped - the entrypoint script honours it on next
         # start. If the container doesn't exist at all (RunInstances
         # has not landed yet), there's nothing to do; ``create_instance``
         # will pick up the attribute via the moto control plane on the
@@ -126,7 +165,7 @@ def apply_source_dest_check(
         )
     else:
         # Router state: open the FORWARD chain. Policy AND an explicit
-        # ACCEPT rule are both installed — the rule guarantees
+        # ACCEPT rule are both installed - the rule guarantees
         # forwarded packets pass even if some other subsystem later
         # flips the policy.
         _exec(
@@ -148,12 +187,48 @@ def apply_source_dest_check(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_primary_eni_entry(instance_id: str):
+    """Return the address-index ``EniEntry`` for the instance's primary
+    ENI (``device_index == 0``), or ``None`` when the address index has
+    no entries for this instance (which is the legacy / default-mode
+    case where ``LOCALEMU_ENI_REAL`` is off).
+
+    Never raises ; the caller treats ``None`` as "fall back to legacy
+    global policy".
+    """
+    try:
+        from localemu.services.ec2.docker.address_index import get_address_index
+        entries = list(get_address_index().get_enis_for_instance(instance_id))
+        # First pass: explicit primary marker (``device_index == 0``).
+        # ``EniManager.attach`` sets this for ENIs that go through the
+        # hot-attach path.
+        for entry in entries:
+            if entry.device_index == 0:
+                return entry
+        # Second pass: ``device_index is None`` AND ``iface_name`` set.
+        # The RunInstances path in ``vm_manager.py`` registers the AWS-
+        # primary ENI directly via ``register_eni(iface_name="eth1")``
+        # without going through ``EniManager.attach``, so
+        # ``device_index`` stays at its dataclass default ``None``. A
+        # registered entry with ``device_index=None`` AND ``iface_name``
+        # set is the primary ENI by definition (an unattached ENI has
+        # ``iface_name=None``).
+        for entry in entries:
+            if entry.device_index is None and entry.iface_name:
+                return entry
+        # Last resort: single-entry instance, take it.
+        if len(entries) == 1:
+            return entries[0]
+    except Exception:
+        return None
+    return None
+
+
 def _container_exists(container_name: str) -> bool:
     try:
         from localemu.utils.docker_utils import DOCKER_CLIENT as CONTAINER_CLIENT
 
-        # ``CmdDockerClient`` does not expose ``get_container_state`` —
-        # we ask ``inspect_container`` instead and treat any non-None
+        # ``CmdDockerClient`` does not expose ``get_container_state`` - # we ask ``inspect_container`` instead and treat any non-None
         # answer as "the container exists, possibly stopped".
         if CONTAINER_CLIENT.is_container_running(container_name):
             return True
@@ -201,7 +276,7 @@ def _write_or_remove_marker_live(container_name: str, source_dest_check: bool) -
 
 
 def _write_or_remove_marker_offline(container_name: str, source_dest_check: bool) -> None:
-    """Same as ``_live`` but the container is stopped — we have no exec
+    """Same as ``_live`` but the container is stopped - we have no exec
     channel, so we no-op. Real cleanup happens on next start when the
     entrypoint script consults the marker file. We log so the change
     isn't silently dropped if the container never restarts."""

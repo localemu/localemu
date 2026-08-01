@@ -30,9 +30,6 @@ from .paths import (
 
 class ConfigEnvironmentConfigurator:
 
-    def __init__(self, pro: bool):
-        self.pro = pro
-
     def __call__(self, cfg: ContainerConfiguration):
         if cfg.env_vars is None:
             cfg.env_vars = {}
@@ -64,8 +61,7 @@ class ImageConfigurator:
     Sets the container image to use for the container (by default either localemu/localemu or
     """
 
-    def __init__(self, pro: bool, image_name: str | None):
-        self.pro = pro
+    def __init__(self, image_name: str | None):
         self.image_name = image_name
 
     def __call__(self, cfg: ContainerConfiguration):
@@ -103,20 +99,17 @@ class CustomEntryPointConfigurator:
 
 class SourceVolumeMountConfigurator:
     """
-    that there is a "workspace" directory in which the source repositories are checked out into.
-    Depending on whether we want to start the pro container, the source paths for localemu are different.
+    Assumes there is a "workspace" directory in which the source repositories are checked out into.
     """
 
     def __init__(
         self,
         *,
         host_paths: HostPaths = None,
-        pro: bool = False,
         chosen_packages: list[str] | None = None,
     ):
         self.host_paths = host_paths or HostPaths()
         self.container_paths = CommunityContainerPaths()
-        self.pro = pro
         self.chosen_packages = chosen_packages or []
 
     def __call__(self, cfg: ContainerConfiguration):
@@ -186,22 +179,16 @@ class EntryPointMountConfigurator:
         *,
         host_paths: HostPaths = None,
         container_paths: ContainerPaths = None,
-        pro: bool = False,
     ):
         self.host_paths = host_paths or HostPaths()
-        self.pro = pro
         self.container_paths = container_paths or None
 
     def __call__(self, cfg: ContainerConfiguration):
-        # special case for community code
-        if not self.pro:
-            host_path = self.host_paths.aws_community_package_dir
-            if host_path.exists():
-                cfg.volumes.append(
-                    BindMount(
-                        str(host_path), self.localemu_community_entry_points, read_only=True
-                    )
-                )
+        host_path = self.host_paths.aws_community_package_dir
+        if host_path.exists():
+            cfg.volumes.append(
+                BindMount(str(host_path), self.localemu_community_entry_points, read_only=True)
+            )
 
         # locate all relevant entry_point.txt files within the container
         pattern = self.entry_point_glob
@@ -247,10 +234,8 @@ class DependencyMountConfigurator:
         *,
         host_paths: HostPaths = None,
         container_paths: ContainerPaths = None,
-        pro: bool = False,
     ):
         self.host_paths = host_paths or HostPaths()
-        self.pro = pro
         self.container_paths = container_paths or CommunityContainerPaths()
 
     def __call__(self, cfg: ContainerConfiguration):
@@ -318,7 +303,7 @@ def _list_files_in_container_image(container_client: ContainerClient, image_name
         container_id = container_client.create_container(image_name=image_name)
         try:
             # docker export yields paths without prefixed slashes, so we add them here
-            # since the file is pretty big (~4MB for community, ~7MB for pro) we gzip it
+            # since the file can be a few MB we gzip it
             cmd = f"docker export {container_id} | tar -t | awk '{{ print \"/\" $0 }}' | gzip > {cache_file}"
             run(cmd, shell=True)
         finally:

@@ -108,7 +108,7 @@ def start_file_watcher(
 
 
 def collect_watch_directories(
-    host_paths: HostPaths, pro: bool, chosen_packages: list[str] | None
+    host_paths: HostPaths, chosen_packages: list[str] | None
 ) -> list[Path]:
     """Collect host-side source directories that are bind-mounted into the container."""
     dirs: list[Path] = []
@@ -116,11 +116,6 @@ def collect_watch_directories(
     source = host_paths.aws_community_package_dir
     if source.exists():
         dirs.append(source)
-
-    if pro:
-        source = host_paths.aws_pro_package_dir
-        if source.exists():
-            dirs.append(source)
 
     for package_name in chosen_packages or []:
         extractor = HOST_PATH_MAPPINGS[package_name]

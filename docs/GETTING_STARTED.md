@@ -5,8 +5,12 @@ LocalEmu is a free, open-source AWS cloud emulator. 132 services. One install. N
 ## Install
 
 ```bash
-pip install localemu[runtime]
+pip install localemu
 ```
+
+> `pip install localemu[runtime]` still works too (both install the exact
+> same thing) - kept for backward compatibility only, will be removed in a
+> future release.
 
 ## Start
 

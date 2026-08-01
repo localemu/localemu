@@ -1,15 +1,15 @@
-"""CloudTrail recording-hook — owned by the CloudTrail service itself.
+"""CloudTrail recording-hook, owned by the CloudTrail service itself.
 
 Historically this handler lived as a closure inside
-``localemu.dashboard.plugins.register_dashboard``. That coupling meant:
+``localemu.dashboard.plugins.register_dashboard``. That coupling meant :
 
 * If the dashboard plugin was disabled, CloudTrail silently stopped
-  recording events (F2 in the audit).
+  recording events.
 * The duplicate-registration guard compared function-object identity
   against a fresh closure, so repeated ``register_dashboard()`` calls
-  registered the handler multiple times (F3).
+  registered the handler multiple times.
 
-The fix (F2+F3):
+The current shape :
 
 * The hook is a **named module-level function** living with the
   CloudTrail service.
@@ -21,12 +21,29 @@ The fix (F2+F3):
 from __future__ import annotations
 
 import logging
+import threading
 
 LOG = logging.getLogger(__name__)
 
+# Real AWS's CloudTrail-to-EventBridge delivery is not synchronous with the
+# originating API call - AWS documents this as an eventually-consistent
+# pipeline, commonly on the order of tens of seconds to a few minutes,
+# layered on top of the archive's own batching delay. Delivering
+# synchronously (as this used to) makes LocalEmu's default bus visibly
+# noisier than real AWS within the first seconds of a request: any
+# unfiltered (no-EventPattern) rule/archive on the default bus would see
+# CloudTrail-forwarded copies of a test's own setup calls (e.g. CreateQueue)
+# land instantly, before a genuinely-user-facing PutEvents-driven event
+# count check has even run once - something real AWS's own latency would
+# never allow. Forwarding on a short background delay restores that
+# ordering property without adding a real dependency on wall-clock timing
+# for the common case (direct PutEvents delivery to archives is unaffected
+# and stays synchronous).
+_EVB_FORWARDING_DELAY_SECONDS = 60
+
 
 # ---------------------------------------------------------------------------
-# PARITY-C1: CloudTrail -> EventBridge forwarding helpers.
+# CloudTrail -> EventBridge forwarding helpers.
 #
 # Mirrors real AWS: every recorded management event is also published to
 # the default event bus so EventBridge rules can match on it. Best-effort,
@@ -78,9 +95,15 @@ def _emit_cloudtrail_to_eventbridge(
 ) -> None:
     if (service_name or "").lower() == "events":
         return
+    # Real AWS's default (free) CloudTrail-to-EventBridge integration only
+    # relays Management events to the account's default bus. Data events
+    # (S3 object ops, SQS message ops, DynamoDB item ops, ...) require an
+    # explicit opt-in AWS doesn't apply automatically, so they must not be
+    # forwarded here either - otherwise high-frequency data-plane traffic
+    # (e.g. SQS long-polling) floods any catch-all rule/archive on the bus.
+    if getattr(event, "event_category", "Management") != "Management":
+        return
     try:
-        from localemu.aws.connect import connect_to
-
         entry = {
             "Source": f"aws.{service_name.lower()}",
             "DetailType": "AWS API Call via CloudTrail",
@@ -92,25 +115,43 @@ def _emit_cloudtrail_to_eventbridge(
         )
         if resources:
             entry["Resources"] = resources
-
-        events_client = connect_to(
-            aws_access_key_id=account_id or "000000000000",
-            region_name=region or "us-east-1",
-        ).events
-        events_client.put_events(Entries=[entry])
     except Exception:
         LOG.debug(
-            "CloudTrail->EventBridge forwarding failed for %s.%s",
+            "CloudTrail->EventBridge forwarding failed to build entry for %s.%s",
             service_name,
             getattr(event, "event_name", "?"),
             exc_info=True,
         )
+        return
+
+    event_name = getattr(event, "event_name", "?")
+
+    def _deliver() -> None:
+        try:
+            from localemu.aws.connect import connect_to
+
+            events_client = connect_to(
+                aws_access_key_id=account_id or "000000000000",
+                region_name=region or "us-east-1",
+            ).events
+            events_client.put_events(Entries=[entry])
+        except Exception:
+            LOG.debug(
+                "CloudTrail->EventBridge forwarding failed for %s.%s",
+                service_name,
+                event_name,
+                exc_info=True,
+            )
+
+    timer = threading.Timer(_EVB_FORWARDING_DELAY_SECONDS, _deliver)
+    timer.daemon = True
+    timer.start()
 
 
 # ---------------------------------------------------------------------------
-# The recording handler — NAMED module-level function.
+# The recording handler - NAMED module-level function.
 #
-# F3 fix: we tag this function with a string attribute
+# We tag this function with a string attribute
 # ``_le_handler_tag = "cloudtrail-activity-recorder"``. The registrar (see
 # ``register_recording_hook`` below) checks for that tag rather than function
 # identity, so that hot reloads importing a fresh module object still
@@ -144,6 +185,21 @@ def cloudtrail_activity_handler(chain, context, response):
         # ListSubscriptionsByTopic / ReceiveMessage / ListRules rows
         # the user never made.
         if user_agent.startswith(_DASHBOARD_USER_AGENT_PREFIX) or _is_internal_dashboard_call():
+            return
+
+        # Skip LocalEmu's own internal service-to-service traffic (EventBridge
+        # target delivery, the SQS approximate-metrics publisher, etc). These
+        # calls go over a real HTTP round-trip to LocalEmu's own gateway (a
+        # thread-local suppression flag set by the originating thread would
+        # not survive that hop, since the request is actually handled by a
+        # different worker thread), so - like the dashboard case above - they
+        # are tagged via a `user_agent_extra` marker that travels with the
+        # request itself. Real AWS's equivalent internal plumbing (delivering
+        # a matched rule's event to its target, a service publishing its own
+        # CloudWatch metrics) happens entirely inside AWS's own control plane
+        # and is never visible on the customer's CloudTrail; forwarding it
+        # here would flood any catch-all EventBridge rule/archive.
+        if _INTERNAL_CALL_USER_AGENT_MARKER in user_agent:
             return
 
         access_key_id = ""
@@ -291,7 +347,7 @@ def cloudtrail_activity_handler(chain, context, response):
         LOG.debug("Activity recording handler failed", exc_info=True)
 
 
-# F3 fix: tag the handler with a stable string so duplicate-registration
+# Tag the handler with a stable string so duplicate-registration
 # detection survives module reloads / fresh imports.
 cloudtrail_activity_handler._le_handler_tag = "cloudtrail-activity-recorder"  # type: ignore[attr-defined]
 
@@ -300,6 +356,15 @@ _HANDLER_TAG = "cloudtrail-activity-recorder"
 
 
 _DASHBOARD_USER_AGENT_PREFIX = "LocalEmu-Dashboard/"
+
+# Substring (not prefix - botocore appends `user_agent_extra` to the end of
+# the existing User-Agent string, it doesn't replace it) tagging boto3
+# clients LocalEmu itself constructs for internal service-to-service calls
+# (e.g. EventBridge delivering a matched event to a target, a service
+# publishing its own CloudWatch metrics). Set via
+# `Config(user_agent_extra=INTERNAL_CALL_USER_AGENT_EXTRA)` on the client.
+INTERNAL_CALL_USER_AGENT_EXTRA = "LocalEmu-Internal/service-call"
+_INTERNAL_CALL_USER_AGENT_MARKER = INTERNAL_CALL_USER_AGENT_EXTRA
 
 # Threading-local flag used by the dashboard's reentrant boto3 helpers
 # to suppress CloudTrail recording. A simple int counter so nested
@@ -336,7 +401,7 @@ class suppress_recording:
 def register_recording_hook() -> None:
     """Register the CloudTrail activity-recording response handler.
 
-    F3: idempotent via the ``_le_handler_tag`` string attribute, NOT via
+    Idempotent via the ``_le_handler_tag`` string attribute, NOT via
     function-object identity (which fails across reloads because a fresh
     closure is a new object each time).
     """

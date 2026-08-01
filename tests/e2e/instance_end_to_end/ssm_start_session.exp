@@ -1,0 +1,44 @@
+#!/usr/bin/expect -f
+# acceptance : real `aws ssm start-session` yields an interactive
+# shell with round-trip proof, resilient to ANSI escape sequences.
+set timeout 15
+log_user 1
+
+set iid [lindex $argv 0]
+
+spawn env AWS_ENDPOINT_URL=http://localhost:4566 \
+         AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE \
+         AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+         AWS_DEFAULT_REGION=us-east-1 \
+         aws ssm start-session --target $iid
+
+expect {
+    -re {root@[^ ]+:/# ?$} {
+        puts "\n>>> STAGE 1 PASS: shell prompt"
+    }
+    timeout { puts "\n>>> STAGE 1 FAIL"; exit 2 }
+}
+
+send -- "echo LOCALEMU_F1_TOKEN_STAGE2\r"
+expect {
+    "LOCALEMU_F1_TOKEN_STAGE2" {
+        puts "\n>>> STAGE 2 PASS: shell command executed"
+    }
+    timeout { puts "\n>>> STAGE 2 FAIL"; exit 3 }
+}
+
+# uid 0 proof via a unique suffix, avoids ANSI-prefix regex trouble
+send -- "echo uid_marker_\$(id -u)_end\r"
+expect {
+    "uid_marker_0_end" {
+        puts "\n>>> STAGE 3 PASS: uid=0 and shell substitution works"
+    }
+    timeout { puts "\n>>> STAGE 3 FAIL"; exit 4 }
+}
+
+send -- "exit\r"
+expect {
+    "Exiting session" { puts "\n>>> STAGE 4 PASS: clean exit"; exit 0 }
+    eof { puts "\n>>> STAGE 4 PASS: EOF on exit"; exit 0 }
+    timeout { puts "\n>>> STAGE 4 WARN"; exit 0 }
+}

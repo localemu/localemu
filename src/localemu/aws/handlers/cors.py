@@ -215,6 +215,22 @@ class CorsEnforcer(Handler):
             if allowed_origin == "*" or origin == allowed_origin:
                 return True
 
+        # A loopback origin is trusted regardless of port: the Origin header
+        # on a real browser request reflects the page's actual origin, so an
+        # external attacker cannot spoof "http://localhost:<port>" for a
+        # page they do not control. GATEWAY_LISTEN (and therefore the static
+        # allow-list above) only knows the port LocalEmu is bound to *inside*
+        # the container - it has no visibility into a host-side port
+        # mapping, so remapping the container's port (conflicts with an
+        # existing 4566, running multiple instances, CI) silently breaks
+        # every browser-origin request, including the dashboard, since none
+        # of them match the internal-port-only allow-list.
+        try:
+            if urlparse(origin).hostname in _ALLOWED_INTERNAL_DOMAINS:
+                return True
+        except Exception:
+            pass
+
         # performance wise, this is not very heavy because most of the regular requests will match above
         # this would be executed mostly when rejecting or actually using content served by CloudFront or S3 website
         for dynamic_origin in DYNAMIC_INTERNAL_ORIGINS:

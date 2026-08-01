@@ -1,11 +1,8 @@
 // IAM drill. Handles Role / User / Group / Policy entities through
 // one drill spec that introspects the row's `type` field.
 //
-// This was the user's main pain anchor: /tmp/le-shit-2.png showed
-// "le-llmgw-lambda-role" with Type / Name / ARN / Policies count and
-// no way to inspect the trust policy or the policy documents. The
-// drill below renders the full attached + inline policy JSON, the
-// trust relationship JSON, Access Advisor (from CloudTrail), and the
+// Renders the full attached + inline policy JSON, the trust
+// relationship JSON, Access Advisor (from CloudTrail) and the
 // recent activity.
 (function () {
   "use strict";

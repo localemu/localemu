@@ -1,13 +1,5 @@
-from typing import TYPE_CHECKING
+"""plux entry points for the LocalEmu package installers.
 
-from localemu.packages.api import Package, package
-
-if TYPE_CHECKING:
-    from localemu.packages.ffmpeg import FfmpegPackageInstaller
-
-
-@package(name="ffmpeg")
-def ffmpeg_package() -> Package["FfmpegPackageInstaller"]:
-    from localemu.packages.ffmpeg import ffmpeg_package
-
-    return ffmpeg_package
+Intentionally minimal. Add a new entry here only when the installer
+lives fully offline or uses ``pip`` with user-owned index resolution.
+"""

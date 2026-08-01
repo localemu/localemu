@@ -46,12 +46,6 @@ console = Console()
     help="The localemu volume on the host, default: ~/.cache/localemu/volume",
 )
 @click.option(
-    "--pro/--community",
-    is_flag=True,
-    default=None,
-    help="Whether to start localemu pro or community. If not set, it will guess from the current directory",
-)
-@click.option(
     "--develop/--no-develop",
     is_flag=True,
     default=False,
@@ -133,7 +127,6 @@ console = Console()
 def run(
     image: str = None,
     volume_dir: str = None,
-    pro: bool = None,
     develop: bool = False,
     randomize: bool = False,
     mount_source: bool = True,
@@ -200,8 +193,8 @@ def run(
             -v $PWD/tests:/opt/code/localemu/tests \\
             -- .venv/bin/python -m pytest tests/unit/http_/
 
-    The script generally assumes that you are executing in either localemu or localemu source
-    repositories that are organized like this::
+    The script generally assumes that you are executing in the localemu source repository, which is
+    organized like this::
 
     \b
         somedir                              <- your workspace directory
@@ -212,15 +205,6 @@ def run(
         │   │   └── localemu_core.egg-info
         │   ├── pyproject.toml
         │   ├── tests
-        │   └── ...
-        ├── localemu                   <- or execute script in here
-        │   ├── ...
-        │   │   ├── localemu
-        │   │   │   └── pro
-        │   │   │       └── core             <- will be mounted into the container
-        │   │   ├── localemu_ext.egg-info
-        │   │   ├── pyproject.toml
-        │   │   └── tests
         │   └── ...
         ├── moto
         │   ├── AUTHORS.md
@@ -259,13 +243,6 @@ def run(
             volume_dir=volume_dir or config.VOLUME_DIR,
         )
 
-        # auto-set pro flag
-        if pro is None:
-            if os.getcwd().endswith("localemu"):
-                pro = True
-            else:
-                pro = False
-
         # setup base configuration
         container_config = ContainerConfiguration(
             image_name=image,
@@ -281,9 +258,9 @@ def run(
 
         # setup configurators
         configurators = [
-            ImageConfigurator(pro, image),
+            ImageConfigurator(image),
             PortConfigurator(randomize),
-            ConfigEnvironmentConfigurator(pro),
+            ConfigEnvironmentConfigurator(),
             ContainerConfigurators.mount_localemu_volume(host_paths.volume_dir),
             ContainerConfigurators.config_env_vars,
         ]
@@ -304,12 +281,11 @@ def run(
             configurators.append(
                 SourceVolumeMountConfigurator(
                     host_paths=host_paths,
-                    pro=pro,
                     chosen_packages=local_packages,
                 )
             )
         if mount_entrypoints:
-            configurators.append(EntryPointMountConfigurator(host_paths=host_paths, pro=pro))
+            configurators.append(EntryPointMountConfigurator(host_paths=host_paths))
         if mount_dependencies:
             configurators.append(DependencyMountConfigurator(host_paths=host_paths))
         if develop:
@@ -346,7 +322,7 @@ def run(
             # an import error for these developers.
             from localemu.dev.run.watcher import collect_watch_directories, start_file_watcher
 
-            if watch_dirs := collect_watch_directories(host_paths, pro, local_packages):
+            if watch_dirs := collect_watch_directories(host_paths, local_packages):
                 stop_live_reload_watcher = start_file_watcher(watch_dirs, docker, container_id)
 
         cmd = [*docker._docker_cmd(), "start", "--interactive", "--attach", container_id]

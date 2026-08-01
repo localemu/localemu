@@ -1,4 +1,4 @@
-"""S3 Access Point routing — the data-plane glue.
+"""S3 Access Point routing - the data-plane glue.
 
 When a client addresses an S3 access point (via ARN, alias, or hostname),
 this module resolves the access point to its underlying bucket, stashes
@@ -30,7 +30,7 @@ LOG = logging.getLogger(__name__)
 # Detection regexes
 # --------------------------------------------------------------------------
 
-# Full access-point ARN. Captures region (may be empty for MRAP — we reject
+# Full access-point ARN. Captures region (may be empty for MRAP - we reject
 # empty), 12-digit account, and access-point name.
 _AP_ARN_RE = re.compile(
     r"^arn:aws:s3:(?P<region>[a-z0-9-]*):(?P<account>\d{12}):accesspoint/(?P<name>[a-z0-9][a-z0-9-]{1,48}[a-z0-9])$"
@@ -66,7 +66,7 @@ _AP_HYBRID_RE = re.compile(
 # --------------------------------------------------------------------------
 
 AP_INCOMPATIBLE_OPS = frozenset({
-    # Bucket lifecycle / configuration ops — all bucket-only
+    # Bucket lifecycle / configuration ops - all bucket-only
     "CreateBucket", "DeleteBucket", "ListBuckets",
     "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration",
     "DeleteBucketLifecycle",
@@ -232,7 +232,7 @@ def resolve_access_point(
 
     if form == "arn_mrap":
         raise AccessPointMrapUnsupported(
-            "Multi-Region Access Points are not implemented in LocalEmu 1.1.0",
+            "Multi-Region Access Points are not implemented in LocalEmu 1.2.0",
         )
 
     if form == "arn":

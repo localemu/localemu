@@ -13,7 +13,7 @@ LOG = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# PARITY-C1: CloudTrail -> EventBridge forwarding
+# CloudTrail -> EventBridge forwarding
 # ---------------------------------------------------------------------------
 # Mapping of LocalEmu/botocore service names to ARN partition service segments.
 # Used only for best-effort resource ARN enrichment on the EventBridge entry
@@ -77,14 +77,14 @@ def _emit_cloudtrail_to_eventbridge(
 
     Safety invariants:
       * Recursion guard: skip when the source service is EventBridge itself
-        (``service_name == "events"``) — otherwise ``put_events`` would record
+        (``service_name == "events"``) - otherwise ``put_events`` would record
         its own call and infinitely loop.
-      * Never propagate failures — a broken EventBridge delivery MUST NOT
+      * Never propagate failures - a broken EventBridge delivery MUST NOT
         break the original request.
       * The caller already gated on trail logging state; this function is
         only invoked when at least one trail is logging.
     """
-    # Recursion guard — do not publish EventBridge's own put_events calls.
+    # Recursion guard - do not publish EventBridge's own put_events calls.
     if (service_name or "").lower() == "events":
         return
 
@@ -123,7 +123,7 @@ def _is_loopback_request(request) -> bool:
     Same-host callers (the LocalEmu CLI, host-side scripts hitting
     127.0.0.1:4566) are trusted because they share the kernel namespace with
     the LocalEmu process. Any other ``remote_addr`` is by definition outside
-    the trust boundary — Docker port-forwards from 0.0.0.0:4566 routinely
+    the trust boundary - Docker port-forwards from 0.0.0.0:4566 routinely
     expose the gateway to the host LAN.
     """
     import ipaddress
@@ -326,7 +326,7 @@ def _register_persistence_endpoints(router):
 
 
 # Idempotency guard for register_dashboard. on_infra_start can fire
-# more than once across a single process — for example a persistence
+# more than once across a single process - for example a persistence
 # reload triggers a second start phase, and any hot-reload tooling does
 # the same. Without this flag the dashboard routes were re-added on
 # every invocation; the Router silently kept the FIRST handler and
@@ -340,7 +340,7 @@ def register_dashboard():
     """Wire up all dashboard-related routes into the internal API router."""
     global _dashboard_registered
     if _dashboard_registered:
-        LOG.debug("LocalEmu dashboard already registered — skipping re-registration")
+        LOG.debug("LocalEmu dashboard already registered - skipping re-registration")
         return
 
     from localemu.http import Resource
@@ -360,6 +360,7 @@ def register_dashboard():
         CloudTrailDetailResource,
         CloudTrailResource,
         CloudWatchLogGroupDetailResource,
+        CognitoMessagesResource,
         CognitoUserPoolDetailResource,
         DashboardResource,
         DynamoDBItemsResource,
@@ -436,6 +437,7 @@ def register_dashboard():
     router.add(Resource("/_localemu/api/resources/elbv2/<name>", G(ElbV2LoadBalancerDetailResource())))
     router.add(Resource("/_localemu/api/resources/route53/<zone_id>", G(Route53ZoneDetailResource())))
     router.add(Resource("/_localemu/api/resources/cognito-idp/<pool_id>", G(CognitoUserPoolDetailResource())))
+    router.add(Resource("/_localemu/api/cognito-messages/<pool_id>/<user>", G(CognitoMessagesResource())))
     router.add(Resource("/_localemu/api/resources/kinesis/<name>/detail", G(KinesisStreamDetailResource())))
     router.add(Resource("/_localemu/api/resources/firehose/<name>", G(FirehoseDeliveryStreamDetailResource())))
     router.add(Resource("/_localemu/api/resources/kafka/<path:arn>", G(MskClusterDetailResource())))
@@ -464,7 +466,7 @@ def register_dashboard():
     router.add(Resource("/_localemu/api/stream/stats", G(StreamStatsResource())))
     router.add(Resource("/_localemu/dashboard/static/<path:path>", G(StaticResource())))
 
-    # Persistence REST API — manual save / load / status.
+    # Persistence REST API - manual save / load / status.
     # Only register if PERSISTENCE=1; the orchestrators have nothing to do
     # otherwise and exposing the routes would waste audit surface.
     from localemu import config as _lemu_config
@@ -475,7 +477,7 @@ def register_dashboard():
     # Activity recording lives in the CloudTrail service itself
     # (see ``localemu.services.cloudtrail.recording_hook``) so the dashboard
     # only READS from the event store via its API resources. We still
-    # trigger the hook registration here as a belt-and-braces — the
+    # trigger the hook registration here as a belt-and-braces - the
     # underlying register call is idempotent via a tag-string attribute on
     # the handler list, so doing it from both sites yields exactly one
     # handler.

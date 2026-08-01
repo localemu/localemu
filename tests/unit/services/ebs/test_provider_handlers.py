@@ -2,7 +2,7 @@
 
 The block-store has its own unit tests (``test_block_store.py``); these
 tests focus on the *boundary* between the AWS protocol runtime and the
-block store — the layer that the previous PR-005 ship missed and that
+block store - the layer that the previous ship missed and that
 let a real bug land in production.
 
 Concretely:
@@ -14,7 +14,7 @@ Concretely:
   crashed with ``memoryview: a bytes-like object is required, not
   '_InputStream'``.
 * The ``GetSnapshotBlock`` response shape's ``BlockData`` is also
-  streaming, so the serializer expects a file-like object — bytes
+  streaming, so the serializer expects a file-like object - bytes
   would crash the serializer the same way.
 
 These tests simulate the streaming shapes without booting LocalEmu or
@@ -92,7 +92,7 @@ def test_coerce_memoryview_to_bytes():
 
 
 def test_coerce_input_stream_like_reads_full_payload():
-    """The exact shape PR-005 user reported: an _InputStream wrapper."""
+    """The exact shape user-reported: an _InputStream wrapper."""
     stream = _InputStreamLike(b"hello-streamed-bytes")
     assert _coerce_block_data_to_bytes(stream) == b"hello-streamed-bytes"
 
@@ -118,11 +118,11 @@ def test_coerce_unknown_type_raises_typeerror():
 
 
 def test_put_snapshot_block_reads_streaming_input_and_stores_bytes():
-    """The PR-005 reproduction at unit scope.
+    """The reproduction at unit scope.
 
     Without the streaming read, this test fails with
     ``TypeError: a bytes-like object is required, not '_InputStreamLike'``
-    inside the hashing step of the block store — matching the bug
+    inside the hashing step of the block store - matching the bug
     report's symptom verbatim.
     """
     block_store.create_snapshot(
@@ -191,7 +191,7 @@ def test_get_snapshot_block_returns_file_like_block_data():
     body = resp["BlockData"]
     assert hasattr(body, "read"), (
         "BlockData on GetSnapshotBlock output must be a file-like "
-        "object — the AWS spec declares it streaming=True and the "
+        "object - the AWS spec declares it streaming=True and the "
         "serializer rejects raw bytes."
     )
     assert body.read() == payload
