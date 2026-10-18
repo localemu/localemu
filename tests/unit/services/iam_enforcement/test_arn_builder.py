@@ -67,3 +67,14 @@ class TestRoute53Arn:
             account_id=ACCOUNT,
         )
         assert arn == "arn:aws:route53:::hostedzone/Z9XYZ"
+
+
+def test_bedrock_runtime_invoke_model_resource_is_the_foundation_model_arn() -> None:
+    from localemu.services.iam_enforcement.arn_builder import _bedrock_runtime_arn
+
+    assert (
+        _bedrock_runtime_arn({"modelId": "meta.llama3-1-8b-instruct-v1:0"}, "us-east-1", "000000000000")
+        == "arn:aws:bedrock:us-east-1::foundation-model/meta.llama3-1-8b-instruct-v1:0"
+    )
+    arn = "arn:aws:bedrock:us-east-1:000000000000:inference-profile/us.x"
+    assert _bedrock_runtime_arn({"modelId": arn}, "us-east-1", "000000000000") == arn

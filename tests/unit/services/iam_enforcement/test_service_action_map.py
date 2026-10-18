@@ -158,3 +158,13 @@ def test_map_action_returns_a_copy_not_the_stored_list() -> None:
     b = map_action("lambda", "Invoke")
     assert b == ["lambda:InvokeFunction"]
     assert "attacker:sneak" not in b
+
+
+def test_bedrock_runtime_uses_the_bedrock_iam_prefix() -> None:
+    """AWS has no ``bedrock-runtime:`` IAM namespace: policies grant
+    ``bedrock:InvokeModel``."""
+    assert map_action("bedrock-runtime", "InvokeModel") == ["bedrock:InvokeModel"]
+    assert map_action("bedrock-runtime", "Converse") == ["bedrock:InvokeModel"]
+    assert map_action("bedrock-runtime", "InvokeModelWithResponseStream") == [
+        "bedrock:InvokeModelWithResponseStream"
+    ]

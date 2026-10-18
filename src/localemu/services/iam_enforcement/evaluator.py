@@ -173,7 +173,7 @@ class PolicyEvaluator:
                 return Decision.IMPLICIT_DENY
 
         # Step 5: Check session policies (for assumed roles)
-        if caller.principal_type == "AssumedRole":
+        if caller.principal_type in ("AssumedRole", "FederatedUser"):
             session_policies = get_session_policies(caller)
             if session_policies:
                 session_allow = False

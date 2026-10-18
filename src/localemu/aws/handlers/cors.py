@@ -185,7 +185,9 @@ class CorsEnforcer(Handler):
             context.request.headers
         ):
             LOG.info(
-                "Blocked CORS request from forbidden origin %s",
+                "Blocked CORS request from forbidden origin %s. If this "
+                "origin is expected (e.g. a custom hostname or reverse "
+                "proxy), add it via EXTRA_CORS_ALLOWED_ORIGINS (comma-separated).",
                 context.request.headers.get("origin") or context.request.headers.get("referer"),
             )
             response.status_code = 403

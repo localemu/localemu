@@ -243,7 +243,74 @@ def resolve_caller(
     except Exception as e:
         LOG.debug("Failed to resolve caller identity for key %s: %s", access_key_id[:8], e)
 
-    return None
+    return _resolve_user_session(access_key_id, account_id)
+
+
+def _resolve_user_session(access_key_id: str, account_id: str) -> CallerIdentity | None:
+    """Resolve credentials minted by GetSessionToken / GetFederationToken.
+
+    GetSessionToken credentials act as the IAM user that requested them.
+    GetFederationToken credentials are a federated user (``federated-user/<name>``)
+    whose identity policies are the requesting user's, narrowed by the
+    session policy stored with the session.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from moto.iam.models import iam_backends
+
+        from localemu.services.sts.models import sts_store_lock, sts_stores
+
+        with sts_store_lock:
+            cfg = sts_stores[account_id]["us-east-1"].sessions.get(access_key_id)
+        if not cfg or not cfg.get("session_kind"):
+            return None
+        exp = cfg.get("expiration")
+        if isinstance(exp, datetime) and exp < datetime.now(timezone.utc):
+            return None
+        if cfg["session_kind"] == "root":
+            return CallerIdentity(
+                principal_type="Root",
+                account_id=account_id,
+                arn=f"arn:aws:iam::{account_id}:root",
+                access_key_id=access_key_id,
+            )
+        if not cfg.get("base_username"):
+            return None
+        user = iam_backends[account_id]["global"].users.get(cfg["base_username"])
+        if user is None:
+            return None
+        if cfg["session_kind"] == "federated":
+            tags = {
+                f"aws:PrincipalTag/{t.get('Key', '')}": t.get("Value", "")
+                for t in (cfg.get("tags") or {}).values()
+                if isinstance(t, dict) and t.get("Key")
+            }
+            return CallerIdentity(
+                principal_type="FederatedUser",
+                account_id=account_id,
+                arn=f"arn:aws:sts::{account_id}:federated-user/{cfg.get('federated_name', '')}",
+                username=user.name,
+                access_key_id=access_key_id,
+                tags=tags,
+            )
+        user_tags = getattr(user, "tags", None) or {}
+        tags = {}
+        if isinstance(user_tags, dict):
+            for tag in user_tags.values():
+                if isinstance(tag, dict):
+                    tags[f"aws:PrincipalTag/{tag.get('Key', '')}"] = tag.get("Value", "")
+        return CallerIdentity(
+            principal_type="User",
+            account_id=account_id,
+            arn=user.arn,
+            username=user.name,
+            access_key_id=access_key_id,
+            tags=tags,
+        )
+    except Exception as e:
+        LOG.debug("Failed to resolve user session for key %s: %s", access_key_id[:8], e)
+        return None
 
 
 def get_identity_policies(caller: CallerIdentity) -> list[dict]:
@@ -261,7 +328,7 @@ def get_identity_policies(caller: CallerIdentity) -> list[dict]:
 
     policies = []
 
-    if caller.principal_type == "User" and caller.username:
+    if caller.principal_type in ("User", "FederatedUser") and caller.username:
         user = backend.users.get(caller.username)
         if user:
             # Inline policies
@@ -341,7 +408,7 @@ def get_permission_boundary(caller: CallerIdentity) -> dict | None:
 
         backend = iam_backends[caller.account_id]["global"]
 
-        if caller.principal_type == "User" and caller.username:
+        if caller.principal_type in ("User", "FederatedUser") and caller.username:
             user = backend.users.get(caller.username)
             if user is not None:
                 raw = getattr(user, "permissions_boundary_arn", None) or getattr(
@@ -377,7 +444,7 @@ def get_session_policies(caller: CallerIdentity) -> list[dict]:
     They further restrict what the assumed role session can do.
     EMU-04: Also includes chained session policies from role chaining.
     """
-    if caller.principal_type != "AssumedRole":
+    if caller.principal_type not in ("AssumedRole", "FederatedUser"):
         return []
 
     policies = []

@@ -37,6 +37,8 @@ LOG = logging.getLogger(__name__)
 # must not be denied just because the caller has no IAM identity:
 #   * ``sts:GetCallerIdentity`` — used by every SDK to discover identity;
 #     denying it would break SDK clients before any other call.
+#   * ``sts:GetSessionToken`` — AWS requires no IAM permission for an IAM
+#     user to get a session token for itself.
 #   * ``sts:AssumeRoleWithWebIdentity`` / ``sts:AssumeRoleWithSAML`` —
 #     authenticate via a JWT / SAML assertion, not via signed creds. The
 #     trust-policy evaluator in ``services/sts/provider.py`` validates the
@@ -49,6 +51,7 @@ LOG = logging.getLogger(__name__)
 #     blocking these at the SigV4 layer breaks every UI sign-in flow.
 _EXEMPT_ACTIONS = {
     "sts:GetCallerIdentity",
+    "sts:GetSessionToken",
     "sts:AssumeRoleWithWebIdentity",
     "sts:AssumeRoleWithSAML",
     "cognito-idp:SignUp",
@@ -428,7 +431,7 @@ def _build_conditions(context: RequestContext, caller) -> dict:
     # long-term IAM-user call appear as "not MFA" while still being a present
     # key, which breaks BoolIfExists: {aws:MultiFactorAuthPresent: false} Deny
     # rules commonly used to gate sensitive actions.
-    if caller.principal_type == "AssumedRole" and caller.access_key_id:
+    if caller.principal_type in ("AssumedRole", "FederatedUser", "User") and caller.access_key_id:
         try:
             from localemu.services.sts.models import sts_stores, sts_store_lock
             _store = sts_stores[caller.account_id]["us-east-1"]
@@ -436,6 +439,10 @@ def _build_conditions(context: RequestContext, caller) -> dict:
                 _session_cfg = _store.sessions.get(caller.access_key_id)
             if _session_cfg and _session_cfg.get("mfa_authenticated"):
                 conditions["aws:MultiFactorAuthPresent"] = "true"
+            if _session_cfg and _session_cfg.get("issued_at"):
+                conditions["aws:TokenIssueTime"] = _session_cfg["issued_at"].strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
         except Exception as mfa_err:
             LOG.debug("Failed to resolve MFA status for %s: %s",
                       caller.access_key_id[:8], mfa_err)

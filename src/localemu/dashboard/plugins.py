@@ -180,14 +180,41 @@ def _is_dashboard_authorized(request) -> bool:
     return _os.environ.get("DASHBOARD_API_OPEN", "").strip().lower() in {"1", "true"}
 
 
+def _extra_cors_allowed_hosts() -> set[str]:
+    """Hostnames carved out of ``EXTRA_CORS_ALLOWED_ORIGINS``.
+
+    This is the same env var the global CORS enforcer
+    (``aws/handlers/cors.py::_get_allowed_cors_origins``) already honors
+    for the rest of the API surface. Reusing it here - rather than
+    inventing a second, dashboard-only knob - means a deployment behind a
+    custom hostname (reverse proxy, non-default Docker port mapping, a
+    LAN hostname) sets exactly one env var to unblock both the general
+    API and the dashboard's own write actions.
+    """
+    import os as _os
+    from urllib.parse import urlparse as _urlparse
+
+    raw = _os.environ.get("EXTRA_CORS_ALLOWED_ORIGINS", "").strip()
+    hosts: set[str] = set()
+    for origin in raw.split(","):
+        origin = origin.strip()
+        if not origin:
+            continue
+        try:
+            hosts.add((_urlparse(origin).hostname or "").lower())
+        except Exception:
+            continue
+    return hosts
+
+
 def _dashboard_origin_ok(request) -> bool:
     """Reject CSRF candidates by inspecting ``Origin`` / ``Referer``.
 
     Browsers send ``Origin`` on cross-origin POST, PUT, DELETE. A page
     on ``https://evil.example`` POSTing to our ``/_localemu/api/...``
     will carry ``Origin: https://evil.example``. Allow only same-origin
-    (no Origin header, or one whose host is loopback / matches the
-    request host).
+    (no Origin header, or one whose host is loopback, or one explicitly
+    listed in ``EXTRA_CORS_ALLOWED_ORIGINS``).
     """
     headers = getattr(request, "headers", {}) or {}
     origin = headers.get("Origin") or headers.get("origin") or ""
@@ -200,7 +227,9 @@ def _dashboard_origin_ok(request) -> bool:
         host = (parsed.hostname or "").lower()
     except Exception:
         return False
-    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+    if host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
+        return True
+    return host in _extra_cors_allowed_hosts()
 
 
 def _dashboard_forbidden(reason: str):
@@ -246,7 +275,8 @@ class _GatedResource:
             if not is_read and not _dashboard_origin_ok(request):
                 return _dashboard_forbidden(
                     "Cross-origin request rejected. Dashboard mutating "
-                    "endpoints require a same-origin Origin header."
+                    "endpoints require a same-origin Origin header, or an "
+                    "origin listed in EXTRA_CORS_ALLOWED_ORIGINS."
                 )
             return inner_method(request, *args, **kwargs)
 

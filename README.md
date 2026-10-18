@@ -17,7 +17,7 @@
 
 <p align="center">
   <img alt="Emulates AWS" src="https://img.shields.io/badge/emulates-AWS-FF9900?logo=amazonwebservices&logoColor=white">
-  <img alt="AWS services" src="https://img.shields.io/badge/AWS%20services-132-1f6feb">
+  <img alt="AWS services" src="https://img.shields.io/badge/AWS%20services-133-1f6feb">
   <a href="https://github.com/localemu/localemu/blob/main/CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
   <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
   <a href="https://github.com/localemu/localemu/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/localemu/localemu?color=yellow"></a>
@@ -35,7 +35,7 @@
 
 ## What is LocalEmu?
 
-LocalEmu emulates 132 AWS services on your machine. Use the same AWS CLI, boto3, Terraform, or CDK you already know - just point to `localhost:4566`.
+LocalEmu emulates 133 AWS services on your machine. Use the same AWS CLI, boto3, Terraform, or CDK you already know - just point to `localhost:4566`.
 
 **Build and test against AWS APIs from your laptop with no account, no credentials, no internet.** The iteration loop is seconds instead of minutes; you can break, reset, and rebuild as often as you want at zero cost.
 
@@ -100,7 +100,7 @@ awsemu lambda create-function --function-name hello \
   --role arn:aws:iam::000000000000:role/role \
   --zip-file fileb://function.zip
 
-# Any of the 132 supported services...
+# Any of the 133 supported services...
 awsemu ecs create-cluster --cluster-name my-cluster
 awsemu rds describe-db-instances
 awsemu cognito-idp create-user-pool --pool-name my-pool
@@ -227,9 +227,115 @@ ROOT_ACCESS_KEYS=AKIAIOSFODNN7EXAMPLE IAM_ENFORCEMENT=1 localemu start
 - Cross-account calls (caller account ≠ resource owner account) are currently treated as same-account. LocalEmu defaults to a single account so this rarely matters; if you emulate multi-account IAM flows, enforcement will be more permissive than AWS.
 - Service-principal grants on resource policies (e.g. `Principal: {Service: lambda.amazonaws.com}`) are not auto-matched for internal service-to-service calls; use `AWS` principals or `*` for now.
 
-## 132 Supported Services
+## Bedrock (local inference)
 
-Run `localemu services` to see the full list. Key services include: ACM, API Gateway, AppSync, Athena, Backup, Batch, Bedrock, CloudFormation, CloudFront, CloudTrail, CloudWatch, CodeBuild, CodeCommit, CodeDeploy, CodePipeline, Cognito, Config, DynamoDB, EC2, ECR, ECS, EFS, EKS, ElastiCache, ELB, ELBv2, Elasticsearch, EMR, EventBridge, Firehose, FSx, Glacier, Glue, GuardDuty, IAM, IoT, Kafka, Kinesis, KMS, Lambda, CloudWatch Logs, Neptune, OpenSearch, Organizations, Pipes, RDS, Redshift, Rekognition, Resource Groups, Route53, S3, SageMaker, Scheduler, Secrets Manager, SES, SESv2, SNS, SQS, SSM, Step Functions, STS, Textract, Transcribe, Transfer, WAFv2, X-Ray, and more.
+`bedrock:ListFoundationModels`/`GetFoundationModel` return a curated, real
+catalog (Anthropic Claude 3.x, Amazon Titan, Meta Llama 3/3.1/3.2,
+Mistral/Mixtral, Cohere, AI21 Jamba — the long-established, verified-ID
+families; newer 2025/2026 providers aren't in the catalog yet, see
+`src/localemu/services/bedrock/catalog.py`).
+
+`bedrock-runtime:InvokeModel` actually runs, picked by `BEDROCK_BACKEND`:
+
+```bash
+# Default: zero dependencies, deterministic, works instantly.
+localemu start
+
+# Real local inference via a Docker sidecar running Ollama.
+BEDROCK_BACKEND=ollama localemu start
+```
+
+- **`synthetic` (default)** — a deterministic placeholder response shaped
+  like the real model family's output (Anthropic Messages, Titan,
+  Llama, Mistral, Cohere, ...), so application code parses it without
+  changes. Same prompt always returns the same output; different prompts
+  return different output. No Docker, no download, no internet.
+- **`ollama`** — real generation/embeddings from a real local model,
+  pulled into a Docker sidecar on first use (one-time download per model,
+  same as any Docker image LocalEmu already pulls). Gated by a **RAM
+  pre-flight check** (`memory_gate.py`): a one-time, static comparison of
+  the machine's total physical RAM against the model's declared tier
+  (16/32/64GB) — not a live/available-memory probe, since free RAM
+  fluctuates minute to minute with whatever else is open and isn't a
+  stable thing to gate on. A machine below the model's tier gets an
+  immediate, readable error instead of attempting the pull at all:
+
+  ```
+  ServiceQuotaExceededException: 'meta.llama3-1-70b-instruct-v1:0' needs
+  a 64GB-tier machine to run locally; this machine has 16.0GB of RAM.
+  Pick a smaller model, or set BEDROCK_BACKEND=synthetic to skip real
+  inference for this call.
+  ```
+
+**Performance expectations with `BEDROCK_BACKEND=ollama`** — real numbers,
+measured on a 16GB Mac (M-series) with Docker Desktop given 15.6GB; yours
+will vary with hardware, but the shape of these numbers won't:
+
+| Model | Real RAM while loaded | First-load time |
+|---|---|---|
+| `llama3.2:1b` | 1.9GB | ~3s |
+| `llama3.2:3b` | 2.9GB | ~4s |
+| `gemma3:4b` | 4.4GB | ~22s |
+| `mistral:7b` | 5.5GB | ~28s |
+| `llama3.1:8b` | 5.9GB | ~60-65s |
+| `gemma3:12b` | 8.7GB | ~2min |
+
+First call to a given model pays both the Docker pull (one-time,
+network-bound — minutes for an 8B+ model on a slow connection) *and* this
+load time (every time the model has to come off disk into RAM — not
+one-time). Subsequent calls to an already-warm model are fast
+(tens of milliseconds).
+
+**A 16GB machine cannot keep two 8B-class models warm at once.** Ollama
+unloads a model after ~5 minutes idle (`OLLAMA_KEEP_ALIVE`) or sooner if
+RAM is needed for a different model you just called. Concretely: embed
+with `amazon.titan-embed-text-v1` (`nomic-embed-text`), then generate
+with `meta.llama3-1-8b-instruct-v1:0` (`llama3.1:8b`) a few minutes
+later — expect the generate call to pay a full ~60s reload, because
+loading the embedding model evicted it. This isn't a bug to work around;
+it's the real, honest cost of running two models on one RAM-constrained
+machine, same as it would be outside LocalEmu entirely. If your
+workshop/demo needs both warm simultaneously, budget RAM for both
+models' rows in the table above, not just the larger one.
+
+**Model mapping and fidelity** (`src/localemu/services/bedrock_runtime/local_inference.py`).
+Every entry is honest about what's actually running — `same_family` (the
+real open-weight model), `different_family` (a real model standing in for
+a closed-weight one, e.g. Claude), or `unavailable` (no local model is a
+reasonable substitute at a dev-machine RAM budget — use `synthetic`
+instead):
+
+| Model id | Runs locally as | Min RAM | Fidelity |
+|---|---|---|---|
+| `anthropic.claude-3-haiku-20240307-v1:0` | `llama3.1:8b` | 16GB | different_family (Claude has no open weights) |
+| `amazon.titan-embed-text-v1` / `v2:0` | `nomic-embed-text` | 16GB | different_family |
+| `meta.llama3-1-8b-instruct-v1:0` | `llama3.1:8b` | 16GB | same_family |
+| `meta.llama3-1-70b-instruct-v1:0` | `llama3.1:70b` | 64GB | same_family |
+| `meta.llama3-1-405b-instruct-v1:0` | — | — | unavailable (~230GB+ even at 4-bit) |
+| `mistral.mistral-7b-instruct-v0:2` | `mistral:7b` | 16GB | same_family |
+| `mistral.mixtral-8x7b-instruct-v0:1` | `mixtral:8x7b` | 32GB | same_family (total weights ≈47B params) |
+| `mistral.mistral-large-2402-v1:0` | — | — | unavailable (closed-weight) |
+| `cohere.command-r-v1:0` | `mistral:7b` | 16GB | different_family |
+| `cohere.embed-english-v3` / `multilingual-v3` | `nomic-embed-text` | 16GB | different_family |
+| `ai21.jamba-1-5-large-v1:0` | — | — | unavailable (closed-weight) |
+
+**Why no DeepSeek/Qwen/GLM/gpt-oss/Nemotron mapping yet**: their exact
+Bedrock `modelId` strings weren't confirmed when this catalog was written.
+A wrong invented ID would mislead more than an honest gap — adding them
+(with verified IDs) is a good follow-up contribution.
+
+**RAM-tiered Ollama tags worth knowing**, if you're extending the map
+yourself (dev machines commonly run 16–64GB):
+
+| RAM tier | Good local models |
+|---|---|
+| 16GB | `llama3.1:8b`, `llama3.2:1b/3b`, `llama3.2-vision:11b`, `mistral:7b`, `gemma3:4b/12b`, `nemotron`, `gpt-oss:20b` |
+| 32GB | `mixtral:8x7b`, `gemma3:27b`, `qwen3:32b`, `deepseek-r1:32b` (a *distillation*, not the real 671B R1) |
+| 64GB | `llama3.3:70b`, `qwen3-next` (tight) |
+
+## 133 Supported Services
+
+Run `localemu services` to see the full list. Key services include: ACM, API Gateway, AppSync, Athena, Backup, Batch, Bedrock, Bedrock Runtime, CloudFormation, CloudFront, CloudTrail, CloudWatch, CodeBuild, CodeCommit, CodeDeploy, CodePipeline, Cognito, Config, DynamoDB, EC2, ECR, ECS, EFS, EKS, ElastiCache, ELB, ELBv2, Elasticsearch, EMR, EventBridge, Firehose, FSx, Glacier, Glue, GuardDuty, IAM, IoT, Kafka, Kinesis, KMS, Lambda, CloudWatch Logs, Neptune, OpenSearch, Organizations, Pipes, RDS, Redshift, Rekognition, Resource Groups, Route53, S3, SageMaker, Scheduler, Secrets Manager, SES, SESv2, SNS, SQS, SSM, Step Functions, STS, Textract, Transfer, WAFv2, X-Ray, and more.
 
 ## Python (boto3)
 
@@ -326,6 +432,23 @@ docker run --rm -d -p 4566:4566 -p 4510-4559:4510-4559 \
 > returns 403 with a message naming this exact variable. The pip-install
 > path does not need it because `localemu start` listens directly on the
 > host loopback.
+>
+> **Accessing the dashboard (or any API) through a custom hostname?**
+> `DASHBOARD_API_OPEN=1` only lifts the loopback-IP restriction above — it
+> does not affect CORS. A browser sends an `Origin` header matching the
+> hostname it's actually loaded from (e.g. `http://my.domain:4567`), and
+> by default only `localhost`/`127.0.0.1`/`app.localemu.cloud` origins are
+> allowed; anything else gets `403 Blocked CORS request from forbidden
+> origin ...` in the log, and the dashboard's own CSS/JS/API calls will
+> fail the same way even though the first HTML page loads. Fix it with
+> `EXTRA_CORS_ALLOWED_ORIGINS` (comma-separated, matched by hostname), the
+> one knob that covers both the general API and the dashboard's write
+> actions:
+>
+> ```bash
+> EXTRA_CORS_ALLOWED_ORIGINS=http://my.domain:4567 \
+>   DASHBOARD_API_OPEN=1 localemu start
+> ```
 
 ## Using the AWS CLI with Docker
 

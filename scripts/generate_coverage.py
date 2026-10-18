@@ -12,6 +12,7 @@ import ast
 import importlib
 import inspect
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,7 @@ DISPLAY_NAMES = {
     "backup": "Backup",
     "batch": "Batch",
     "bedrock": "Bedrock",
+    "bedrock-runtime": "Bedrock Runtime",
     "budgets": "Budgets",
     "ce": "Cost Explorer",
     "cloudformation": "CloudFormation",
@@ -340,11 +342,17 @@ def get_operations_custom_dispatch(service_name: str, info: dict) -> list[dict]:
     ops = _get_service_operations(service_name)
 
     intercepted_ops: set[str] = set()
+    # A service whose module never proxies to moto (e.g. bedrock-runtime,
+    # which has no moto backend) answers 501 for every op it does not
+    # intercept, so those ops are not implemented, not "moto".
+    fallback_status = "moto"
     import_path = info.get("import_path")
     create_func = info.get("create_func")
     if import_path:
         try:
             mod = importlib.import_module(import_path)
+            if not re.search(r"_proxy_moto|MotoFallback|_moto_service|moto\.", inspect.getsource(mod)):
+                fallback_status = "not_implemented"
             intercepted_dict = getattr(mod, "_INTERCEPTED_OPS", None)
             if intercepted_dict and isinstance(intercepted_dict, dict):
                 intercepted_ops = set(intercepted_dict.keys())
@@ -357,14 +365,12 @@ def get_operations_custom_dispatch(service_name: str, info: dict) -> list[dict]:
         except Exception as exc:
             _warn(f"Failed to import {import_path} for {service_name}: {exc}")
 
-    has_any_custom = bool(intercepted_ops)
     return [
         {
             "name": op,
             "status": (
                 "custom" if op in intercepted_ops
-                else "moto" if has_any_custom
-                else "moto"
+                else fallback_status
             ),
         }
         for op in ops
@@ -469,6 +475,11 @@ def get_operations_asf(service_name: str, info: dict, has_moto_fallback: bool) -
 # 3. Main generation
 # ---------------------------------------------------------------------------
 
+# Services whose provider answers every operation with a "not implemented"
+# error. Their operations are listed but never counted as implemented.
+STUB_SERVICES = {"transcribe"}
+
+
 def generate_coverage() -> dict:
     """Generate the full coverage JSON structure."""
     services_info = _parse_providers()
@@ -499,6 +510,10 @@ def generate_coverage() -> dict:
             _warn(f"Failed to introspect {service_name}: {exc}")
             continue
 
+        if service_name in STUB_SERVICES:
+            for op in operations:
+                op["status"] = "not_implemented"
+
         custom_count = sum(1 for op in operations if op["status"] == "custom")
         moto_count = sum(1 for op in operations if op["status"] == "moto")
         not_impl_count = sum(1 for op in operations if op["status"] == "not_implemented")
@@ -520,7 +535,9 @@ def generate_coverage() -> dict:
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "total_services": len(coverage_services),
+        "total_services": sum(
+            1 for svc in coverage_services.values() if svc["custom"] + svc["moto"] > 0
+        ),
         "total_operations": total_operations,
         "total_implemented": total_implemented,
         "services": coverage_services,

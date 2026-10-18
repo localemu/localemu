@@ -74,6 +74,13 @@ ACTION_MAP: dict[tuple[str, str], list[str]] = {
     ("lambda", "InvokeWithResponseStream"): ["lambda:InvokeFunction"],
     ("lambda", "InvokeAsync"):              ["lambda:InvokeFunction"],
     ("lambda", "GetLayerVersionByArn"):     ["lambda:GetLayerVersion"],
+    # ---- Bedrock Runtime: the IAM prefix is "bedrock", there is no
+    # "bedrock-runtime:" IAM namespace in AWS ----
+    ("bedrock-runtime", "InvokeModel"):                   ["bedrock:InvokeModel"],
+    ("bedrock-runtime", "InvokeModelWithResponseStream"): ["bedrock:InvokeModelWithResponseStream"],
+    ("bedrock-runtime", "Converse"):                      ["bedrock:InvokeModel"],
+    ("bedrock-runtime", "ConverseStream"):                ["bedrock:InvokeModelWithResponseStream"],
+    ("bedrock-runtime", "ApplyGuardrail"):                ["bedrock:ApplyGuardrail"],
     # ---- SQS batch ops collapse to the non-batch action ----
     ("sqs", "SendMessageBatch"):             ["sqs:SendMessage"],
     ("sqs", "DeleteMessageBatch"):           ["sqs:DeleteMessage"],

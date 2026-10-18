@@ -648,7 +648,16 @@ def autoscaling():
 
 @aws_provider()
 def bedrock():
-    return _moto_service("bedrock")
+    from localemu.services.bedrock.provider import create_bedrock_service
+
+    return create_bedrock_service()
+
+
+@aws_provider(api="bedrock-runtime")
+def bedrock_runtime():
+    from localemu.services.bedrock_runtime.provider import create_bedrock_runtime_service
+
+    return create_bedrock_runtime_service()
 
 
 @aws_provider()
@@ -771,7 +780,9 @@ def glacier():
 
 @aws_provider()
 def guardduty():
-    return _moto_service("guardduty")
+    from localemu.services.guardduty.provider import create_guardduty_service
+
+    return create_guardduty_service()
 
 
 @aws_provider()

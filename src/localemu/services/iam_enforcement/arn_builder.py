@@ -128,6 +128,15 @@ def _logs_arn(params: dict, region: str, account_id: str) -> str:
     return f"arn:aws:logs:{region}:{account_id}:log-group:{log_group}"
 
 
+def _bedrock_runtime_arn(params: dict, region: str, account_id: str) -> str:
+    model_id = params.get("modelId", "")
+    if model_id.startswith("arn:"):
+        return model_id
+    if model_id:
+        return f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+    return f"arn:aws:bedrock:{region}::foundation-model/*"
+
+
 def _events_arn(params: dict, region: str, account_id: str) -> str:
     rule_name = params.get("Name", "")
     event_bus = params.get("EventBusName", "default")
@@ -270,6 +279,7 @@ _SERVICE_ARN_BUILDERS = {
     "ec2": _ec2_arn,
     "ecs": _ecs_arn,
     "logs": _logs_arn,
+    "bedrock-runtime": _bedrock_runtime_arn,
     "events": _events_arn,
     "states": _states_arn,
     "rds": _rds_arn,

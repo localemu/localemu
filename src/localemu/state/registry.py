@@ -41,6 +41,10 @@ NATIVE_STORES = {
     # AWS Backup overlay (selections + protected-resource index that moto
     # doesn't model). See services/backup/models.py.
     "backup_overlay": ("localemu.services.backup.models", "backup_stores"),
+    # GuardDuty findings (sample findings, archive state, feedback). Moto
+    # owns the detectors and filters; the finding plane is native. See
+    # services/guardduty/models.py.
+    "guardduty_findings": ("localemu.services.guardduty.models", "guardduty_stores"),
     # Central registry of accounts known to this LocalEmu instance.
     # CrossAccount dict in _universal slot, shared across all services.
     # Loaded first so Organizations and IAM cross-account evaluators see
@@ -77,7 +81,7 @@ LOAD_ORDER = [
      "accounts_registry"],
     # Tier 1: depends on IAM/KMS only
     ["s3", "sqs", "sns", "dynamodb", "dynamodbstreams", "kinesis",
-     "secretsmanager", "ssm", "route53", "route53resolver"],
+     "secretsmanager", "ssm", "route53", "route53resolver", "guardduty_findings"],
     # Tier 2: depends on S3 (Lambda code) + Tier 0-1
     ["lambda_", "cloudwatch", "logs", "opensearch", "transcribe"],
     # Tier 3: depends on Lambda + messaging

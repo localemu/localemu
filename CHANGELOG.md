@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.3.0
+
+Bedrock model catalog and `bedrock-runtime` `InvokeModel` (synthetic by default, real local inference via Ollama opt-in), native GuardDuty findings wired to EventBridge, the `aws:TokenIssueTime` IAM condition key, and `EXTRA_CORS_ALLOWED_ORIGINS` honoured by the dashboard's write actions.
+
+### Bedrock foundation-model catalog
+
+Moto's Bedrock backend has no route for `/foundation-models`, so `ListFoundationModels` and `GetFoundationModel` failed with `No moto route for service bedrock`. Both are now answered natively from a curated catalog (`services/bedrock/catalog.py`) covering Anthropic Claude 3.x, Amazon Titan, Meta Llama 3/3.1/3.2, Mistral/Mixtral, Cohere and AI21 Jamba, with `byProvider` and `byOutputModality` filtering. Newer providers (DeepSeek, Qwen, GLM, gpt-oss, Nemotron) are not in the catalog because their exact Bedrock model ids were not verified. Every other Bedrock operation stays on the existing moto path.
+
+### bedrock-runtime `InvokeModel`
+
+New `bedrock-runtime` provider (registered in `plux.ini` and `services/providers.py`). `InvokeModel` validates its input like Bedrock: an unknown model id (a bare id, a `foundation-model` ARN or a `us.`/`eu.`/`apac.` inference-profile id of a catalog model is accepted) and a body that is empty, not JSON or not a JSON object both return `ValidationException`. Only `InvokeModel` is implemented; every other operation (`Converse`, streaming) returns a 501 `InternalFailure` reading `no handler for operation '<name>' on service 'bedrock-runtime'`. `BEDROCK_BACKEND` selects the backend:
+
+- `synthetic` (default) : deterministic placeholder output shaped like each model family's real response body (Anthropic Messages, Titan, Llama, Mistral, Cohere), so application code parses it unchanged. Same prompt gives the same output. No Docker, no download.
+- `ollama` : real generation and embeddings from a local model in a Docker sidecar, pulled on first use. A model-to-Ollama-tag table (`local_inference.py`) marks each entry `same_family`, `different_family` (for example Claude served by `llama3.1:8b`) or `unavailable` (405B, closed-weight Mistral Large, Jamba). A RAM pre-flight (`memory_gate.py`) compares total physical RAM against the model's tier (16/32/64 GB) and returns a `ServiceQuotaExceededException` before attempting the pull, instead of stalling the machine.
+
+The README documents measured RAM and first-load times and the cost of switching between two large models on a 16 GB machine.
+
+### GuardDuty findings
+
+Moto implements detectors and filters but has no route for the finding plane, so these operations failed with `No moto route`. They are now native (`services/guardduty/findings_store.py`), on a persisted store keyed by account, region and detector:
+
+- `CreateSampleFindings`, `ListFindings`, `GetFindings`.
+- `ArchiveFindings` and `UnarchiveFindings` (the `Service.Archived` flag), `UpdateFindingsFeedback` (`Service.UserFeedback`) and `GetFindingsStatistics` (`COUNT_BY_SEVERITY` plus `GroupBy` account, date, finding type, resource and severity).
+- `ListFilters`, which moto also lacked.
+- `DeleteDetector` now also removes the detector's findings.
+
+`FindingCriteria` works on any dotted field path (`type`, `severity`, `service.archived`, `resource.resourceType`, `updatedAt`, ...) with `Eq`, `Neq`, `Equals`, `NotEquals`, `Gt`, `Gte`, `Lt`, `Lte` and their long names, `Matches` and `NotMatches`. Timestamps compare as epoch milliseconds, as in AWS, and a field a finding does not have never satisfies a positive condition. `SortCriteria` is honored by `ListFindings` and `GetFindings`. Findings survive `PERSISTENCE=1` restarts and state save and load.
+
+Finding types follow the `<category>:<resourceClass>/<threatName>` convention; a curated table gives real titles, descriptions and severities for the common types, and any other type gets a schema-valid finding derived from the type string. `CreateSampleFindings` publishes each finding to the account's default EventBridge bus (`source: aws.guardduty`, `detail-type: GuardDuty Finding`), so a GuardDuty -> EventBridge -> Lambda pipeline runs against the real API without a synthetic `put-events` step. Detector and filter create, get and update operations are unchanged.
+
+### IAM `aws:TokenIssueTime`
+
+The condition key was absent from the request context, so any policy conditioned on it silently never matched. STS now records `issued_at` on every session it mints (`AssumeRole`, the SAML and web-identity variants, `GetSessionToken` and `GetFederationToken`), and the enforcer exposes it as an ISO-8601 UTC string. The incident-response pattern of denying every session issued before a containment timestamp (`Deny` with `DateLessThan` on `aws:TokenIssueTime`) now works. The key is also set for `GetSessionToken` and `GetFederationToken` sessions. Long-term IAM-user keys and sessions created before this version (no recorded `issued_at`) do not get it.
+
+### GetSessionToken and GetFederationToken credentials work under IAM enforcement
+
+With `IAM_ENFORCEMENT=1`, credentials from `GetSessionToken` and `GetFederationToken` were rejected as "security token invalid". They now resolve to the caller: `GetSessionToken` credentials act as the IAM user (or as root, for the root account) and `GetCallerIdentity` returns the user ARN. `GetFederationToken` credentials are `federated-user/<Name>`: the user's policies intersected with the `Policy` passed in the call, and no permissions at all when no policy is passed, as in AWS. Credentials stop working at their expiry. `sts:GetSessionToken` needs no IAM permission, as in AWS; `sts:GetFederationToken` does.
+
+### IAM actions for Bedrock Runtime
+
+`InvokeModel` is authorized as the real AWS action `bedrock:InvokeModel` (AWS has no `bedrock-runtime:` IAM namespace) on `arn:aws:bedrock:<region>::foundation-model/<model-id>`, so policies written for AWS work, including ones scoped to a single model. `Converse` maps to `bedrock:InvokeModel`, and the streaming operations to `bedrock:InvokeModelWithResponseStream`.
+
+### Dashboard behind a custom hostname
+
+The dashboard's write actions rejected any non-loopback `Origin`, even when `EXTRA_CORS_ALLOWED_ORIGINS` already allowed it for the rest of the API. They now accept hostnames listed in that variable. The CORS-blocked log line and the dashboard 403 message name the variable, and the README documents it next to `DASHBOARD_API_OPEN=1`.
+
 ## 1.2.0
 
 EC2 access end-to-end (SSM shell, SSH, EC2 Instance Connect, SSM port-forwarding), snapshot honesty, ENI-level live security-group re-apply, EC2 multi-NIC, Cognito User Pool Lambda triggers, and a full excision of every external URL from the code base.

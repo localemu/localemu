@@ -399,6 +399,31 @@ def _resolve_caller_arn(access_key_id: str, account_id: str) -> str:
     return f"arn:aws:iam::{account_id}:root"
 
 
+def _caller_session_fields(
+    context, caller_access_key_id: str | None, kind: str, federated_name: str | None = None,
+) -> dict:
+    """Session fields recording which IAM user a GetSessionToken /
+    GetFederationToken credential belongs to, so IAM enforcement can resolve
+    it. Empty when the caller is not the root account or an IAM user."""
+    if not caller_access_key_id:
+        return {}
+    try:
+        from localemu.services.iam_enforcement.identity import resolve_caller
+
+        caller = resolve_caller(caller_access_key_id, context.account_id, context.region)
+    except Exception:
+        return {}
+    if caller is not None and caller.principal_type == "Root" and kind == "session-token":
+        # The root account's session credentials act as root.
+        return {"session_kind": "root"}
+    if caller is None or caller.principal_type != "User" or not caller.username:
+        return {}
+    fields: dict = {"session_kind": kind, "base_username": caller.username}
+    if federated_name:
+        fields["federated_name"] = federated_name
+    return fields
+
+
 def _store_session(target_account_id: str, access_key_id: str, config: SessionConfig):
     """Thread-safe session store write."""
     store = sts_stores[target_account_id]["us-east-1"]
@@ -436,6 +461,16 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             session = _get_session(response.get("Account", context.account_id), access_key_id)
             if session and session.get("source_identity"):
                 response["SourceIdentity"] = session["source_identity"]
+            if session and session.get("session_kind"):
+                # GetSessionToken / GetFederationToken credentials: report the
+                # IAM user (or federated user) they belong to, not moto's stub.
+                from localemu.services.iam_enforcement.identity import resolve_caller
+
+                identity = resolve_caller(access_key_id, context.account_id, context.region)
+                if identity is not None:
+                    response["Arn"] = identity.arn
+                    if identity.principal_type == "FederatedUser":
+                        response["UserId"] = f"{identity.account_id}:{session.get('federated_name', '')}"
 
         return response
 
@@ -564,6 +599,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             iam_context={},
             source_identity=resolved_source_identity,
             expiration=datetime.fromtimestamp(expiration, tz=timezone.utc),
+            issued_at=datetime.now(timezone.utc),
             session_policies=session_policies,
             mfa_authenticated=bool(serial_number),
         ))
@@ -650,6 +686,7 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             iam_context={},
             source_identity="",
             expiration=datetime.fromtimestamp(expiration, tz=timezone.utc),
+            issued_at=datetime.now(timezone.utc),
             session_policies=session_policies,
             # AssumeRoleWithSAML/WebIdentity: MFA assertions live in the upstream
             # IdP, not in STS. AWS does not reflect them via aws:MultiFactorAuthPresent.
@@ -698,8 +735,10 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             iam_context={},
             source_identity=existing_session.get("source_identity", "") if existing_session else "",
             expiration=datetime.fromtimestamp(expiration, tz=timezone.utc),
+            issued_at=datetime.now(timezone.utc),
             session_policies=existing_session.get("session_policies", []) if existing_session else [],
             mfa_authenticated=bool(serial_number),
+            **_caller_session_fields(context, access_key_id, "session-token"),
         ))
 
         return response
@@ -739,6 +778,11 @@ class StsProvider(StsApi, ServiceLifecycleHook):
                 session_policies.append(json.loads(policy) if isinstance(policy, str) else policy)
             except (json.JSONDecodeError, TypeError):
                 raise MalformedPolicyDocumentError("The policy is not in valid JSON format.")
+        if not session_policies and not policy_arns:
+            # AWS: a federated user passed no policy has no permissions of its
+            # own (only resource-based policies can grant it access). An empty
+            # session policy makes the intersection with the user's policies empty.
+            session_policies.append({"Version": "2012-10-17", "Statement": []})
 
         effective_duration = duration_seconds or _FEDERATION_TOKEN_DEFAULT_DURATION
         expiration = datetime.now(timezone.utc).timestamp() + effective_duration
@@ -752,9 +796,16 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             iam_context={},
             source_identity="",
             expiration=datetime.fromtimestamp(expiration, tz=timezone.utc),
+            issued_at=datetime.now(timezone.utc),
             session_policies=session_policies,
             # GetFederationToken does not accept MFA and produces no MFA context.
             mfa_authenticated=False,
+            **_caller_session_fields(
+                context,
+                extract_access_key_id_from_auth_header(context.request.headers),
+                "federated",
+                federated_name=name,
+            ),
         ))
 
         return response
