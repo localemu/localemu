@@ -22,8 +22,6 @@ class TestHealthResource:
         )
 
         state = resource.on_get(Request("GET", "/", body=b"None"))
-        # edition may return a different value depending on how the tests are run
-        state.pop("edition", None)
         state.pop("uptime", None)
 
         assert state == {
@@ -54,7 +52,6 @@ class TestHealthResource:
         resource.on_put(Request("PUT", "/", body=b'{"features:initScripts": "initialized"}'))
 
         state = resource.on_get(Request("GET", "/", body=b"None"))
-        state.pop("edition", None)
         state.pop("uptime", None)
 
         assert state == {

@@ -400,7 +400,7 @@ def package(
     """
     Decorator for marking methods that create Package instances as a PackagePlugin.
     Methods marked with this decorator are discoverable as a PluginSpec within the namespace "localemu.packages".
-    The plugin name is the package name; a scope (e.g. "community") can optionally be appended as "<name>/<scope>".
+    The plugin name is the package name; an optional scope can be appended as "<name>/<scope>".
     If ``name`` is not explicitly specified, the parent module name is used.
     """
 

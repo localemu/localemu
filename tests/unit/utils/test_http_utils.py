@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -69,6 +70,7 @@ def test_add_query_params_to_url():
 
 @pytest.mark.parametrize("total_size_known", [False, True])
 def test_download_progress(httpserver, caplog, total_size_known):
+    caplog.set_level(logging.DEBUG, logger="localemu.utils.http")
     content = bytes(
         list(os.urandom(1024 * 246) * 40)
     )  # 0.25 MB of random bytes, 40 times -> 10 MB, nicely compressable

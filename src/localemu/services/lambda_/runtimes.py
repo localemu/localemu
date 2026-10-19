@@ -23,7 +23,7 @@ from localemu.aws.api.lambda_ import Runtime
 # 5. Run the unit test to check the runtime setup:
 # tests.unit.services.lambda_.test_api_utils.TestApiUtils.test_check_runtime
 # 6. Review special tests including:
-# a) [pro] tests.aws.services.lambda_.test_lambda_endpoint_injection
+# a) tests.aws.services.lambda_.test_lambda_endpoint_injection
 # 7. Before merging, run the ext integration tests to cover transparent endpoint injection testing.
 # 8. Add the new runtime to the K8 image build: https://github.com/localemu/lambda-images
 # 9. Check that the Resource Browser shows the new runtime or reach out to the web team.

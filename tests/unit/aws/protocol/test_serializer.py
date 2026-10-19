@@ -1196,13 +1196,33 @@ def test_json_serializer_cognito_with_botocore():
 
 
 def test_json_serializer_date_serialization_with_botocore():
+    # unixtimestamp shapes are serialized with millisecond precision, like AWS
+    parameters = {
+        "UserPool": {
+            "LastModifiedDate": datetime(2022, 2, 8, 9, 17, 40, 122000, tzinfo=tzlocal()),
+        }
+    }
+    _botocore_serializer_integration_test(
+        service="cognito-idp", action="DescribeUserPool", response=parameters
+    )
+
+
+def test_json_serializer_date_serialization_truncates_to_milliseconds():
     parameters = {
         "UserPool": {
             "LastModifiedDate": datetime(2022, 2, 8, 9, 17, 40, 122939, tzinfo=tzlocal()),
         }
     }
+    expected = {
+        "UserPool": {
+            "LastModifiedDate": datetime(2022, 2, 8, 9, 17, 40, 122000, tzinfo=tzlocal()),
+        }
+    }
     _botocore_serializer_integration_test(
-        service="cognito-idp", action="DescribeUserPool", response=parameters
+        service="cognito-idp",
+        action="DescribeUserPool",
+        response=parameters,
+        expected_response_content=expected,
     )
 
 

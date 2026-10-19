@@ -113,7 +113,7 @@ def collect_watch_directories(
     """Collect host-side source directories that are bind-mounted into the container."""
     dirs: list[Path] = []
 
-    source = host_paths.aws_community_package_dir
+    source = host_paths.localemu_package_dir
     if source.exists():
         dirs.append(source)
 

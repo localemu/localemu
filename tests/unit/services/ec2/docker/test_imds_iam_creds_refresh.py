@@ -145,7 +145,9 @@ class TestRefreshLogic:
         result = _refresh_iam_credentials_if_needed(meta)
         assert result is not None
         assert "AccessKeyId" in result
-        assert result["AccessKeyId"].startswith(("AKIA", "ASIA"))
+        # the IAM patches (imported by other tests) prefix keys with "L" unless
+        # PARITY_AWS_ACCESS_KEY_ID is set
+        assert result["AccessKeyId"].startswith(("AKIA", "ASIA", "LKIA", "LSIA"))
 
     def test_sts_failure_falls_back_to_cached(self):
         """When STS re-mint raises, return whatever's cached rather

@@ -469,7 +469,7 @@ class ServicePluginManager(ServiceManager):
         return self.provider_config.default_value
 
     # TODO make the abstraction clearer, to provide better information if service is available versus discoverable
-    # especially important when considering pro services
+    # especially important when considering optional services
     def list_available(self) -> list[str]:
         """
         List all available services, which have an available, configured provider
@@ -593,7 +593,7 @@ class ServicePluginManager(ServiceManager):
             default = self.get_default_provider()
             LOG.warning(
                 "Configured provider (%s) does not exist for service (%s). Available options are: %s. "
-                "Falling back to default provider '%s'. This can impact the availability of Pro functionality, "
+                "Falling back to default provider '%s'. This can impact the availability of some functionality, "
                 "please fix this configuration issue as soon as possible.",
                 preferred_provider,
                 name,

@@ -72,7 +72,6 @@ CATEGORIES: list[tuple[str, str]] = [
     ("HOSTNAME", "core"),
     ("EDGE_", "core"),
     ("EXTERNAL_", "core"),
-    ("LOCALSTACK_", "core"),
     ("LOCALEMU_", "core"),
     ("ALLOW_", "core"),
     ("ROOT_", "iam"),

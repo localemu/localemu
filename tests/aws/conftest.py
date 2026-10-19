@@ -168,7 +168,7 @@ def snapshot(request, _snapshot_session: SnapshotSession, account_id, region_nam
 @pytest.hookimpl()
 def pytest_addhooks(pluginmanager):
     try:
-        # This is only relevant when running Community Tests against Pro pipeline
+        # Optional store serialization checker, only present in some environments
         from localemu.pro.core.testing.pytest.store import StoreSerializationCheckerPlugin
 
         from localemu.testing.aws.util import is_aws_cloud

@@ -213,7 +213,7 @@ class ResourceProvider[Properties]:
 
 # legacy helpers
 def get_resource_type(resource: dict) -> str:
-    """this is currently overwritten in PRO to add support for custom resources"""
+    """Return the CloudFormation resource type of the given resource."""
     if isinstance(resource, str):
         raise ValueError(f"Invalid argument: {resource}")
     try:

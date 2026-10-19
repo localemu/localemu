@@ -319,8 +319,7 @@ def in_docker():
 
     # check some marker files that we create in our Dockerfiles
     for path in [
-        "/usr/lib/localemu/.community-version",
-        "/usr/lib/localemu/.pro-version",
+        "/usr/lib/localemu/.docker-image",
         "/tmp/localemu/.marker",
     ]:
         if os.path.isfile(path):
@@ -993,7 +992,7 @@ LAMBDA_IGNORE_ARCHITECTURE = is_env_true("LAMBDA_IGNORE_ARCHITECTURE")
 # prebuild images before execution? Increased cold start time on the tradeoff of increased time until lambda is ACTIVE
 LAMBDA_PREBUILD_IMAGES = is_env_true("LAMBDA_PREBUILD_IMAGES")
 
-# PUBLIC: docker (default), kubernetes (pro)
+# PUBLIC: docker (default)
 # Where Lambdas will be executed.
 LAMBDA_RUNTIME_EXECUTOR = os.environ.get("LAMBDA_RUNTIME_EXECUTOR", CONTAINER_RUNTIME).strip()
 

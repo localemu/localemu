@@ -83,7 +83,6 @@ class HealthResource:
         # build state dict from internal state and merge into it the service states
         result = dict(self.state)
         result = merge_recursive({"services": services}, result)
-        result["edition"] = "community"
         result["version"] = constants.VERSION
         result["uptime"] = int(time.time() - config.load_start_time)
         return result
@@ -127,7 +126,6 @@ class InfoResource:
 
         return {
             "version": client_metadata.version,
-            "edition": "community",
             "server_time_utc": datetime.utcnow().isoformat(timespec="seconds"),
             "uptime": uptime,
         }

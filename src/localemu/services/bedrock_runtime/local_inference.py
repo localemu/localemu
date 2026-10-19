@@ -118,4 +118,10 @@ LOCAL_INFERENCE_MAP: dict[str, LocalInferenceSpec] = {
 
 
 def get_spec(model_id: str) -> LocalInferenceSpec | None:
-    return LOCAL_INFERENCE_MAP.get(model_id)
+    spec = LOCAL_INFERENCE_MAP.get(model_id)
+    if spec is None and model_id.startswith("anthropic.claude-"):
+        # Claude has no open weights, so every Claude version is served by the
+        # same stand-in. Without this, an application that targets a newer
+        # Claude than the table lists (Sonnet 4.x, ...) could not run locally.
+        spec = LOCAL_INFERENCE_MAP["anthropic.claude-3-haiku-20240307-v1:0"]
+    return spec

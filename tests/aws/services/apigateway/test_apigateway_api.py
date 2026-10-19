@@ -2731,7 +2731,7 @@ class TestApiGatewayVpcLink:
                 LoadBalancerArns=[nlb_arn], WaiterConfig={"Delay": sleep, "MaxAttempts": retries}
             )
         else:
-            # ElbV2 is not available in community, so we just use a dummy arn
+            # ElbV2 is not available locally, so we just use a dummy arn
             nlb_arn = f"arn:aws:elasticloadbalancing:{region_name}:{account_id}:loadbalancer/net/my-load-balancer/50dc6c495c0c9188"
 
         snapshot.match("nlb-arn", nlb_arn)

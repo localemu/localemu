@@ -22,9 +22,7 @@ Access patterns are as follows
     sqs_stores[account_id]['ap-south-1']  # -> SqsStore
     sqs_stores[account_id]['ap-south-1'].queues  # -> {}
 
-There should be a single declaration of a Store for a given service. If a service
-has both Community and Pro providers, it must be declared as in Community codebase.
-All Pro attributes must be declared within.
+There should be a single declaration of a Store for a given service.
 
 While not recommended, store classes may define member helper functions and properties.
 """

@@ -4,7 +4,7 @@
 Exercises:
   - aws ssm send-command --document-name AWS-RunShellScript
   - aws ssm get-command-invocation
-  - Non-zero exit still captures stdout+stderr (beats LocalStack Pro gap)
+  - Non-zero exit still captures stdout+stderr (stdout and stderr are kept)
   - {{ssm:/path}} parameter resolution
   - Instance unreachable path
   - aws ssm describe-instance-information includes the running EC2
@@ -137,7 +137,7 @@ def send_hello():
 
 @step("03-send-command-nonzero-exit-still-captures-output")
 def send_nonzero():
-    # beats LocalStack Pro: stdout+stderr captured even when exit != 0
+    # stdout+stderr captured even when exit != 0
     r = ssm.send_command(
         DocumentName="AWS-RunShellScript",
         InstanceIds=[state["i1"]],
@@ -160,7 +160,7 @@ def send_nonzero():
 
 @step("04-shell-constructs-work-and-pipes")
 def send_pipes():
-    # beats LocalStack Pro: &&, |, > all work via bash-script execution
+    # &&, |, > all work via bash-script execution
     r = ssm.send_command(
         DocumentName="AWS-RunShellScript",
         InstanceIds=[state["i1"]],

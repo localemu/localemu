@@ -12,7 +12,7 @@ baked in even for real-AWS targets):
 * ``endpoint_url`` is ``None`` **and** ``access_key`` is ``None`` →
   real AWS target: defer entirely to boto3's default credential chain
   (env vars, shared config, IMDS, SSO, ...).
-* ``endpoint_url`` provided → LocalEmu/LocalStack-style target: use the
+* ``endpoint_url`` provided → LocalEmu-style target: use the
   explicit credentials if given, otherwise fall back to ``test/test``
   (harmless placeholder that every local emulator accepts).
 """

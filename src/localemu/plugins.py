@@ -16,7 +16,7 @@ LOG = logging.getLogger(__name__)
 
 @hooks.on_infra_start()
 def deprecation_warnings() -> None:
-    LOG.debug("Checking for the usage of deprecated community features and configs...")
+    LOG.debug("Checking for the usage of deprecated features and configs...")
     from localemu.deprecations import log_deprecation_warnings
 
     log_deprecation_warnings()

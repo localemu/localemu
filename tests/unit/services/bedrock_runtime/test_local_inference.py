@@ -44,3 +44,8 @@ def test_every_mapped_entry_with_a_tag_has_a_ram_requirement():
 def test_embedding_models_are_tagged_embedding_modality():
     spec = local_inference.get_spec("amazon.titan-embed-text-v1")
     assert spec.modality == "EMBEDDING"
+
+
+def test_newer_claude_ids_use_the_claude_stand_in():
+    spec = local_inference.get_spec("anthropic.claude-sonnet-4-6-v1:0")
+    assert spec == local_inference.get_spec("anthropic.claude-3-haiku-20240307-v1:0")

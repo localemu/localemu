@@ -37,7 +37,7 @@ class HostPaths:
         )
 
     @property
-    def aws_community_package_dir(self) -> Path:
+    def localemu_package_dir(self) -> Path:
         return self.localemu_project_dir / "src" / "localemu"
 
 
@@ -69,7 +69,7 @@ class ContainerPaths:
         return self.site_packages_target_dir + f"/{name}"
 
 
-class CommunityContainerPaths(ContainerPaths):
+class ImageContainerPaths(ContainerPaths):
     """In the image, code is copied into /opt/code/localemu/src/localemu"""
 
     def __init__(self):

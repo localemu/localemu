@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.1
+
+`bedrock-runtime` `InvokeModel` accepts Bedrock model ids that are not in the 21-model catalog, so applications that target newer models run locally.
+
+### InvokeModel model ids
+
+1.3.0 rejected any model id outside the catalog with `ValidationException: The provided model identifier is invalid`. That broke applications written for newer models, for example `anthropic.claude-sonnet-4-6-v1:0` or an Amazon Nova model, even though the same call works on AWS.
+
+- A well-formed id from a known Bedrock provider (`provider.model-name`, optionally with a `:<n>` suffix) is now accepted, as a plain id, a `foundation-model` ARN, or a `us.`, `eu.` or `apac.` inference-profile id. A malformed id still returns `ValidationException`.
+- `BEDROCK_BACKEND=synthetic` answers every accepted id.
+- `BEDROCK_BACKEND=ollama` serves any `anthropic.claude-*` id that is not in the model map with the same stand-in as the listed Claude models (`llama3.1:8b`, `different_family`). Claude has no open weights, so the answer never comes from Claude.
+- With `ollama`, an accepted id that is not in the model map and is not a Claude id returns `ValidationException` and tells you to use the synthetic backend.
+
+The README now lists the full model mapping (all 21 entries, the Claude fallback and the validation rules).
+
+### Cleanup of inherited edition labels
+
+LocalEmu is one open-source edition, so the leftovers of the upstream editions are gone:
+
+- `/_localemu/health` and `/_localemu/info` no longer return an `edition` field (it was always `"community"`), and `openapi.yaml` matches.
+- The Docker image marker `.community-version` is now `.docker-image`, and `.pro-version` is no longer checked.
+- Removed the unused `DOCKER_IMAGE_NAME_PRO` constant, the `on_pro_infra_start` hook, the `pro` option of the `container` test fixture and the unused `scripts/tinybird` tooling.
+- The dev tooling classes named `Community...` are renamed, and comments that mention LocalStack Pro or a community edition were reworded.
+
 ## 1.3.0
 
 Bedrock model catalog and `bedrock-runtime` `InvokeModel` (synthetic by default, real local inference via Ollama opt-in), native GuardDuty findings wired to EventBridge, the `aws:TokenIssueTime` IAM condition key, and `EXTRA_CORS_ALLOWED_ORIGINS` honoured by the dashboard's write actions.

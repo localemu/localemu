@@ -125,7 +125,7 @@ def list_packages(verbose: bool):
     package_manager.load_all()
     packages = package_manager.get_all_packages()
     for package_name, _package_scope, package_instance in packages:
-        # Scope is an internal grouping (legacy "community" namespace);
+        # Scope is an internal grouping;
         # not shown to end-users so the CLI surface stays one column.
         console.print(f"[green]{package_name}[/green]")
         if verbose:

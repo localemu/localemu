@@ -92,7 +92,6 @@ API_DEPENDENCIES_OPTIONAL = {
         "sqs",  # Event source mapping source + Lambda destination
         "sns",  # Lambda destination
         "sts",  # Credentials injection
-        # Additional dependencies to Pro-only services are defined in ext
     ],
     "ses": ["sns"],
     "sns": ["sqs", "lambda", "firehose", "ses", "logs"],
@@ -319,7 +318,7 @@ def get_enabled_apis() -> set[str]:
             enabled_services.append(service)
 
         services = [service for service in enabled_services if service in services]
-        # TODO: log a message if a service was not supported? see with pro loading
+        # TODO: log a message if a service was not supported?
 
     return resolve_apis(services)
 
@@ -873,8 +872,7 @@ class Container:
         # FIXME: this is pretty awkward, but additional_flags in the LocalemuContainer API was
         #  always a list of ["-e FOO=BAR", ...], whereas in the DockerClient it is expected to be
         #  a string. so we need to re-assemble it here. the better way would be to not use
-        #  additional_flags here all together. it is still used in ext in
-        #  `configure_pro_container` which could be refactored to use the additional port bindings.
+        #  additional_flags here all together.
         cfg = copy.deepcopy(self.config)
         if not cfg.additional_flags:
             cfg.additional_flags = ""

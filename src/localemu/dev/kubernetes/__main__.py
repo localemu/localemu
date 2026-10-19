@@ -35,7 +35,7 @@ def generate_mount_points(
     target_path = "/opt/code/localemu/"
     venv_path = os.path.join(target_path, ".venv", "lib", "python3.13", "site-packages")
 
-    # Community code: the code is not installed as a package, it lives directly in `/opt/code/localemu`
+    # The code is not installed as a package, it lives directly in `/opt/code/localemu`
     mount_points.append(
         MountPoint(
             name="localemu",
@@ -47,13 +47,13 @@ def generate_mount_points(
 
     # entrypoints
     if mount_entrypoints:
-        # In the community image, the code is not installed as package, so the paths are predictable
+        # In the image, the code is not installed as package, so the paths are predictable
         egg_path = os.path.join(root_path, "src", "localemu_core.egg-info/entry_points.txt")
         mount_points.append(
             MountPoint(
-                name="entry-points-community",
+                name="entry-points",
                 host_path=os.path.normpath(egg_path),
-                node_path="/code/entry-points-community",
+                node_path="/code/entry-points",
                 container_path=os.path.join(
                     target_path,
                     "src",

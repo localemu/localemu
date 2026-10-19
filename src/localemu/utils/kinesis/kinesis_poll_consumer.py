@@ -2,7 +2,7 @@
 
 Replaces the previous AWS KCL (Kinesis Client Library) based consumer that
 spawned a Java MultiLangDaemon subprocess and required the `kclpy-ext`
-extra at runtime. That implementation was inherited from LocalStack and
+extra at runtime. That implementation was inherited from upstream and
 contradicted LocalEmu's pure-Python stack goal — it has been removed.
 
 Design:

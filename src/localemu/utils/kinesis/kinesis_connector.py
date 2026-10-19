@@ -2,7 +2,7 @@
 
 This module used to host a KCL (Kinesis Client Library) based consumer that
 spawned a Java MultiLangDaemon subprocess. The KCL plumbing has been
-removed (it was inherited from LocalStack and contradicted LocalEmu's
+removed (it was inherited from upstream and contradicted LocalEmu's
 pure-Python stack goal). The consumer is now a boto3 polling implementation
 in :mod:`localemu.utils.kinesis.kinesis_poll_consumer`.
 

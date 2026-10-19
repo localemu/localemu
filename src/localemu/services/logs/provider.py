@@ -500,7 +500,6 @@ def moto_put_log_events(self: "MotoLogStream", log_events):
     # leaking filtered state from one filter into the next.
     for subscription_filter in self.log_group.subscription_filters.values():
         if subscription_filter.filter_pattern:
-            # TODO only patched in pro
             matches = get_pattern_matcher(subscription_filter.filter_pattern)
             filtered_events = [
                 LogEvent(self.last_ingestion_time, raw_event)

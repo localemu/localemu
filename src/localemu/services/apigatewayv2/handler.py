@@ -855,7 +855,7 @@ def _enforce_api_key(request: Request, api, api_id: str) -> Response | None:
             valid = True
 
     # In local emulation, accept any non-empty key when no keys are explicitly configured
-    # (matches LocalStack behavior — avoids blocking users who haven't set keys in moto)
+    # (lenient on purpose: avoids blocking users who haven't set keys in moto)
     if not valid:
         # Check if any keys are actually configured; if none, accept any key
         has_configured_keys = False

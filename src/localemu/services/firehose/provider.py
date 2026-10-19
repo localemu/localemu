@@ -1028,7 +1028,7 @@ class FirehoseProvider(FirehoseApi):
             else:
                 value = str(value)
             parameters.append({"name": key, "value": value})
-            # required to work with execute_statement in community (moto) and ext (localemu native)
+            # required to work with execute_statement in both moto and the native provider
 
         return parameters
 

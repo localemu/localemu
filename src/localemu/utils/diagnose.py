@@ -142,8 +142,7 @@ def get_docker_image_details() -> dict[str, str]:
     except ContainerException:
         return {}
     # The default bootstrap image detection does not take custom images into account.
-    # Also, the patches to correctly detect a `-pro` image are only applied on the host, so the detection fails
-    # at runtime. The bootstrap detection is mostly used for the CLI, so having a different logic here makes sense.
+    # The bootstrap detection is mostly used for the CLI, so having a different logic here makes sense.
     return bootstrap.get_docker_image_details(image_name=image)
 
 

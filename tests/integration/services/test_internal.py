@@ -38,7 +38,6 @@ class TestHealthResource:
         response = requests.get(config.internal_service_url() + "/_localemu/health")
         assert response.ok
         assert "services" in response.json()
-        assert "edition" in response.json()
 
     def test_head(self):
         response = requests.head(config.internal_service_url() + "/_localemu/health")
@@ -59,6 +58,5 @@ class TestInfoEndpoint:
         # no session ID, no license-activation flag (LocalEmu has no licensing system
         # and no telemetry). See services/internal.py:get_info_data.
         assert doc["version"].startswith(str(VERSION))
-        assert doc["edition"] == "community"
         assert "server_time_utc" in doc
         assert isinstance(doc["uptime"], int)

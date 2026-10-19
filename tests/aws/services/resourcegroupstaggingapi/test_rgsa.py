@@ -4,7 +4,7 @@ from localemu.testing.pytest import markers
 
 
 class TestRGSAIntegrations:
-    # Historically gated on a paid LocalStack-Pro license. LocalEmu has no paid tier
+    # Historically gated on a paid license upstream. LocalEmu has no paid tier
     # and the OSS test runner does not stand up a multi-region cleanups infrastructure.
     @pytest.mark.skip(reason="requires multi-region resource-tagging test infrastructure not provisioned in OSS CI")
     @markers.aws.validated

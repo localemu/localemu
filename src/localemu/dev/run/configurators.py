@@ -22,7 +22,7 @@ from localemu.utils.strings import md5
 
 from .paths import (
     HOST_PATH_MAPPINGS,
-    CommunityContainerPaths,
+    ImageContainerPaths,
     ContainerPaths,
     HostPaths,
 )
@@ -79,7 +79,7 @@ class CustomEntryPointConfigurator:
 
     def __init__(self, script: str, tmp_dir: str = None):
         self.script = script.lstrip(os.linesep)
-        self.container_paths = CommunityContainerPaths()
+        self.container_paths = ImageContainerPaths()
         self.tmp_dir = tmp_dir
 
     def __call__(self, cfg: ContainerConfiguration):
@@ -109,12 +109,12 @@ class SourceVolumeMountConfigurator:
         chosen_packages: list[str] | None = None,
     ):
         self.host_paths = host_paths or HostPaths()
-        self.container_paths = CommunityContainerPaths()
+        self.container_paths = ImageContainerPaths()
         self.chosen_packages = chosen_packages or []
 
     def __call__(self, cfg: ContainerConfiguration):
         # localemu source code if available
-        source = self.host_paths.aws_community_package_dir
+        source = self.host_paths.localemu_package_dir
         if source.exists():
             cfg.volumes.add(
                 BindMount(str(source), self.container_paths.localemu_source_dir, read_only=True)
@@ -170,7 +170,7 @@ class EntryPointMountConfigurator:
     entry_point_glob = (
         "/opt/code/localemu/.venv/lib/python3.*/site-packages/*.dist-info/entry_points.txt"
     )
-    localemu_community_entry_points = (
+    localemu_entry_points = (
         "/opt/code/localemu/localemu_core.egg-info/entry_points.txt"
     )
 
@@ -184,10 +184,10 @@ class EntryPointMountConfigurator:
         self.container_paths = container_paths or None
 
     def __call__(self, cfg: ContainerConfiguration):
-        host_path = self.host_paths.aws_community_package_dir
+        host_path = self.host_paths.localemu_package_dir
         if host_path.exists():
             cfg.volumes.append(
-                BindMount(str(host_path), self.localemu_community_entry_points, read_only=True)
+                BindMount(str(host_path), self.localemu_entry_points, read_only=True)
             )
 
         # locate all relevant entry_point.txt files within the container
@@ -236,7 +236,7 @@ class DependencyMountConfigurator:
         container_paths: ContainerPaths = None,
     ):
         self.host_paths = host_paths or HostPaths()
-        self.container_paths = container_paths or CommunityContainerPaths()
+        self.container_paths = container_paths or ImageContainerPaths()
 
     def __call__(self, cfg: ContainerConfiguration):
         # locate all relevant dependency directories

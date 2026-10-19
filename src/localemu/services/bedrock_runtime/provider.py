@@ -158,19 +158,34 @@ _FOUNDATION_MODEL_ARN = re.compile(r"^arn:aws[a-z-]*:bedrock:[a-z0-9-]*::foundat
 _INFERENCE_PROFILE_PREFIXES = ("us.", "eu.", "apac.", "us-gov.", "global.")
 
 
+# Providers that publish models on Bedrock. The catalog only lists models whose
+# ids were verified, so a well-formed id from one of these providers is accepted
+# even when it is not in the catalog (newer Claude, Nova, ...): rejecting it
+# would break applications that use a real, valid model.
+_BEDROCK_PROVIDERS = (
+    "anthropic", "amazon", "meta", "mistral", "cohere", "ai21", "deepseek",
+    "qwen", "openai", "writer", "stability", "twelvelabs", "luma", "google",
+    "minimax", "moonshot", "nvidia", "zai",
+)
+_MODEL_ID_SHAPE = re.compile(
+    r"^(?:" + "|".join(_BEDROCK_PROVIDERS) + r")\.[a-z0-9][a-z0-9._-]*(?::\d+)?$"
+)
+
+
 def _validate_model_id(model_id: str) -> str:
     """Return the bare foundation-model id, or raise the ValidationException
-    real Bedrock raises for an identifier it does not know. Accepts a plain
-    id, a foundation-model ARN, and a cross-region inference-profile id
-    (``us.<model id>``)."""
+    real Bedrock raises for a malformed identifier. Accepts a plain id, a
+    foundation-model ARN and a cross-region inference-profile id
+    (``us.<model id>``). Ids of models outside the catalog are accepted when
+    they have the shape of a Bedrock id from a known provider."""
     candidate = model_id
     if match := _FOUNDATION_MODEL_ARN.match(candidate):
         candidate = match.group("id")
     for prefix in _INFERENCE_PROFILE_PREFIXES:
-        if candidate.startswith(prefix) and catalog.get_model(candidate[len(prefix):]):
+        if candidate.startswith(prefix) and _MODEL_ID_SHAPE.match(candidate[len(prefix):]):
             candidate = candidate[len(prefix):]
             break
-    if not catalog.get_model(candidate):
+    if not catalog.get_model(candidate) and not _MODEL_ID_SHAPE.match(candidate):
         raise CommonServiceException(
             code="ValidationException",
             message="The provided model identifier is invalid.",

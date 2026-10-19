@@ -81,9 +81,9 @@ def check_localemu_reachable(endpoint: str = "http://localhost:4566") -> None:
     import urllib.request
 
     # The LocalEmu health endpoint is the canonical reachability probe.
-    # The legacy ``/_localstack/health`` path is no longer served by this
-    # build, so probing it produced spurious 404s that aborted preflight
-    # against a perfectly healthy LocalEmu.
+    # Only this path is served by this build. Probing any other health path
+    # produced spurious 404s that aborted preflight against a perfectly
+    # healthy LocalEmu.
     health_url = endpoint.rstrip("/") + "/_localemu/health"
     try:
         req = urllib.request.Request(health_url, method="GET")

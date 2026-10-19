@@ -154,8 +154,8 @@ HEALTHCHECK --interval=10s --start-period=15s --retries=5 --timeout=10s \
 #   docker run -v localemu-data:/var/lib/localemu -e PERSISTENCE=1 ...
 VOLUME /var/lib/localemu
 
-# Mark as community edition
-RUN touch /usr/lib/localemu/.community-version
+# Marker used by config.in_docker() to detect the container
+RUN touch /usr/lib/localemu/.docker-image
 
 LABEL authors="LocalEmu Contributors"
 LABEL maintainer="LocalEmu Team (info@localemu.cloud)"

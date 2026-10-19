@@ -191,11 +191,6 @@ components:
     SessionInfo:
       additionalProperties: false
       properties:
-        edition:
-          type: string
-          enum:
-            - community
-          description: LocalEmu edition (always "community")
         server_time_utc:
           type: string
         uptime:
@@ -205,7 +200,6 @@ components:
           type: string
       required:
         - version
-        - edition
         - server_time_utc
         - uptime
       type: object
@@ -1036,11 +1030,6 @@ paths:
               schema:
                 additionalProperties: false
                 properties:
-                  edition:
-                    enum:
-                      - community
-                    type: string
-                    description: LocalEmu edition (always "community")
                   features:
                     type: object
                   services:
@@ -1063,7 +1052,6 @@ paths:
                   version:
                     type: string
                 required:
-                  - edition
                   - services
                   - version
                 type: object

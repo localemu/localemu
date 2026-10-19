@@ -36,7 +36,6 @@ class ContainerFactory:
     def __call__(
         self,
         # convenience properties
-        pro: bool = False,
         publish: list[int] | None = None,
         configurators: list[ContainerConfigurator] | None = None,
         # ContainerConfig properties
@@ -57,10 +56,6 @@ class ContainerFactory:
             command=shlex.split(os.environ.get("CMD", "")) or None,
             env_vars={},
         )
-
-        # handle the convenience options
-        if pro:
-            container_configuration.env_vars["GATEWAY_LISTEN"] = "0.0.0.0:4566,0.0.0.0:443"
 
         # override values from kwargs
         for key, value in kwargs.items():

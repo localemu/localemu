@@ -45,7 +45,7 @@ ENV USER=localemu
 ENV PYTHONUNBUFFERED=1
 
 
-# builder: Stage which installs the dependencies of LocalEmu Community
+# builder: Stage which installs the dependencies of LocalEmu
 FROM base AS builder
 ARG TARGETARCH
 
@@ -84,7 +84,7 @@ COPY Makefile pyproject.toml plux.ini ./
 # add the code as late as possible
 COPY src/ /opt/code/localemu/src
 
-# Install LocalEmu Community and generate the version file while doing so
+# Install LocalEmu and generate the version file while doing so
 RUN --mount=type=cache,target=/root/.cache \
     . .venv/bin/activate && \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LOCALEMU=${LOCALEMU_BUILD_VERSION} \

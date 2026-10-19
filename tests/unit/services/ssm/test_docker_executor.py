@@ -122,8 +122,7 @@ class TestExecNonZeroStillCapturesOutput:
         final = upd.call_args_list[-1].kwargs
         assert final["status"] == "Failed"
         assert final["response_code"] == 7
-        # CRITICAL: we beat LocalStack Pro's gap — stdout+stderr captured
-        # even on non-zero exit.
+        # stdout+stderr captured even on non-zero exit.
         assert final["standard_output"] == "partial stdout\n"
         assert final["standard_error"] == "error msg\n"
 

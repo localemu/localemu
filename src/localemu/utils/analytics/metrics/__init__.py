@@ -1,6 +1,6 @@
 """Inert no-op metrics shim — no counters are ever reported.
 
-The original LocalStack-era ``LabeledCounter`` class incremented in-memory
+The original upstream ``LabeledCounter`` class incremented in-memory
 counts that were aggregated and POSTed to an external metrics endpoint on a
 periodic schedule. That entire pipeline has been removed.
 
@@ -25,7 +25,7 @@ _NOOP_LABEL = _NoOpLabel()
 
 
 class LabeledCounter:
-    """No-op replacement for the former LocalStack labeled counter.
+    """No-op replacement for the former upstream labeled counter.
 
     Accepts and ignores any additional keyword arguments (``schema_version``,
     etc.) so historical call sites declared in services/*/analytics.py modules
@@ -42,7 +42,7 @@ class LabeledCounter:
 
 
 class Counter(LabeledCounter):
-    """No-op replacement for the former LocalStack unlabeled counter."""
+    """No-op replacement for the former upstream unlabeled counter."""
 
     def increment(self, *args, **kwargs) -> None:
         return None

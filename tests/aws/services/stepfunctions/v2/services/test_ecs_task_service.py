@@ -51,7 +51,7 @@ _ECS_SNAPSHOT_SKIP_PATHS: [list[str]] = [
 
 
 # This integration test exercises a code path that historically required a paid
-# LocalStack-Pro license. LocalEmu has no paid tier and inherits no license-gating,
+# upstream license. LocalEmu has no paid tier and inherits no license-gating,
 # so the test stays in the repo as documentation of intended Step Functions + ECS
 # fidelity but is skipped because it depends on infrastructure (real ECS task
 # execution against a multi-AZ cluster) that the OSS test runner does not stand up.

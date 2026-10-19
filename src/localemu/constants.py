@@ -58,7 +58,6 @@ PATH_USER_REQUEST = "_user_request_"
 
 # name of LocalEmu Docker image
 DOCKER_IMAGE_NAME = "localemu/localemu"
-DOCKER_IMAGE_NAME_PRO = "localemu/localemu"
 DOCKER_IMAGE_NAME_FULL = "localemu/localemu"
 
 # backdoor API path used to retrieve or update config variables

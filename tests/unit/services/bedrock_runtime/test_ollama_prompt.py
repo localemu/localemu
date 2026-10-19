@@ -138,7 +138,17 @@ def test_known_model_ids_are_accepted_in_every_form(model_id):
     assert json.loads(_invoke(model_id, b'{"prompt":"x"}')["body"])["generation"]
 
 
-@pytest.mark.parametrize("model_id", ["", "foo.bar-v1", "us.foo.bar-v1", "arn:aws:bedrock:us-east-1::foundation-model/nope"])
+@pytest.mark.parametrize("model_id", [
+    "anthropic.claude-sonnet-4-6-v1:0",
+    "us.anthropic.claude-sonnet-4-6-v1:0",
+    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+])
+def test_well_formed_ids_outside_the_catalog_are_accepted(model_id):
+    out = json.loads(_invoke(model_id, b'{"messages":[{"role":"user","content":"x"}]}')["body"])
+    assert out
+
+
+@pytest.mark.parametrize("model_id", ["", "foo.bar-v1", "us.foo.bar-v1", "not-a-model", "anthropic", "arn:aws:bedrock:us-east-1::foundation-model/nope"])
 def test_unknown_model_ids_raise_validation_exception(model_id):
     with pytest.raises(CommonServiceException) as exc:
         _invoke(model_id, b'{"prompt":"x"}')

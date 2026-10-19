@@ -299,25 +299,44 @@ workshop/demo needs both warm simultaneously, budget RAM for both
 models' rows in the table above, not just the larger one.
 
 **Model mapping and fidelity** (`src/localemu/services/bedrock_runtime/local_inference.py`).
-Every entry is honest about what's actually running — `same_family` (the
+Every entry is honest about what is actually running: `same_family` (the
 real open-weight model), `different_family` (a real model standing in for
 a closed-weight one, e.g. Claude), or `unavailable` (no local model is a
-reasonable substitute at a dev-machine RAM budget — use `synthetic`
-instead):
+reasonable substitute at a dev-machine RAM budget, use `synthetic`
+instead). With `BEDROCK_BACKEND=ollama`, the response always comes from the
+"Runs locally as" model, never from the model named in the request.
 
 | Model id | Runs locally as | Min RAM | Fidelity |
 |---|---|---|---|
 | `anthropic.claude-3-haiku-20240307-v1:0` | `llama3.1:8b` | 16GB | different_family (Claude has no open weights) |
-| `amazon.titan-embed-text-v1` / `v2:0` | `nomic-embed-text` | 16GB | different_family |
+| `anthropic.claude-3-5-sonnet-20240620-v1:0` | `llama3.1:8b` | 16GB | different_family (Claude has no open weights) |
+| any other `anthropic.claude-*` id (Sonnet 4.x, Opus, Haiku 4.x, ...) | `llama3.1:8b` | 16GB | different_family (same stand-in as the Claude entries above) |
+| `amazon.titan-embed-text-v1` | `nomic-embed-text` | 16GB | different_family |
+| `amazon.titan-embed-text-v2:0` | `nomic-embed-text` | 16GB | different_family |
+| `amazon.titan-text-express-v1` | `llama3.1:8b` | 16GB | different_family |
+| `meta.llama3-8b-instruct-v1:0` | `llama3:8b` | 16GB | same_family |
 | `meta.llama3-1-8b-instruct-v1:0` | `llama3.1:8b` | 16GB | same_family |
+| `meta.llama3-2-1b-instruct-v1:0` | `llama3.2:1b` | 16GB | same_family |
+| `meta.llama3-2-3b-instruct-v1:0` | `llama3.2:3b` | 16GB | same_family |
+| `meta.llama3-2-11b-instruct-v1:0` | `llama3.2-vision:11b` | 16GB | same_family |
+| `meta.llama3-70b-instruct-v1:0` | `llama3:70b` | 64GB | same_family |
 | `meta.llama3-1-70b-instruct-v1:0` | `llama3.1:70b` | 64GB | same_family |
-| `meta.llama3-1-405b-instruct-v1:0` | — | — | unavailable (~230GB+ even at 4-bit) |
+| `meta.llama3-1-405b-instruct-v1:0` | none | none | unavailable (~230GB+ even at 4-bit) |
+| `meta.llama3-2-90b-instruct-v1:0` | none | none | unavailable (more than a 64GB machine has) |
 | `mistral.mistral-7b-instruct-v0:2` | `mistral:7b` | 16GB | same_family |
 | `mistral.mixtral-8x7b-instruct-v0:1` | `mixtral:8x7b` | 32GB | same_family (total weights ≈47B params) |
-| `mistral.mistral-large-2402-v1:0` | — | — | unavailable (closed-weight) |
+| `mistral.mistral-large-2402-v1:0` | none | none | unavailable (closed-weight) |
 | `cohere.command-r-v1:0` | `mistral:7b` | 16GB | different_family |
-| `cohere.embed-english-v3` / `multilingual-v3` | `nomic-embed-text` | 16GB | different_family |
-| `ai21.jamba-1-5-large-v1:0` | — | — | unavailable (closed-weight) |
+| `cohere.embed-english-v3` | `nomic-embed-text` | 16GB | different_family |
+| `cohere.embed-multilingual-v3` | `nomic-embed-text` | 16GB | different_family |
+| `ai21.jamba-1-5-large-v1:0` | none | none | unavailable (closed-weight) |
+
+A well-formed model id from a known provider that is not in this table is
+accepted by `InvokeModel` (the `synthetic` backend answers it). With
+`ollama`, such an id returns a `ValidationException` that names the model
+and tells you to use `synthetic`, except for `anthropic.claude-*` ids, which
+use the Claude stand-in above. Inference-profile ids (`us.anthropic...`) and
+model ARNs are accepted the same way.
 
 **Why no DeepSeek/Qwen/GLM/gpt-oss/Nemotron mapping yet**: their exact
 Bedrock `modelId` strings weren't confirmed when this catalog was written.

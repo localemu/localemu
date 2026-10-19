@@ -7,7 +7,6 @@ HOOKS_CONFIGURE_LOCALEMU_CONTAINER = "localemu.hooks.configure_localemu_containe
 HOOKS_ON_RUNTIME_CREATE = "localemu.hooks.on_runtime_create"
 HOOKS_ON_INFRA_READY = "localemu.hooks.on_infra_ready"
 HOOKS_ON_INFRA_START = "localemu.hooks.on_infra_start"
-HOOKS_ON_PRO_INFRA_START = "localemu.hooks.on_pro_infra_start"
 HOOKS_ON_INFRA_SHUTDOWN = "localemu.hooks.on_infra_shutdown"
 HOOKS_PREPARE_HOST = "localemu.hooks.prepare_host"
 
@@ -114,9 +113,6 @@ patches or otherwise configure the interpreter before any other code is imported
 
 on_runtime_start = on_infra_start
 """Alias for on_infra_start. TODO: switch and deprecated `infra` naming."""
-
-on_pro_infra_start = hook_spec(HOOKS_ON_PRO_INFRA_START)
-"""Hooks that are executed after on_infra_start hooks, and only if LocalEmu pro has been activated."""
 
 on_infra_ready = hook_spec(HOOKS_ON_INFRA_READY)
 """Hooks that are execute after all startup hooks have been executed, and the LocalEmu infrastructure has become

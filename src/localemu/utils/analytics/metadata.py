@@ -1,6 +1,6 @@
 """Inert no-op client-metadata shim — no machine fingerprint, no persistence.
 
-The original LocalStack-era implementation here wrote a salted persistent
+The original upstream implementation here wrote a salted persistent
 machine fingerprint to ``~/.cache/localemu/machine.json`` and shipped a
 ``ClientMetadata`` dataclass populated with the user's API key/auth token
 and host details, intended for inclusion in telemetry events. Both behaviors

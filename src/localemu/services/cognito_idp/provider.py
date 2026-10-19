@@ -1248,7 +1248,7 @@ class CognitoIdpState:
 
     def accept_state_visitor(self, visitor: StateVisitor):
         # Only visit state containers the visitor knows how to handle (moto
-        # backends + community stores via reflection). Our plain dicts are
+        # backends + stores via reflection). Our plain dicts are
         # cleared via the lifecycle hook attached to the Service instead.
         from localemu.state.inspect import ReflectionStateLocator
 

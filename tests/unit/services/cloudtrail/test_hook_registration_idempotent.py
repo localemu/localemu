@@ -47,10 +47,14 @@ class TestIdempotentRegistration:
         register_recording_hook()
         assert _count_recorders() == 1
 
-    def test_register_dashboard_twice_installs_only_once(self):
+    def test_register_dashboard_twice_installs_only_once(self, monkeypatch):
         """Dashboard's ``register_dashboard`` now delegates to the named
         CloudTrail hook. Calling it twice must not duplicate."""
+        from localemu.dashboard import plugins as dashboard_plugins
         from localemu.dashboard.plugins import register_dashboard
+
+        # another test may already have registered the dashboard in this process
+        monkeypatch.setattr(dashboard_plugins, "_dashboard_registered", False)
         from localemu.services.cloudtrail.recording_hook import (
             unregister_recording_hook,
         )

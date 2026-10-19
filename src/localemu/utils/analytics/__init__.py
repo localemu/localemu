@@ -1,7 +1,7 @@
 """LocalEmu does not collect telemetry. This module is an inert no-op shim.
 
 Historical context: this directory inherited a full analytics pipeline from the
-LocalStack codebase (HTTP client to an external events endpoint, persistent
+upstream codebase (HTTP client to an external events endpoint, persistent
 salted machine fingerprint at ~/.cache/localemu/machine.json, per-service
 counters, a runtime hook that reported environment variables, and a
 ServiceRequestAggregator that batched AWS API call metadata). All of that has

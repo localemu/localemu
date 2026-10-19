@@ -38,7 +38,7 @@ class Route53Provider(Route53Api, ServiceLifecycleHook):
         visitor.visit(route53_backends)
         visitor.visit(route53_stores)
 
-    # No tag deletion logic to handle in Community. Overwritten in Pro implementation.
+    # No tag deletion logic to handle here.
     def remove_resource_tags(
         self, context: RequestContext, resource_type: str, resource_id: str
     ) -> None:

@@ -71,7 +71,7 @@ class TestServerless:
                     Bucket=bucket_name,
                     Delete={"Objects": objects},
                 )
-            # TODO the cleanup still fails due to inability to find ECR service in community
+            # TODO the cleanup still fails due to inability to find ECR service locally
             command = "undeploy-aws" if is_aws_cloud() else "undeploy"
             run(["npm", "run", command, "--", f"--region={region_name}"], cwd=base_dir)
         except Exception:

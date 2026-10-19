@@ -1,7 +1,7 @@
 """Transcribe provider - stubbed out.
 
 Real AWS Transcribe uses Amazon-trained speech models on their side.
-The historical LocalEmu implementation (inherited from LocalStack)
+The historical implementation inherited by LocalEmu
 emulated Transcribe by downloading Vosk speech-recognition models
 from an external HuggingFace mirror on first use. That download
 path was removed in LocalEmu 1.2.0 to keep the emulator entirely
@@ -12,7 +12,7 @@ Users who need Transcribe should point their AWS SDK at real AWS
 for that service and keep LocalEmu for the rest of their stack.
 """
 
-from localemu.aws.api import CommonServiceException, RequestContext
+from localemu.aws.api import CommonServiceException, RequestContext, ServiceRequest, handler
 from localemu.aws.api.transcribe import TranscribeApi
 
 
@@ -36,18 +36,22 @@ class TranscribeProvider(TranscribeApi):
             status_code=501,
         )
 
-    # The AWS Transcribe API surface, all stubbed. We accept ``**kwargs``
-    # so a schema bump on any of these operations does not break the
-    # dispatcher when it passes new fields.
+    # The AWS Transcribe API surface, all stubbed. The handlers take the raw
+    # request (``expand=False``) so a schema bump on any of these operations
+    # does not break the dispatcher when it passes new fields.
 
-    def start_transcription_job(self, context: RequestContext, **kwargs):
+    @handler("StartTranscriptionJob", expand=False)
+    def start_transcription_job(self, context: RequestContext, request: ServiceRequest):
         self._not_supported("StartTranscriptionJob")
 
-    def get_transcription_job(self, context: RequestContext, **kwargs):
+    @handler("GetTranscriptionJob", expand=False)
+    def get_transcription_job(self, context: RequestContext, request: ServiceRequest):
         self._not_supported("GetTranscriptionJob")
 
-    def list_transcription_jobs(self, context: RequestContext, **kwargs):
+    @handler("ListTranscriptionJobs", expand=False)
+    def list_transcription_jobs(self, context: RequestContext, request: ServiceRequest):
         self._not_supported("ListTranscriptionJobs")
 
-    def delete_transcription_job(self, context: RequestContext, **kwargs):
+    @handler("DeleteTranscriptionJob", expand=False)
+    def delete_transcription_job(self, context: RequestContext, request: ServiceRequest):
         self._not_supported("DeleteTranscriptionJob")

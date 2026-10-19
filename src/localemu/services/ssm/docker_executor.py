@@ -15,8 +15,7 @@ Design notes :
 - Execution is dispatched to a bounded ``ThreadPoolExecutor``; the
   calling API thread returns the CommandId within ~10 ms even for
   multi-instance fan-out.
-- stdout + stderr are captured regardless of exit code (LocalStack Pro
-  misses this). Each is truncated to 24 000 bytes for the inline
+- stdout + stderr are captured regardless of exit code. Each is truncated to 24 000 bytes for the inline
   ``StandardOutputContent`` / ``StandardErrorContent`` fields (AWS
   parity); full output is available in ``/var/lib/localemu/ssm/`` on
   the container and optionally spilled to S3 when the caller provides

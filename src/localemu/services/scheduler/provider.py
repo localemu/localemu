@@ -22,7 +22,7 @@ class SchedulerProvider(SchedulerApi, ServiceLifecycleHook):
     via the default dispatcher; this provider adds:
 
       * schedule-expression validation that matches AWS's accepted set
-        (including ``rate(N seconds)`` which the original LocalStack
+        (including ``rate(N seconds)`` which the original
         port did not validate),
       * lifecycle hooks that start the polling thread on infra-start,
         stop it on infra-stop, and rebuild the in-memory job registry
