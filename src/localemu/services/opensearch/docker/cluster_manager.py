@@ -329,31 +329,53 @@ class DockerClusterManager:
         # Wait for cluster health in background
         threading.Thread(
             target=self._wait_for_health,
-            args=(domain_name, host_port),
+            args=(domain_name, host_port, container_name),
             daemon=True,
         ).start()
 
         LOG.info("OpenSearch domain %s starting at %s", domain_name, endpoint)
         return info
 
-    def _wait_for_health(self, domain_name: str, port: int, timeout: int = 60):
+    @staticmethod
+    def _health_urls(container_name: str, port: int) -> list[str]:
+        """URLs to probe for the domain's health.
+
+        When LocalEmu runs in Docker, ``localhost:<port>`` is the LocalEmu
+        container itself, not the Docker host that publishes the port, so the
+        container's own address on the shared Docker network goes first.
+        ``localhost:<port>`` stays as the fallback for LocalEmu running on
+        the host.
+        """
+        urls = []
+        try:
+            if ip := DOCKER_CLIENT.get_container_ip(container_name):
+                urls.append(f"http://{ip}:9200/_cluster/health")
+        except Exception:
+            pass
+        urls.append(f"http://localhost:{port}/_cluster/health")
+        return urls
+
+    def _wait_for_health(
+        self, domain_name: str, port: int, container_name: str | None = None, timeout: int = 120
+    ):
         """Wait for the OpenSearch container to be healthy."""
         import requests
 
-        url = f"http://localhost:{port}/_cluster/health"
+        container_name = container_name or self._container_name(domain_name)
         start = time.time()
         while time.time() - start < timeout:
-            try:
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    with self._lock:
-                        info = self._clusters.get(domain_name)
-                        if info:
-                            info.status = "active"
-                    LOG.info("OpenSearch domain %s is healthy at localhost:%s", domain_name, port)
-                    return
-            except Exception:
-                pass
+            for url in self._health_urls(container_name, port):
+                try:
+                    resp = requests.get(url, timeout=5)
+                    if resp.status_code == 200:
+                        with self._lock:
+                            info = self._clusters.get(domain_name)
+                            if info:
+                                info.status = "active"
+                        LOG.info("OpenSearch domain %s is healthy at %s", domain_name, url)
+                        return
+                except Exception:
+                    pass
             time.sleep(2)
         LOG.warning("OpenSearch domain %s health check timed out after %ds", domain_name, timeout)
 

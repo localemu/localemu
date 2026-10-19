@@ -656,7 +656,11 @@ class FirehoseProvider(FirehoseApi):
         fh_d_stream: str,
         records: list[Record],
     ):
-        """Process the given records from the underlying Kinesis stream"""
+        """Process the given records from the underlying Kinesis stream.
+
+        The Kinesis consumer hands over the raw record bytes, while the delivery code expects
+        the base64 encoded data that a PutRecord request carries after ``_reencode_record``."""
+        records = self._reencode_records(records)
         return self._put_records(account_id, region_name, fh_d_stream, records)
 
     def _put_record(

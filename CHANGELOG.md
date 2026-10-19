@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.2
+
+Two fixes found by running the examples on a Linux Docker host: OpenSearch domains created by LocalEmu running in Docker now become active, and Firehose delivers the records of a Kinesis source stream.
+
+### OpenSearch domain stuck in Processing
+
+When LocalEmu runs in Docker, its readiness check of a new domain used `http://localhost:<published port>`. Inside the LocalEmu container that address is the container itself, not the Docker host, so the check never succeeded. The domain stayed `Processing=true` after the 60 second timeout, and `terraform apply` of an `aws_opensearch_domain` waited on it indefinitely. The check now probes the domain container's own address on the Docker network first and keeps `localhost:<port>` as the fallback, and the timeout is 120 seconds.
+
+### Firehose with a Kinesis stream as its source
+
+A `KinesisStreamAsSource` delivery stream accepted its configuration, but no record reached the destination. The Kinesis consumer passed the raw record bytes to the delivery code, which base64-decodes `Data`, so every batch failed with `Incorrect padding` in the log. The records are now re-encoded like the ones of a PutRecord request, and S3 receives them.
+
 ## 1.3.1
 
 `bedrock-runtime` `InvokeModel` accepts Bedrock model ids that are not in the 21-model catalog, so applications that target newer models run locally.
