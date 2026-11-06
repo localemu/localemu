@@ -1,4 +1,5 @@
 import json
+import os
 import logging
 import re
 from datetime import datetime, timezone
@@ -107,6 +108,36 @@ def _get_root_access_keys() -> set[str]:
     return {"AKIAIOSFODNN7EXAMPLE", "000000000000"}
 
 
+def _decode_jwt_claims_unverified(token: str) -> dict:
+    """Decode every claim of a JWT without verifying its signature.
+
+    Used only to drive trust-policy Condition matching when no registered
+    OIDC provider could verify the token (no ``iss`` claim, or an issuer
+    nobody registered) - the structural-match fallback
+    ``_trust_policy_allows_web_identity`` already documents. A trust
+    policy's wildcard ``sub``/``aud`` condition is only a real control if
+    it's actually evaluated against *something*; skipping evaluation just
+    because nothing verified the token's signature would make a wildcard
+    condition and a tightly-scoped one behave identically here, which is
+    the opposite of what this condition exists to test. Returns ``{}`` on
+    any decode failure.
+    """
+    if not token or "." not in token:
+        return {}
+    try:
+        import base64 as _b64
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload_b64 = parts[1]
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = _b64.urlsafe_b64decode(payload_b64 + padding)
+        decoded = json.loads(payload)
+        return decoded if isinstance(decoded, dict) else {}
+    except Exception:
+        return {}
+
+
 def _extract_jwt_issuer(token: str) -> str:
     """Pull the ``iss`` claim out of a JWT without verifying the signature.
 
@@ -115,20 +146,7 @@ def _extract_jwt_issuer(token: str) -> str:
     on any decode failure; the caller then falls back to the wildcard
     Federated principals.
     """
-    if not token or "." not in token:
-        return ""
-    try:
-        import base64 as _b64
-        parts = token.split(".")
-        if len(parts) < 2:
-            return ""
-        payload_b64 = parts[1]
-        padding = "=" * (-len(payload_b64) % 4)
-        payload = _b64.urlsafe_b64decode(payload_b64 + padding)
-        claims = json.loads(payload)
-        return str(claims.get("iss") or "")
-    except Exception:
-        return ""
+    return str(_decode_jwt_claims_unverified(token).get("iss") or "")
 
 
 # Well-known federated provider strings AWS recognises in
@@ -147,18 +165,57 @@ _FEDERATED_PROVIDER_ALIASES = {
 }
 
 
-def _trust_policy_allows_web_identity(role, issuer: str) -> bool:
+def _find_registered_oidc_provider(account_id: str, issuer: str):
+    """Return the IAM OIDC provider registered for this issuer, or None.
+
+    A provider only counts as "registered" if its URL matches the token's
+    ``iss`` claim - an issuer nobody registered has nothing to verify
+    against, so callers fall back to the existing structural check (this
+    preserves LocalEmu's own Cognito-via-WebIdentity flow, which never goes
+    through ``iam:CreateOpenIDConnectProvider`` at all).
+    """
+    if not issuer:
+        return None
+    issuer_host = issuer.split("://", 1)[-1].rstrip("/")
+    try:
+        from moto.iam.models import iam_backends
+
+        backend = iam_backends[account_id]["global"]
+        for provider in backend.open_id_providers.values():
+            if provider.url.rstrip("/") == issuer_host:
+                return provider
+    except Exception:
+        LOG.debug("OIDC provider lookup failed for issuer %s", issuer, exc_info=True)
+    return None
+
+
+def _trust_policy_allows_web_identity(
+    role, issuer: str, claims: dict | None = None, provider_arn: str | None = None,
+) -> bool:
     """True if the role's trust policy authorises this JWT-issuer to
     call ``sts:AssumeRoleWithWebIdentity``.
 
     Matches any of:
       * ``Principal: "*"`` - anonymous federated trust.
       * ``Principal: {Federated: "*"}`` - same effect, dict form.
+      * ``Principal: {Federated: <provider_arn>}`` - the ARN of a
+        registered ``iam:CreateOpenIDConnectProvider`` provider, exactly
+        matching the resolved provider's own ARN. This is what AWS
+        actually documents for a real OIDC provider's trust policy; a
+        real IAM-registered provider's trust policy names the ARN
+        (``arn:aws:iam::<acct>:oidc-provider/<url>``), never the bare
+        issuer URL, so comparing it against ``issuer`` (which is the
+        ``https://<url>`` form) by substring could never match either
+        direction - the ARN has no "https://" and the URL has no
+        "arn:aws:iam::...:oidc-provider/".
       * ``Principal: {Federated: <provider>}`` where provider is a
         well-known alias (``cognito-idp.amazonaws.com`` etc.) OR a
         substring of the JWT's ``iss`` claim (catches the local
-        ``http://localhost:4566/...`` issuer).
+        ``http://localhost:4566/...`` issuer, and providers referenced
+        by bare URL instead of ARN).
     """
+    from localemu.services.iam_enforcement.condition_evaluator import matches_conditions
+
     trust_doc_str = getattr(role, "assume_role_policy_document", None)
     if not trust_doc_str:
         return False
@@ -193,22 +250,133 @@ def _trust_policy_allows_web_identity(role, issuer: str) -> bool:
         if isinstance(fed, str):
             fed = [fed]
         for f in fed:
+            idp_host_override = None
             if f == "*":
-                return True
-            if f in _FEDERATED_PROVIDER_ALIASES:
-                return True
+                matched = True
+            elif provider_arn and f == provider_arn:
+                matched = True
+            elif f in _FEDERATED_PROVIDER_ALIASES:
+                matched = True
             # Match by issuer substring - handles LocalEmu's
             # ``http://localhost:4566/...`` and full Cognito issuer URLs
             # like ``https://cognito-idp.us-east-1.amazonaws.com/...``.
-            if issuer and (f in issuer or issuer in f):
-                return True
+            elif issuer and (f in issuer or issuer in f):
+                matched = True
+            # The trust policy names a specific registered-provider ARN
+            # directly - the normal, AWS-documented shape. Match
+            # structurally even when the token's issuer couldn't be
+            # resolved (no ``iss`` claim, or an unverified/forged token -
+            # see _decode_jwt_claims_unverified), and derive the
+            # condition-key hostname from the ARN itself rather than from
+            # ``issuer`` (which is empty here) or ``f`` as a whole (which
+            # would build an unmatchable ``arn:...:sub`` condition key -
+            # this is the bug the comment below used to warn about without
+            # actually preventing it).
+            elif provider_arn is None and f.startswith("arn:") and ":oidc-provider/" in f:
+                # Only when NOTHING could be resolved/verified for this
+                # token at all (provider_arn is None) - if a specific,
+                # different provider WAS resolved, a statement naming some
+                # other provider ARN must still not match just because it
+                # happens to be ARN-shaped.
+                matched = True
+                idp_host_override = f.split(":oidc-provider/", 1)[-1]
+            else:
+                continue
+
+            # Evaluate the statement's Condition (e.g.
+            # ``token.actions.githubusercontent.com:sub``/``:aud``) with the
+            # same engine used for identity/resource policies - this used to
+            # be skipped entirely, so e.g. a ``repo:myorg/*`` sub condition
+            # never actually restricted anything.
+            #
+            # The condition-key prefix is always the IdP's bare hostname
+            # (AWS's documented convention: ``<idp-host>:<claim>``), never
+            # ``f`` - ``f`` matched here via the provider's ARN, an alias,
+            # or an issuer substring, and using it directly as the prefix
+            # would silently build keys like
+            # ``arn:aws:iam::...:oidc-provider/host:sub`` that can never
+            # match a real trust policy's ``host:sub`` condition -
+            # ``idp_host_override`` (set above for the ARN-shaped match)
+            # takes precedence over that for exactly this reason.
+            #
+            # ``claims is not None`` (not truthy) deliberately still runs
+            # condition matching against an empty ``{}`` - a wildcard
+            # ``sub: repo:*`` condition and a scoped ``sub: repo:org/*``
+            # one must not behave identically just because the token had
+            # no claims to check; an empty context correctly fails a
+            # scoped condition while a true wildcard still passes.
+            if claims is not None:
+                idp_host = idp_host_override or (issuer or "").split("://", 1)[-1].rstrip("/") or f
+                condition_context = {f"{idp_host}:{k}": v for k, v in claims.items()}
+                if not matches_conditions(st, condition_context):
+                    continue
+            return True
     return False
+
+
+def _build_trust_policy_conditions(
+    caller_arn: str,
+    caller_account_id: str,
+    region: str,
+    access_key_id: str | None,
+    external_id: str | None,
+    serial_number: str | None,
+    session_tags: list | None,
+    source_identity: str | None,
+) -> dict:
+    """Build the condition context for trust-policy evaluation.
+
+    Mirrors ``iam_enforcement.enforcer._build_conditions`` but for the
+    *trust* side of AssumeRole: the "principal" being checked is the caller
+    attempting to assume the role, not the role itself.
+    """
+    context: dict = {}
+    if external_id:
+        context["sts:ExternalId"] = external_id
+    # Present only when MFA was actually supplied - BoolIfExists conditions
+    # rely on absence, same rationale as iam_enforcement.enforcer.
+    if serial_number:
+        context["aws:MultiFactorAuthPresent"] = "true"
+    if source_identity:
+        context["sts:SourceIdentity"] = source_identity
+
+    # aws:PrincipalTag/<key> - the CALLER's own existing tags (the entity
+    # trying to assume the role), e.g. an IAM user tagged Department=Eng.
+    if access_key_id:
+        try:
+            from localemu.services.iam_enforcement.identity import resolve_caller
+
+            caller = resolve_caller(access_key_id, caller_account_id, region)
+            if caller and caller.tags:
+                context.update(caller.tags)
+        except Exception:
+            LOG.debug("Failed to resolve caller tags for trust policy evaluation", exc_info=True)
+
+    # aws:RequestTag/<key> and aws:TagKeys - the session tags being
+    # requested BY this AssumeRole call (the ``Tags`` parameter), not the
+    # role's own tags.
+    if session_tags:
+        tag_keys = []
+        for tag in session_tags:
+            key = (tag or {}).get("Key")
+            value = (tag or {}).get("Value", "")
+            if key:
+                context[f"aws:RequestTag/{key}"] = value
+                tag_keys.append(key)
+        if tag_keys:
+            context["aws:TagKeys"] = tag_keys
+
+    return context
 
 
 def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
                            external_id: str | None = None,
                            serial_number: str | None = None,
-                           service_principal: str | None = None) -> bool:
+                           service_principal: str | None = None,
+                           region: str = "us-east-1",
+                           access_key_id: str | None = None,
+                           session_tags: list | None = None,
+                           source_identity: str | None = None) -> bool:
     """Evaluate the role's trust policy (AssumeRolePolicyDocument).
 
     Returns True if the caller is allowed to assume the role.
@@ -218,7 +386,25 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
     ``Principal: {Service: ...}`` clause are matched against this value
     (suffix ``.amazonaws.com`` form), mirroring how AWS authorizes service
     role assumption (e.g. Lambda assuming the function execution role).
+
+    Trust-policy ``Condition`` blocks are evaluated with the same IAM
+    condition engine used for identity/resource policies (see
+    ``iam_enforcement.condition_evaluator``), covering any operator -
+    ``StringEquals``/``StringLike``/``Bool``/etc - not just the
+    ``sts:ExternalId``/``aws:MultiFactorAuthPresent`` special cases this
+    function used to hand-check. Context keys currently NOT populated here
+    (not yet plumbed through the call sites that would need to supply them):
+    ``aws:SourceAccount``/``aws:SourceArn`` (only meaningful for a handful of
+    service-principal assumptions that pass a source resource) and
+    ``aws:PrincipalOrgID`` (would duplicate the Organizations lookup that
+    already lives in ``enforcer.py``).
     """
+    from localemu.services.iam_enforcement.condition_evaluator import matches_conditions
+
+    trust_conditions = _build_trust_policy_conditions(
+        caller_arn, caller_account_id, region, access_key_id,
+        external_id, serial_number, session_tags, source_identity,
+    )
     trust_doc_str = getattr(role, "assume_role_policy_document", None)
     if not trust_doc_str:
         # No trust policy = deny
@@ -269,24 +455,7 @@ def _evaluate_trust_policy(role, caller_arn: str, caller_account_id: str,
                                         service_principal=service_principal):
             continue
 
-        # Check conditions
-        conditions = statement.get("Condition", {})
-
-        # ExternalId check
-        external_id_condition = (
-            conditions.get("StringEquals", {}).get("sts:ExternalId")
-            or conditions.get("StringEquals", {}).get("sts:externalId")
-        )
-        if external_id_condition:
-            if isinstance(external_id_condition, list):
-                if external_id not in external_id_condition:
-                    continue
-            elif external_id != external_id_condition:
-                continue
-
-        # MFA check
-        mfa_required = conditions.get("Bool", {}).get("aws:MultiFactorAuthPresent")
-        if mfa_required == "true" and not serial_number:
+        if not matches_conditions(statement, trust_conditions):
             continue
 
         return True
@@ -511,6 +680,20 @@ class StsProvider(StsApi, ServiceLifecycleHook):
 
         # / Trust policy evaluation
         role = _resolve_role(target_account_id, role_arn)
+        if not role and os.environ.get("IAM_ENFORCEMENT", "").strip().lower() in ("1", "soft"):
+            internal_params = getattr(context, "internal_request_params", None) or {}
+            if not internal_params.get("service_principal"):
+                # AWS answers AssumeRole on a role that does not exist exactly like a refusal by the
+                # trust policy, so callers cannot tell the two cases apart.
+                caller_arn = _resolve_caller_arn(access_key_id, context.account_id)
+                raise CommonServiceException(
+                    code="AccessDenied",
+                    message=(
+                        f"User: {caller_arn} is not authorized to perform: sts:AssumeRole on "
+                        f"resource: {role_arn}"
+                    ),
+                    status_code=403,
+                )
         if role:
             caller_arn = _resolve_caller_arn(access_key_id, context.account_id)
             # Internal services (Lambda, Events, ...) propagate
@@ -523,7 +706,11 @@ class StsProvider(StsApi, ServiceLifecycleHook):
             if not _evaluate_trust_policy(role, caller_arn, context.account_id,
                                           external_id=external_id,
                                           serial_number=serial_number,
-                                          service_principal=caller_service_principal):
+                                          service_principal=caller_service_principal,
+                                          region=context.region or "us-east-1",
+                                          access_key_id=access_key_id,
+                                          session_tags=tags,
+                                          source_identity=source_identity):
                 raise CommonServiceException(
                     code="AccessDenied",
                     message=(
@@ -659,7 +846,42 @@ class StsProvider(StsApi, ServiceLifecycleHook):
         role = _resolve_role(target_account_id, role_arn)
         if role:
             issuer = _extract_jwt_issuer(web_identity_token)
-            if not _trust_policy_allows_web_identity(role, issuer):
+            claims = None
+
+            # If an OIDC provider is actually registered for this issuer,
+            # real AWS requires the token's signature to verify against
+            # that provider's JWKS - a structural match on the issuer
+            # string alone (the previous behaviour) let ANY token through,
+            # forged signature and all, as long as the Principal matched.
+            # An issuer nobody registered (e.g. LocalEmu's own Cognito
+            # issuer) keeps the pre-existing structural-only check.
+            provider = _find_registered_oidc_provider(target_account_id, issuer)
+            if provider is not None:
+                from localemu.services.sts.oidc_local import verify_web_identity_token
+
+                claims = verify_web_identity_token(web_identity_token, provider)
+                if claims is None:
+                    raise CommonServiceException(
+                        code="InvalidIdentityToken",
+                        message="Signature verification failed",
+                        status_code=400,
+                    )
+            else:
+                # No issuer claim (or no provider registered for it) means
+                # nothing CAN verify this token's signature - fall back to
+                # decoding its claims unverified, purely to drive the trust
+                # policy's own Condition matching (e.g. sub/aud). This is
+                # a deliberate structural-only check, not a security
+                # control: a forged/unsigned token with a resolvable
+                # provider ARN named directly in the trust policy still
+                # only gets through if that policy's own conditions (like
+                # an overly-broad wildcard sub) allow it - exactly the
+                # misconfiguration this is meant to let a lab demonstrate.
+                claims = _decode_jwt_claims_unverified(web_identity_token)
+
+            if not _trust_policy_allows_web_identity(
+                role, issuer, claims=claims, provider_arn=getattr(provider, "arn", None)
+            ):
                 raise CommonServiceException(
                     code="AccessDenied",
                     message=f"Not authorized to perform sts:AssumeRoleWithWebIdentity on resource: {role_arn}",

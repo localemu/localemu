@@ -67,7 +67,6 @@ API_DEPENDENCIES = {
     "lambda": ["s3", "sts"],
     # firehose currently only supports kinesis as source, this could become optional when more sources are supported
     "firehose": ["kinesis"],
-    "transcribe": ["s3"],
     # secretsmanager uses lambda for rotation
     "secretsmanager": ["kms", "lambda"],
     # ssm uses secretsmanager for get_parameter

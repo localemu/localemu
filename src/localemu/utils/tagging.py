@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from warnings import deprecated
+
+from typing_extensions import deprecated
 
 
 @deprecated("`TaggingService` is deprecated. Please use the `RGTAPlugin`/`Tags` system.")

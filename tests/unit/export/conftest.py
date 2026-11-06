@@ -15,7 +15,10 @@ Fixtures here:
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -444,6 +447,66 @@ def seeded_infra(aws_client: Any) -> Any:  # noqa: ANN401 - dynamic boto clients
             fn()
         except Exception:
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Terraform provider resolution — resolve once per session, not per test      #
+# --------------------------------------------------------------------------- #
+#
+# Every Terraform-rendering test writes its own fresh ``providers.tf`` with
+# an unpinned ``version = "~> 5.0"`` constraint into a brand-new ``tmp_path``.
+# With no ``.terraform.lock.hcl`` already on disk, ``terraform init`` has no
+# choice but to ask registry.terraform.io which exact version satisfies that
+# constraint - once per test. Resolving that question here, once per test
+# session, and handing every test a copy of the resulting lock file lets
+# ``terraform init`` skip that registry round-trip: a lock file with a
+# selection already present in the local provider plugin cache
+# (``~/.terraform.d/plugin-cache`` or ``TF_PLUGIN_CACHE_DIR``) is honored
+# fully offline.
+
+_TF_REQUIRED_PROVIDERS_BLOCK = (
+    'terraform {\n'
+    '  required_version = ">= 1.5"\n'
+    '  required_providers {\n'
+    '    aws = {\n'
+    '      source  = "hashicorp/aws"\n'
+    '      version = "~> 5.0"\n'
+    '    }\n'
+    '  }\n'
+    '}\n'
+)
+
+
+@pytest.fixture(scope="session")
+def terraform_lockfile(tmp_path_factory: pytest.TempPathFactory) -> Path | None:
+    """A ``.terraform.lock.hcl`` resolved once, reused by every TF test.
+
+    Returns ``None`` if terraform isn't installed or the one-time
+    resolution itself fails (e.g. no network at all) - callers fall back
+    to letting ``terraform init`` resolve the version itself.
+    """
+    if shutil.which("terraform") is None:
+        return None
+    warm_dir = tmp_path_factory.mktemp("tf_provider_warmup")
+    (warm_dir / "providers.tf").write_text(_TF_REQUIRED_PROVIDERS_BLOCK)
+    result = subprocess.run(
+        ["terraform", "init", "-backend=false", "-input=false"],
+        cwd=warm_dir, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    lockfile = warm_dir / ".terraform.lock.hcl"
+    return lockfile if lockfile.exists() else None
+
+
+def seed_terraform_lockfile(tmp_path: Path, terraform_lockfile: Path | None) -> None:
+    """Copy the session-resolved lock file into a test's ``tmp_path``.
+
+    No-op (test falls back to per-test resolution) if warmup didn't
+    produce one.
+    """
+    if terraform_lockfile is not None:
+        shutil.copy(terraform_lockfile, tmp_path / ".terraform.lock.hcl")
 
 
 # --------------------------------------------------------------------------- #

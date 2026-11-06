@@ -340,8 +340,6 @@ _FIXTURES: dict[tuple[str, str], dict[str, Any]] = {
     ("ssm", "patch_baseline"): {"name": "cov-pb", "operating_system": "AMAZON_LINUX_2"},
     ("stepfunctions", "alias"): {"name": "live"},
     ("secretsmanager", "secret_rotation"): {"secret_id": "arn:aws:secretsmanager:us-east-1:000000000000:secret:cov", "rotation_lambda_arn": "arn:aws:lambda:us-east-1:000000000000:function:cov-rotator"},
-    ("transcribe", "vocabulary"): {"vocabulary_name": "cov-vocab", "language_code": "en-US", "vocabulary_file_uri": "s3://cov-bucket/vocab.txt"},
-    ("transcribe", "vocabulary_filter"): {"vocabulary_filter_name": "cov-filter", "language_code": "en-US", "words": ["badword"]},
     ("apigateway", "vpc_link"): {
         "name": "localemu-coverage-vpclink",
         "target_arns": ["arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/my-nlb/abc"],
@@ -1579,16 +1577,6 @@ _FIXTURES: dict[tuple[str, str], dict[str, Any]] = {
     ("sns", "data_protection_policy"): {
         "arn": "arn:aws:sns:us-east-1:000000000000:cov-topic",
         "policy": "{\"Name\":\"cov-policy\",\"Version\":\"2021-06-01\",\"Statement\":[{\"DataDirection\":\"Inbound\",\"Principal\":[\"*\"],\"DataIdentifier\":[\"arn:aws:dataprotection::aws:data-identifier/EmailAddress\"],\"Operation\":{\"Deny\":{}}}]}",
-    },
-    ("transcribe", "medical_vocabulary"): {
-        "vocabulary_name": "cov-med-vocab",
-        "language_code": "en-US",
-        "vocabulary_file_uri": "s3://cov-bucket/medical-vocab.txt",
-    },
-    ("transcribe", "language_model"): {
-        "model_name": "cov-lang-model",
-        "language_code": "en-US",
-        "base_model_name": "NarrowBand",
     },
     ("logs", "destination_policy"): {
         "destination_name": "cov-dest",
@@ -2879,7 +2867,7 @@ def _add_elbv2_companions(
     ids=lambda key: f"{key[0]}-{key[1]}",
 )
 def test_service_renders_valid_terraform(
-    tmp_path: Path, spec_key: tuple[str, str]
+    tmp_path: Path, spec_key: tuple[str, str], terraform_lockfile: Path | None
 ) -> None:
     if spec_key not in _FIXTURES:
         pytest.skip(
@@ -3033,6 +3021,9 @@ def test_service_renders_valid_terraform(
     if not placeholder.exists():
         placeholder.write_bytes(b"PK\x03\x04")
 
+    from tests.unit.export.conftest import seed_terraform_lockfile
+
+    seed_terraform_lockfile(tmp_path, terraform_lockfile)
     init = subprocess.run(
         ["terraform", "init", "-backend=false", "-input=false"],
         cwd=tmp_path, capture_output=True, text=True, check=False,

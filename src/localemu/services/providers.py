@@ -395,15 +395,6 @@ def support():
     return Service.for_provider(provider, dispatch_table_factory=MotoFallbackDispatcher)
 
 
-@aws_provider()
-def transcribe():
-    from localemu.services.moto import MotoFallbackDispatcher
-    from localemu.services.transcribe.provider import TranscribeProvider
-
-    provider = TranscribeProvider()
-    return Service.for_provider(provider, dispatch_table_factory=MotoFallbackDispatcher)
-
-
 # ---------------------------------------------------------------------------
 # Tier 1 services -pure Moto backends, no custom provider needed
 # Uses MotoOnlyDispatcher which routes all operations directly to Moto.
@@ -464,7 +455,9 @@ def cognito_idp():
 
 @aws_provider(api="cognito-identity")
 def cognito_identity():
-    return _moto_service("cognito-identity")
+    from localemu.services.cognito_identity.provider import create_cognito_identity_service
+
+    return create_cognito_identity_service()
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +526,13 @@ def codebuild():
 
 @aws_provider()
 def wafv2():
+    # Moto's own AssociateWebACL has no "replace the existing association"
+    # semantics; patch it so the single-Web-ACL-per-resource invariant the
+    # real-time evaluator (services/wafv2/alb_hook.py) relies on actually
+    # holds. See services/wafv2/patches.py.
+    from localemu.services.wafv2.patches import apply_patches as _apply_wafv2_patches
+
+    _apply_wafv2_patches()
     return _moto_service("wafv2")
 
 
@@ -905,6 +905,10 @@ def quicksight():
 
 @aws_provider()
 def ram():
+    # Applies the AssociateResourceShare/DisassociateResourceShare moto
+    # patch at first load - see services/ram/_moto_patches.py.
+    import localemu.services.ram  # noqa: F401
+
     return _moto_service("ram")
 
 

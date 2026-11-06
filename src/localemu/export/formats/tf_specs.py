@@ -1947,23 +1947,6 @@ def _build_backup_plan(
     return attrs
 
 
-def _build_transcribe_language_model(
-    resource: Resource, attrs: dict[str, Any], ctx: dict[str, Any]
-) -> dict[str, Any]:
-    """``aws_transcribe_language_model``: input_data_config required."""
-    idc = resource.attributes.get("input_data_config")
-    if isinstance(idc, (dict, list)):
-        attrs["input_data_config"] = idc if isinstance(idc, list) else [idc]
-    else:
-        attrs["input_data_config"] = [{
-            "data_access_role_arn": "arn:aws:iam::000000000000:role/cov-transcribe-role",
-            "s3_uri": "s3://cov-bucket/training-data/",
-        }]
-    if resource.tags:
-        attrs["tags"] = dict(resource.tags)
-    return attrs
-
-
 def _build_s3_replication_configuration(
     resource: Resource, attrs: dict[str, Any], ctx: dict[str, Any]
 ) -> dict[str, Any]:
@@ -4058,16 +4041,6 @@ TF_SPECS: dict[tuple[str, str], TfSpec] = {
         builder=_build_sm_rotation,
     ),
     # --- Transcribe ----------------------------------------------------------
-    ("transcribe", "vocabulary"): TfSpec(
-        resource_type="aws_transcribe_vocabulary",
-        attribute_map={"vocabulary_name": "vocabulary_name", "language_code": "language_code", "vocabulary_file_uri": "vocabulary_file_uri"},
-        builder=_build_tags_only,
-    ),
-    ("transcribe", "vocabulary_filter"): TfSpec(
-        resource_type="aws_transcribe_vocabulary_filter",
-        attribute_map={"vocabulary_filter_name": "vocabulary_filter_name", "language_code": "language_code", "words": "words", "vocabulary_filter_file_uri": "vocabulary_filter_file_uri"},
-        builder=_build_tags_only,
-    ),
     # --- CloudFormation extensions ------------------------------------------
     ("cloudformation", "stack_set"): TfSpec(
         resource_type="aws_cloudformation_stack_set",
@@ -5259,24 +5232,6 @@ TF_SPECS: dict[tuple[str, str], TfSpec] = {
             "arn": "arn",
             "policy": "policy",
         },
-    ),
-    ("transcribe", "medical_vocabulary"): TfSpec(
-        resource_type="aws_transcribe_medical_vocabulary",
-        attribute_map={
-            "vocabulary_name": "vocabulary_name",
-            "language_code": "language_code",
-            "vocabulary_file_uri": "vocabulary_file_uri",
-        },
-        builder=_build_tags_only,
-    ),
-    ("transcribe", "language_model"): TfSpec(
-        resource_type="aws_transcribe_language_model",
-        attribute_map={
-            "model_name": "model_name",
-            "language_code": "language_code",
-            "base_model_name": "base_model_name",
-        },
-        builder=_build_transcribe_language_model,
     ),
     ("logs", "destination_policy"): TfSpec(
         resource_type="aws_cloudwatch_log_destination_policy",

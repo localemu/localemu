@@ -22,9 +22,82 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from localemu.aws.connect import connect_to
 from localemu.services.events.target import TargetSenderFactory
+from localemu.utils.aws.client_types import ServicePrincipal
 
 LOG = logging.getLogger(__name__)
+
+_UNIVERSAL_TARGET_PREFIX = "arn:aws:scheduler:::aws-sdk:"
+
+
+def _snake_case(name: str) -> str:
+    """lowerCamelCase SDK action name -> boto3's snake_case method name
+    (``getParameter`` -> ``get_parameter``)."""
+    import re
+
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def _invoke_universal_target(
+    *, schedule_arn: str, target: dict, account_id: str, region: str,
+) -> None:
+    """Universal targets (``arn:aws:scheduler:::aws-sdk:<service>:<action>``)
+    call an arbitrary AWS SDK action directly - they don't go through the
+    EventBridge Rule/Target-sender machinery at all (there's no "event" to
+    deliver, no retry/DLQ semantics AWS documents for them), and the result
+    goes nowhere on real AWS, same here.
+
+    Previously unrecognised entirely: ``TargetSenderFactory`` tried to
+    resolve a service from the ARN's own (``scheduler``) segment, found no
+    matching sender, and the schedule silently never fired.
+    """
+    arn = target["Arn"]
+    service_and_action = arn[len(_UNIVERSAL_TARGET_PREFIX):]
+    service, _, action = service_and_action.partition(":")
+    if not service or not action:
+        LOG.warning("Scheduler %s has a malformed universal target ARN %s", schedule_arn, arn)
+        return
+
+    role_arn = target.get("RoleArn")
+    if not role_arn:
+        LOG.warning("Scheduler %s universal target %s has no RoleArn", schedule_arn, arn)
+        return
+
+    client_factory = connect_to.with_assumed_role(
+        role_arn=role_arn,
+        service_principal=ServicePrincipal("scheduler"),
+        region_name=region,
+    )
+    client = client_factory.get_client(service)
+    client = client.request_metadata(
+        service_principal=ServicePrincipal("scheduler"),
+        source_arn=schedule_arn,
+        # Same opt-in as the v1 target path: the role's own permission
+        # policy must gate this call, not just its trust policy.
+        enforce_role_permissions=True,
+    )
+
+    raw_input = target.get("Input")
+    kwargs = {}
+    if raw_input:
+        try:
+            kwargs = json.loads(raw_input) if isinstance(raw_input, str) else dict(raw_input)
+        except (TypeError, ValueError):
+            LOG.warning("Scheduler %s universal target has non-JSON Input", schedule_arn)
+            return
+
+    method_name = _snake_case(action)
+    method = getattr(client, method_name, None)
+    if method is None:
+        LOG.warning(
+            "Scheduler %s universal target %s has no such %s operation",
+            schedule_arn, arn, method_name,
+        )
+        return
+    # The result is discarded - real AWS documents universal targets as
+    # having nowhere for the response to go.
+    method(**kwargs)
 
 
 def _synthesise_event(
@@ -95,6 +168,12 @@ def invoke(
         )
         return
 
+    if target["Arn"].startswith(_UNIVERSAL_TARGET_PREFIX):
+        _invoke_universal_target(
+            schedule_arn=schedule_arn, target=target, account_id=account_id, region=region,
+        )
+        return
+
     factory = TargetSenderFactory(
         target=target,
         # The sender shapes its DLQ + log messages with rule_arn / rule_name;
@@ -109,6 +188,9 @@ def invoke(
         # the trust policy users write for Scheduler-managed roles names
         # that principal, not EventBridge's.
         caller_service_principal="scheduler",
+        # The role's own permission policy gates invocation too, not
+        # just its trust policy.
+        enforce_role_permissions=True,
     )
     try:
         sender = factory.get_target_sender()

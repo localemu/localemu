@@ -58,7 +58,7 @@ def test_identity_for_full_vpc_subnet():
 
 
 def test_shifts_subnet_when_vpc_bridge_fell_back_to_different_tier():
-    """The case Tarek hit on 2026-06-07: user CreateVpc(10.86.0.0/16),
+    """A real case hit in practice: user CreateVpc(10.86.0.0/16),
     Docker bridge already held 10.86.0.0/16 from a prior orphan, so
     the fallback picker landed the new bridge on 10.0.0.0/16. The
     subnet's AWS CIDR 10.86.1.0/24 must shift to 10.0.1.0/24 to lie

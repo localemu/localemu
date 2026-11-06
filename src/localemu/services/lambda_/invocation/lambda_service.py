@@ -137,7 +137,20 @@ class LambdaService:
             qualified_arn, self.lambda_starting_versions.pop(qualified_arn, None)
         )
         if not version_manager:
-            raise ValueError(f"Unable to find version manager for {qualified_arn}")
+            # A version that reached State.Failed in update_version_state()
+            # is popped from both tracking dicts there (and its own .stop()
+            # already submitted) without ever landing in the other dict -
+            # by the time anything calls stop_version() on it again (e.g.
+            # DeleteFunction iterating every version), there is really
+            # nothing left to stop. Treat that as already-stopped, not an
+            # error: raising here used to abort DeleteFunction/Update
+            # entirely, leaving a function that failed to start permanently
+            # undeletable.
+            LOG.debug(
+                "No version manager tracked for %s (already stopped or never "
+                "started) - nothing to do", qualified_arn,
+            )
+            return
         self.task_executor.submit(version_manager.stop)
         lambda_hooks.delete_function_version.run(qualified_arn)
 

@@ -76,6 +76,23 @@ _OPERATORS: dict[str, callable] = {
 }
 
 
+# Negated operators. AWS evaluates them differently from the positive ones in two ways:
+#  * several condition values are ANDed ("the key matches none of them"), not ORed;
+#  * when the key is absent from the request the condition is TRUE.
+# https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html
+_NEGATED_OPERATORS = frozenset({
+    "StringNotEquals", "StringNotEqualsIgnoreCase", "StringNotLike", "NumericNotEquals",
+    "DateNotEquals", "NotIpAddress", "ArnNotEquals", "ArnNotLike",
+})
+
+
+def _value_matches(compare_fn: callable, negated: bool, context_value, condition_values: list) -> bool:
+    """One context value against the list of condition values of one key."""
+    if negated:
+        return all(_safe_negated_compare(compare_fn, context_value, v) for v in condition_values)
+    return any(_safe_compare(compare_fn, context_value, v) for v in condition_values)
+
+
 def matches_conditions(statement: dict, context: dict) -> bool:
     """Evaluate all conditions in a policy statement.
 
@@ -133,32 +150,41 @@ def matches_conditions(statement: dict, context: dict) -> bool:
                     if not compare_fn(None, condition_values[0]):
                         return False
                     continue
+                if set_op == "all":
+                    continue  # ForAllValues is vacuously true when the key is absent (AWS documents this)
+                if set_op == "any":
+                    return False  # ForAnyValue needs at least one value
+                if base_operator in _NEGATED_OPERATORS:
+                    continue  # a negated condition on an absent key is true
                 return False  # Key required but not present
 
             # Set operations (ForAllValues / ForAnyValue)
             if set_op:
                 ctx_values = context_value if isinstance(context_value, list) else [context_value]
+                negated = base_operator in _NEGATED_OPERATORS
                 if set_op == "all":
-                    # Every context value must match at least one condition value
+                    # Every context value must match the condition values
                     for cv in ctx_values:
-                        if not any(_safe_compare(compare_fn, cv, cond_v) for cond_v in condition_values):
+                        if not _value_matches(compare_fn, negated, cv, condition_values):
                             return False
                 elif set_op == "any":
-                    # At least one context value must match at least one condition value
-                    if not any(
-                        _safe_compare(compare_fn, cv, cond_v)
-                        for cv in ctx_values
-                        for cond_v in condition_values
-                    ):
+                    # At least one context value must match
+                    if not any(_value_matches(compare_fn, negated, cv, condition_values) for cv in ctx_values):
                         return False
             else:
-                # Standard: at least one condition value must match (OR within a key)
-                if not any(
-                    _safe_compare(compare_fn, context_value, v) for v in condition_values
-                ):
+                # Standard: one condition value must match (OR); for negated operators none may match (AND of the negations)
+                if not _value_matches(compare_fn, base_operator in _NEGATED_OPERATORS, context_value, condition_values):
                     return False
 
     return True
+
+
+def _safe_negated_compare(fn: callable, a, b) -> bool:
+    """Negated comparison; an uncomparable pair (bad number or date) does not satisfy the condition."""
+    try:
+        return fn(a, b)
+    except (ValueError, TypeError):
+        return False
 
 
 def _safe_compare(fn: callable, a, b) -> bool:

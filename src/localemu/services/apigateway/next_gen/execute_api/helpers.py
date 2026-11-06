@@ -40,8 +40,10 @@ def freeze_rest_api(
     )
 
 
-# AWS stage variable values must match this pattern (alphanumeric, hyphens, underscores, periods, slashes, colons)
-_STAGE_VAR_VALUE_PATTERN = re.compile(r"^[a-zA-Z0-9._\-:/]*$")
+# AWS stage variable values must match this pattern (alphanumeric, hyphens, underscores, periods, slashes,
+# colons, and the query-string characters =, ? and & - AWS allows a stage variable to hold a full query
+# string that gets embedded into a URI template, e.g. "?${stageVariables.querystring}")
+_STAGE_VAR_VALUE_PATTERN = re.compile(r"^[a-zA-Z0-9._\-:/=?&]*$")
 
 
 def _sanitize_stage_variable_value(value: str) -> str:
@@ -53,7 +55,7 @@ def _sanitize_stage_variable_value(value: str) -> str:
         return value
     LOG.warning("Stage variable value contains invalid characters, sanitizing: %s", value)
     # Strip any characters that are not in the allowed set
-    return re.sub(r"[^a-zA-Z0-9._\-:/]", "", value)
+    return re.sub(r"[^a-zA-Z0-9._\-:/=?&]", "", value)
 
 
 def render_uri_with_stage_variables(

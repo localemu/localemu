@@ -90,12 +90,47 @@ class LambdaVersionManager:
         self.ldm_provisioner = None
         lambda_hooks.inject_ldm_provisioner.run(self)
 
+    def _prepare_version_with_timeout(self) -> None:
+        """Run ``prepare_version`` (docker image pull/build, runtime init)
+        under a hard ceiling so a slow/stuck pull can't leave the version
+        in ``Pending`` forever - that in turn blocked
+        UpdateFunctionConfiguration ("cannot be updated if an old one is
+        not running") with no way out short of restarting the server.
+
+        The underlying call isn't safely cancellable mid-flight (it's a
+        blocking Docker SDK call), so on timeout we raise and move on;
+        the background thread is left to finish on its own time and its
+        result is simply discarded.
+        """
+        timeout = config.LAMBDA_VERSION_START_TIMEOUT_SECONDS
+        if not timeout:
+            get_runtime_executor().prepare_version(self.function_version)
+            return
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            get_runtime_executor().prepare_version, self.function_version
+        )
+        try:
+            future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"Version preparation for {self.function_version.qualified_arn} "
+                f"did not finish within {timeout}s (LAMBDA_VERSION_START_TIMEOUT_SECONDS)"
+            ) from None
+        finally:
+            executor.shutdown(wait=False)
+
     def start(self) -> VersionState:
         try:
             self.log_handler.start_subscriber()
+            LOG.info(
+                "Version preparation starting for %s (image pull / runtime "
+                "init - this is what can make a function sit in Pending)",
+                self.function_version.qualified_arn,
+            )
             time_before = time.perf_counter()
-            get_runtime_executor().prepare_version(self.function_version)  # TODO: make pluggable?
-            LOG.debug(
+            self._prepare_version_with_timeout()
+            LOG.info(
                 "Version preparation of function %s took %0.2fms",
                 self.function_version.qualified_arn,
                 (time.perf_counter() - time_before) * 1000,

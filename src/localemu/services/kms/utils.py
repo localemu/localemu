@@ -1,6 +1,7 @@
 import base64
 import re
 from collections.abc import Callable
+from typing import TypeVar
 
 from localemu.aws.api.kms import (
     CreateKeyRequest,
@@ -126,7 +127,10 @@ def get_custom_key_id(request: CreateKeyRequest | None) -> bytes | None:
     return None
 
 
-def execute_dry_run_capable[T](func: Callable[..., T], dry_run: bool, *args, **kwargs) -> T:
+T = TypeVar("T")
+
+
+def execute_dry_run_capable(func: Callable[..., T], dry_run: bool, *args, **kwargs) -> T:
     """
     Executes a function unless dry run mode is enabled.
 

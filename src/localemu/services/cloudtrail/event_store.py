@@ -229,6 +229,9 @@ class CloudTrailEvent:
     # Insight-category events are recorded explicitly by callers that know
     # they've observed data-plane activity or insight anomalies.
     event_category: str = "Management"
+    # The caller as CloudTrail reports it (type Root / IAMUser / AssumedRole / AWSAccount). When
+    # None the event is reported as an IAM user named after ``username``.
+    user_identity: dict[str, Any] | None = None
 
     def to_cloudtrail_event_json(self) -> str:
         """Build the full CloudTrailEvent JSON string (what AWS returns).
@@ -253,7 +256,8 @@ class CloudTrailEvent:
 
         event_dict: dict[str, Any] = {
             "eventVersion": "1.08",
-            "userIdentity": {
+            "userIdentity": self.user_identity
+            or {
                 "type": "IAMUser",
                 "principalId": self.access_key_id or "AIDAEXAMPLE",
                 "arn": f"arn:aws:iam::{self.account_id}:user/{self.username}",
@@ -593,6 +597,7 @@ class CloudTrailEventStore:
                     "read_only": evt.read_only,
                     "username": evt.username,
                     "access_key_id": evt.access_key_id,
+                    "user_identity": evt.user_identity,
                     "error_code": evt.error_code,
                     "error_message": evt.error_message,
                     "resources": evt.resources,
@@ -670,6 +675,7 @@ class CloudTrailEventStore:
                         read_only=data["read_only"],
                         username=data["username"],
                         access_key_id=data["access_key_id"],
+                        user_identity=data.get("user_identity"),
                         error_code=data.get("error_code"),
                         error_message=data.get("error_message"),
                         resources=data.get("resources", []),
@@ -836,6 +842,7 @@ def create_event_from_context(
     response_elements: dict | None = None,
     http_status_code: int = 0,
     event_category: str | None = None,
+    user_identity: dict | None = None,
 ) -> CloudTrailEvent:
     """Create a CloudTrailEvent from handler chain context fields.
 
@@ -875,4 +882,5 @@ def create_event_from_context(
         response_elements=_sanitize_params(response_elements, service_name=service_name),
         http_status_code=http_status_code,
         event_category=event_category,
+        user_identity=user_identity,
     )

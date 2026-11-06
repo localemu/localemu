@@ -99,7 +99,7 @@ FormattedEvent = TypedDict(  # functional syntax required due to name-name keys
 FormattedEventDict = dict[str, FormattedEvent]
 FormattedEventList = list[FormattedEvent]
 
-type TransformedEvent = FormattedEvent | dict | str
+TransformedEvent = FormattedEvent | dict | str
 
 
 class ResourceType(Enum):

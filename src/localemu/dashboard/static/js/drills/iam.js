@@ -17,11 +17,20 @@
     return "roles";  // best default for the typical click target
   }
 
+  // The list page knows each row's real type (User/Role/Group/Policy) --
+  // hint() records it just before navigation so fetchByName() can go
+  // straight to the right endpoint instead of probing every kind in
+  // turn (which means a 404 on every miss before the real one hits).
+  // Direct URL navigation / reload / back-button has no hint, so
+  // fetchByName still falls back to the full probe in that case.
+  var kindHints = {};
+  function hint(name, type) {
+    if (!name) return;
+    var k = kindFromRow({ type: type });
+    if (k) kindHints[name] = k;
+  }
+
   function open(key) {
-    // The IAM list passes the raw name as the resource key. The drill
-    // fetch is kind-aware via the row's `type` field that the list
-    // endpoint already returns. We default to Role -- most user clicks
-    // target roles, which is exactly the user's pain anchor.
     DASH.drills.framework.open(spec(), key, {});
   }
 
@@ -32,8 +41,9 @@
   }
 
   function fetchByName(name) {
-    // Try each kind in turn (role first, then user, group, policy).
     var kinds = ["roles", "users", "groups", "policies", "instance-profiles"];
+    var hinted = kindHints[name];
+    if (hinted) kinds = [hinted].concat(kinds.filter(function (k) { return k !== hinted; }));
     var i = 0;
     function tryNext() {
       if (i >= kinds.length) return Promise.resolve({ name: name, kind: "unknown" });
@@ -212,5 +222,5 @@
     window.DASH.registry.registerDrill("iam", spec());
   }
   window.DASH.drills = window.DASH.drills || {};
-  window.DASH.drills.iam = { open: open };
+  window.DASH.drills.iam = { open: open, hint: hint };
 })();

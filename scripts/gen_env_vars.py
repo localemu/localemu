@@ -103,6 +103,10 @@ def extract_default(rhs: str) -> str:
     # is_env_true("VAR") -> bool with implicit False default
     if "is_env_true" in rhs:
         return "0"
+    # is_env_not_false("VAR") -> bool with implicit True default (empty/unset
+    # counts as true; only an explicit false-ish value flips it)
+    if "is_env_not_false" in rhs:
+        return "1"
     # os.environ.get("X", default) / os.getenv("X", default)
     m = re.search(r'(?:os\.environ\.get|os\.getenv)\(\s*"[^"]+"\s*,\s*([^)]+)\)', rhs)
     if m:
@@ -138,7 +142,7 @@ def main() -> int:
                     pending_comments.append(txt)
                 continue
         vm = VAR_RE.match(ln)
-        if vm and ("os.environ" in vm.group(2) or "is_env_true" in vm.group(2) or "os.getenv" in vm.group(2)):
+        if vm and ("os.environ" in vm.group(2) or "is_env_true" in vm.group(2) or "is_env_not_false" in vm.group(2) or "os.getenv" in vm.group(2)):
             name, rhs = vm.group(1), vm.group(2)
             description = " ".join(pending_comments).strip()
             # Trim runaway descriptions to keep the table readable.

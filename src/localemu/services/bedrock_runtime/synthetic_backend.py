@@ -7,6 +7,28 @@ Each model family's real InvokeModel response has its own JSON body shape
 This mirrors each shape closely enough that application code written
 against the real Bedrock API (such as 08-llm-gateway's BedrockLLMClient)
 parses it without changes - the values are synthetic, the shape is real.
+
+Public, stable contract - safe to build a lab/test on this, not an
+implementation detail that might change silently:
+
+* Every synthetic text response embeds the literal marker text
+  ``prompt-digest=<hex>`` where ``<hex>`` is the first 12 hex characters
+  of ``sha256(prompt_bytes).hexdigest()``.
+* ``prompt_bytes`` is model-family-specific, matching whichever field that
+  family's real InvokeModel request body actually carries the prompt in:
+    - **anthropic**: ``json.dumps(body["messages"])`` (or ``body["prompt"]``
+      for the legacy, pre-Messages-API shape) - encoded with Python's
+      default ``json.dumps`` separators (``", "``/``": "``), NOT the
+      compact ``(",", ":")`` form.
+    - **amazon** (Titan text, non-embedding): ``body["inputText"]`` as-is
+      (not JSON-encoded).
+  Any other family currently falls through without a digest; don't rely on
+  one appearing for them.
+* This is unaffected by ``model_id`` - two different Anthropic model IDs
+  given the same ``messages`` produce the same digest.
+* Verified identical in both the current release and the one under
+  development; a change here would be called out explicitly in the
+  changelog as a breaking change to this contract.
 """
 from __future__ import annotations
 

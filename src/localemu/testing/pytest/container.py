@@ -161,15 +161,33 @@ def container_factory() -> Generator[ContainerFactory, None, None]:
     factory.remove_all_containers()
 
 
+# Bounds how long we wait for a test container to report ready. Without a bound, a container
+# that crashes right after `docker create` (e.g. when it's started with `remove=True`, which
+# erases its id and logs the instant it exits) causes an unrecoverable, undiagnosable hang:
+# the whole test run blocks here forever instead of failing with a clear error.
+DEFAULT_CONTAINER_READY_TIMEOUT = 90.0
+
+
 @pytest.fixture(scope="session")
 def wait_for_localemu_ready():
-    def _wait_for(container: RunningContainer, timeout: float | None = None):
-        container.wait_until_ready(timeout)
+    def _wait_for(
+        container: RunningContainer, timeout: float | None = DEFAULT_CONTAINER_READY_TIMEOUT
+    ):
+        if not container.wait_until_ready(timeout):
+            raise TimeoutError(
+                f"Container {container.name} (id={container.id}) did not reach running state "
+                f"within {timeout}s"
+            )
 
-        poll_condition(
+        if not poll_condition(
             lambda: constants.READY_MARKER_OUTPUT in container.get_logs().splitlines(),
             timeout=timeout,
-        )
+        ):
+            raise TimeoutError(
+                f"Container {container.name} (id={container.id}) did not print the ready "
+                f"marker ({constants.READY_MARKER_OUTPUT!r}) within {timeout}s. "
+                f"Last logs:\n{container.get_logs()}"
+            )
 
     return _wait_for
 

@@ -536,12 +536,72 @@ def _handle_list_tags_for_resource(
     return {"Tags": tags.get("Tags", []) if isinstance(tags, dict) else []}
 
 
+def _handle_update_work_group(
+    context: RequestContext, request: ServiceRequest,
+) -> ServiceResponse:
+    """``UpdateWorkGroup`` - moto's Athena backend never implemented this
+    (no ``update_work_group`` method at all), so blue-team fixes that
+    enforce workgroup configuration + SSE-KMS (``ConfigurationUpdates``)
+    had nothing to call. Mutate the real moto ``WorkGroup`` directly."""
+    import moto.backends as moto_backends
+    from localemu.aws.api import CommonServiceException
+
+    name = request.get("WorkGroup") or ""
+    backend = moto_backends.get_backend("athena")[context.account_id][context.region]
+    work_group = backend.work_groups.get(name)
+    if work_group is None:
+        raise CommonServiceException(
+            code="InvalidRequestException",
+            message=f"WorkGroup {name} is not found",
+            status_code=400,
+            sender_fault=True,
+        )
+
+    if "Description" in request:
+        work_group.description = request["Description"]
+    if "State" in request:
+        work_group.state = request["State"]
+
+    updates = request.get("ConfigurationUpdates") or {}
+    cfg = work_group.configuration
+    for key in (
+        "EnforceWorkGroupConfiguration",
+        "PublishCloudWatchMetricsEnabled",
+        "BytesScannedCutoffPerQuery",
+        "RequesterPaysEnabled",
+        "EngineVersion",
+    ):
+        if key in updates:
+            cfg[key] = updates[key]
+    if updates.get("RemoveBytesScannedCutoffPerQuery"):
+        cfg.pop("BytesScannedCutoffPerQuery", None)
+
+    result_updates = updates.get("ResultConfigurationUpdates") or {}
+    if result_updates:
+        result_cfg = cfg.setdefault("ResultConfiguration", {})
+        if result_updates.get("RemoveOutputLocation"):
+            result_cfg.pop("OutputLocation", None)
+        elif "OutputLocation" in result_updates:
+            result_cfg["OutputLocation"] = result_updates["OutputLocation"]
+        if result_updates.get("RemoveEncryptionConfiguration"):
+            result_cfg.pop("EncryptionConfiguration", None)
+        elif "EncryptionConfiguration" in result_updates:
+            result_cfg["EncryptionConfiguration"] = result_updates["EncryptionConfiguration"]
+        if result_updates.get("RemoveExpectedBucketOwner"):
+            result_cfg.pop("ExpectedBucketOwner", None)
+        elif "ExpectedBucketOwner" in result_updates:
+            result_cfg["ExpectedBucketOwner"] = result_updates["ExpectedBucketOwner"]
+
+    return {}
+
+
 _INTERCEPTED_OPS = {
     "StartQueryExecution": _handle_start_query_execution,
     "GetQueryResults": _handle_get_query_results,
     "GetQueryExecution": _handle_get_query_execution,
     "StopQueryExecution": _handle_stop_query_execution,
     "ListTagsForResource": _handle_list_tags_for_resource,
+    "UpdateWorkGroup": _handle_update_work_group,
 }
 
 

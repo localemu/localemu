@@ -412,6 +412,7 @@ def register_dashboard():
         MqBrokerDetailResource,
         MskClusterDetailResource,
         OpenSearchDomainDetailResource,
+        FaviconResource,
         OverviewResource,
         PipeDetailResource,
         RdsInstanceDetailResource,
@@ -429,6 +430,13 @@ def register_dashboard():
         VpcDetailResource,
         Wafv2WebAclDetailResource,
     )
+    from .console_api import (
+        CallsResource,
+        ChangesResource,
+        RequestMetricsResource,
+        ServiceActivityResource,
+        SystemResource,
+    )
     # Importing the registry module populates SERVICE_REGISTRY at boot.
     from . import registry  # noqa: F401
     from .sse import StreamResource, StreamStatsResource
@@ -440,6 +448,11 @@ def register_dashboard():
     # and read CloudTrail with no challenge. _GatedResource also enforces
     # an Origin allow-list on writes for CSRF defence-in-depth.
     G = _GatedResource
+    # Not gated: a favicon carries no sensitive data, and browsers probe
+    # this exact literal path automatically regardless of any <link
+    # rel="icon"> in the dashboard's own HTML - gating it would just
+    # trade one confusing 403 for another.
+    router.add(Resource("/favicon.ico", FaviconResource()))
     router.add(Resource("/_localemu/dashboard", G(DashboardResource())))
     router.add(Resource("/_localemu/api/overview", G(OverviewResource())))
     router.add(Resource("/_localemu/api/registry", G(RegistryResource())))
@@ -492,6 +505,12 @@ def register_dashboard():
     router.add(Resource("/_localemu/api/accounts/<account_id>", G(AccountResource())))
     router.add(Resource("/_localemu/api/accounts/<account_id>/summary", G(AccountSummaryResource())))
     router.add(Resource("/_localemu/api/actions/<service>/<action>", G(ActionsResource())))
+    # 1.4.0 console: instance health + request telemetry.
+    router.add(Resource("/_localemu/api/system", G(SystemResource())))
+    router.add(Resource("/_localemu/api/metrics/requests", G(RequestMetricsResource())))
+    router.add(Resource("/_localemu/api/metrics/services", G(ServiceActivityResource())))
+    router.add(Resource("/_localemu/api/calls", G(CallsResource())))
+    router.add(Resource("/_localemu/api/changes", G(ChangesResource())))
     router.add(Resource("/_localemu/api/stream", G(StreamResource())))
     router.add(Resource("/_localemu/api/stream/stats", G(StreamStatsResource())))
     router.add(Resource("/_localemu/dashboard/static/<path:path>", G(StaticResource())))
@@ -521,6 +540,15 @@ def register_dashboard():
             "Dashboard could not register CloudTrail recording hook",
             exc_info=True,
         )
+
+    # Console request telemetry (latency, principal, IAM denials,
+    # requests/s). Idempotent; failures never block startup.
+    try:
+        from .telemetry import register_telemetry_handlers
+
+        register_telemetry_handlers()
+    except Exception:
+        LOG.warning("Dashboard could not register request telemetry", exc_info=True)
 
     _dashboard_registered = True
     LOG.info("LocalEmu dashboard registered at /_localemu/dashboard")

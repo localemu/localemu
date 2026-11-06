@@ -176,6 +176,7 @@ class TargetSender(ABC):
         region: str,
         account_id: str,
         caller_service_principal: str | None = None,
+        enforce_role_permissions: bool = False,
     ):
         self.target = target
         self.rule_arn = rule_arn
@@ -183,6 +184,7 @@ class TargetSender(ABC):
         self.service = service
         self.region = region
         self.account_id = account_id
+        self.enforce_role_permissions = enforce_role_permissions
         if caller_service_principal is not None:
             self.caller_service_principal = caller_service_principal
 
@@ -343,7 +345,15 @@ class TargetSender(ABC):
             )
         client = client_factory.get_client(self.service)
         client = client.request_metadata(
-            service_principal=service_principal, source_arn=self.rule_arn
+            service_principal=service_principal,
+            source_arn=self.rule_arn,
+            # Opt-in (Pipes, Scheduler): tells the enforcer this call,
+            # although carrying LocalEmu's internal DTO like any other
+            # service-to-service hop, represents a customer-supplied
+            # RoleArn acting on the customer's behalf - its own permission
+            # policy must still gate the action, unlike LocalEmu's own
+            # bookkeeping calls which legitimately bypass enforcement.
+            enforce_role_permissions=self.enforce_role_permissions or None,
         )
         self._register_client_hooks(client)
         return client
@@ -871,6 +881,7 @@ class TargetSenderFactory:
         region: str,
         account_id: str,
         caller_service_principal: str | None = None,
+        enforce_role_permissions: bool = False,
     ):
         self.target = target
         self.rule_arn = rule_arn
@@ -880,6 +891,10 @@ class TargetSenderFactory:
         # Used so EventBridge Scheduler can re-use this factory while
         # assuming the target role as ``scheduler.amazonaws.com``.
         self.caller_service_principal = caller_service_principal
+        # Opt-in (Pipes, Scheduler): the target's RoleArn's own permission
+        # policy, not just its trust policy, gates delivery. EventBridge's
+        # own native rule targets keep the default False unchanged.
+        self.enforce_role_permissions = enforce_role_permissions
 
     @classmethod
     def register_target_sender(cls, service_name: str, sender_class: type[TargetSender]):
@@ -897,6 +912,8 @@ class TargetSenderFactory:
         kwargs = {}
         if self.caller_service_principal is not None:
             kwargs["caller_service_principal"] = self.caller_service_principal
+        if self.enforce_role_permissions:
+            kwargs["enforce_role_permissions"] = True
         target_sender = target_sender_class(
             self.target, self.rule_arn, self.rule_name, service, self.region, self.account_id,
             **kwargs,

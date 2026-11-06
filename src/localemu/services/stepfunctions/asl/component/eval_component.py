@@ -41,9 +41,12 @@ class EvalComponent(Component, abc.ABC):
         if event_details:
             error_log_parts.append(f"Details={to_json_str(event_details)}")
 
-        error_log = ", ".join(error_log_parts)
-        component_repr = repr(self)
-        LOG.error("%s at '%s'", error_log, component_repr)
+        # A failure event is an outcome of the state machine (a Fail state, a
+        # Task error, a Choice with no match), recorded in the execution
+        # history, not a fault of the emulator.
+        if LOG.isEnabledFor(logging.DEBUG):
+            error_log = ", ".join(error_log_parts)
+            LOG.debug("%s at '%s'", error_log, repr(self))
 
     def _log_exception(self, exception: Exception) -> None:
         exception_name = exception.__class__.__name__

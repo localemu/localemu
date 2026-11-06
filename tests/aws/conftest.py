@@ -151,7 +151,6 @@ def snapshot(request, _snapshot_session: SnapshotSession, account_id, region_nam
         "tests/aws/services/sns",
         "tests/aws/services/stepfunctions",
         "tests/aws/services/sqs",
-        "tests/aws/services/transcribe",
         "tests/aws/scenario/bookstore",
         "tests/aws/scenario/note_taking",
         "tests/aws/scenario/lambda_destination",

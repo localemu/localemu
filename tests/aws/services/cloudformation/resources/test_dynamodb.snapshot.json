@@ -1,6 +1,6 @@
 {
   "tests/aws/services/cloudformation/resources/test_dynamodb.py::test_default_name_for_table": {
-    "recorded-date": "13-10-2025, 18:57:55",
+    "recorded-date": "23-10-2026, 13:31:30",
     "recorded-content": {
       "table_description": {
         "Table": {
@@ -10,8 +10,12 @@
               "AttributeType": "S"
             }
           ],
+          "BillingModeSummary": {
+            "BillingMode": "PROVISIONED"
+          },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -19,6 +23,7 @@
               "KeyType": "HASH"
             }
           ],
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 5,
@@ -59,7 +64,7 @@
     }
   },
   "tests/aws/services/cloudformation/resources/test_dynamodb.py::test_billing_mode_as_conditional[PROVISIONED]": {
-    "recorded-date": "13-10-2025, 18:59:26",
+    "recorded-date": "23-10-2026, 14:33:50",
     "recorded-content": {
       "table_description": {
         "Table": {
@@ -69,8 +74,12 @@
               "AttributeType": "S"
             }
           ],
+          "BillingModeSummary": {
+            "BillingMode": "PROVISIONED"
+          },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -80,6 +89,7 @@
           ],
           "LatestStreamArn": "arn:<partition>:dynamodb:<region>:111111111111:table/<table-name:1>/stream/<latest-stream-label:1>",
           "LatestStreamLabel": "<latest-stream-label:1>",
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 5,
@@ -108,7 +118,7 @@
     }
   },
   "tests/aws/services/cloudformation/resources/test_dynamodb.py::test_billing_mode_as_conditional[PAY_PER_REQUEST]": {
-    "recorded-date": "13-10-2025, 19:00:03",
+    "recorded-date": "23-10-2026, 14:33:54",
     "recorded-content": {
       "table_description": {
         "Table": {
@@ -119,11 +129,11 @@
             }
           ],
           "BillingModeSummary": {
-            "BillingMode": "PAY_PER_REQUEST",
-            "LastUpdateToPayPerRequestDateTime": "datetime"
+            "BillingMode": "PAY_PER_REQUEST"
           },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -133,6 +143,7 @@
           ],
           "LatestStreamArn": "arn:<partition>:dynamodb:<region>:111111111111:table/<table-name:1>/stream/<latest-stream-label:1>",
           "LatestStreamLabel": "<latest-stream-label:1>",
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 0,
@@ -161,7 +172,7 @@
     }
   },
   "tests/aws/services/cloudformation/resources/test_dynamodb.py::test_global_table": {
-    "recorded-date": "13-10-2025, 19:01:29",
+    "recorded-date": "23-10-2026, 14:34:00",
     "recorded-content": {
       "table_description": {
         "Table": {
@@ -172,11 +183,11 @@
             }
           ],
           "BillingModeSummary": {
-            "BillingMode": "PAY_PER_REQUEST",
-            "LastUpdateToPayPerRequestDateTime": "datetime"
+            "BillingMode": "PAY_PER_REQUEST"
           },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -184,6 +195,7 @@
               "KeyType": "HASH"
             }
           ],
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 0,

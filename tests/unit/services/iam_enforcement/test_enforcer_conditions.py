@@ -381,3 +381,145 @@ class TestSessionTokenIdentities:
 
         assert "sts:GetSessionToken" in _EXEMPT_ACTIONS
         assert "sts:GetFederationToken" not in _EXEMPT_ACTIONS
+
+
+class TestDynamoDbLeadingKeys:
+    """``dynamodb:LeadingKeys`` is the standard tenant-isolation condition
+    key - it was previously never populated, so a policy conditioning on it
+    silently never matched (the condition was always "absent")."""
+
+    def _ddb_ctx(self, operation_name, service_request, account_id="123456789012", region="us-east-1"):
+        request = SimpleNamespace(headers={}, remote_addr="127.0.0.1", is_secure=False, url="http://x/")
+        return SimpleNamespace(
+            request=request,
+            service_request=service_request,
+            region=region,
+            account_id=account_id,
+            service=SimpleNamespace(service_name="dynamodb"),
+            operation=SimpleNamespace(name=operation_name),
+        )
+
+    def _caller(self):
+        return CallerIdentity(
+            principal_type="User", account_id="123456789012",
+            arn="arn:aws:iam::123456789012:user/alice", username="alice",
+        )
+
+    def _make_table(self, account_id="123456789012", region="us-east-1", table_name="T", hash_key="userId"):
+        import boto3
+
+        ddb = boto3.client("dynamodb", region_name=region)
+        ddb.create_table(
+            TableName=table_name,
+            KeySchema=[{"AttributeName": hash_key, "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": hash_key, "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+    @pytest.fixture(autouse=True)
+    def _aws(self):
+        from moto import mock_aws
+
+        with mock_aws():
+            yield
+
+    def test_get_item_populates_leading_keys_from_the_hash_key(self):
+        self._make_table()
+        ctx = self._ddb_ctx("GetItem", {"TableName": "T", "Key": {"userId": {"S": "alice"}}})
+        conditions = _build_conditions(ctx, self._caller())
+        assert conditions["dynamodb:LeadingKeys"] == "alice"
+
+    def test_put_item_populates_leading_keys_from_item(self):
+        self._make_table()
+        ctx = self._ddb_ctx("PutItem", {"TableName": "T", "Item": {"userId": {"S": "bob"}, "x": {"S": "y"}}})
+        conditions = _build_conditions(ctx, self._caller())
+        assert conditions["dynamodb:LeadingKeys"] == "bob"
+
+    def test_query_is_not_covered_key_absent_not_crashing(self):
+        """Documented scope limit - Query/Scan parsing isn't implemented;
+        must stay absent (not raise, not a wrong guess)."""
+        self._make_table()
+        ctx = self._ddb_ctx("Query", {"TableName": "T", "KeyConditionExpression": "userId = :u"})
+        conditions = _build_conditions(ctx, self._caller())
+        assert "dynamodb:LeadingKeys" not in conditions
+
+    def test_unknown_table_does_not_crash(self):
+        ctx = self._ddb_ctx("GetItem", {"TableName": "NoSuchTable", "Key": {"userId": {"S": "x"}}})
+        conditions = _build_conditions(ctx, self._caller())
+        assert "dynamodb:LeadingKeys" not in conditions
+
+    def test_minimal_context_without_service_attribute_does_not_crash(self):
+        """Regression pin: _build_conditions is also called with the
+        bare-bones fixture used throughout this file (no .service/.operation
+        at all) - must degrade gracefully, not AttributeError."""
+        conditions = _build_conditions(_ctx(), self._caller())
+        assert "dynamodb:LeadingKeys" not in conditions
+
+
+class TestDynamoDbAttributesAndSelect:
+    """``dynamodb:Attributes`` (column-level restriction, e.g. hiding a
+    sensitive attribute via ``ForAllValues:StringEquals``) and
+    ``dynamodb:Select`` (forcing ``SPECIFIC_ATTRIBUTES`` so a caller can't
+    wildcard-read every column) - fine-grained isolation condition keys
+    the tenant-isolation labs (s12/s20) need alongside LeadingKeys."""
+
+    def _ddb_ctx(self, operation_name, service_request):
+        request = SimpleNamespace(headers={}, remote_addr="127.0.0.1", is_secure=False, url="http://x/")
+        return SimpleNamespace(
+            request=request,
+            service_request=service_request,
+            region="us-east-1",
+            account_id="123456789012",
+            service=SimpleNamespace(service_name="dynamodb"),
+            operation=SimpleNamespace(name=operation_name),
+        )
+
+    def _caller(self):
+        return CallerIdentity(
+            principal_type="User", account_id="123456789012",
+            arn="arn:aws:iam::123456789012:user/alice", username="alice",
+        )
+
+    def test_put_item_attributes_from_item_keys(self):
+        ctx = self._ddb_ctx("PutItem", {
+            "TableName": "T",
+            "Item": {"id": {"S": "1"}, "name": {"S": "Alice"}, "ssn": {"S": "x"}},
+        })
+        conditions = _build_conditions(ctx, self._caller())
+        assert sorted(conditions["dynamodb:Attributes"]) == ["id", "name", "ssn"]
+
+    def test_get_item_attributes_from_attributes_to_get_legacy_param(self):
+        ctx = self._ddb_ctx("GetItem", {"TableName": "T", "Key": {}, "AttributesToGet": ["id", "name"]})
+        conditions = _build_conditions(ctx, self._caller())
+        assert conditions["dynamodb:Attributes"] == ["id", "name"]
+
+    def test_get_item_attributes_from_projection_expression_with_placeholders(self):
+        ctx = self._ddb_ctx("GetItem", {
+            "TableName": "T", "Key": {},
+            "ProjectionExpression": "id, #n, meta.nested[0]",
+            "ExpressionAttributeNames": {"#n": "name"},
+        })
+        conditions = _build_conditions(ctx, self._caller())
+        # "meta.nested[0]" reduces to its top-level attribute "meta" -
+        # dynamodb:Attributes only documents top-level attribute names.
+        assert conditions["dynamodb:Attributes"] == ["id", "name", "meta"]
+
+    def test_query_select_is_populated(self):
+        ctx = self._ddb_ctx("Query", {"TableName": "T", "Select": "SPECIFIC_ATTRIBUTES"})
+        conditions = _build_conditions(ctx, self._caller())
+        assert conditions["dynamodb:Select"] == "SPECIFIC_ATTRIBUTES"
+
+    def test_select_absent_for_get_item_not_a_query_or_scan_concept(self):
+        ctx = self._ddb_ctx("GetItem", {"TableName": "T", "Key": {}})
+        conditions = _build_conditions(ctx, self._caller())
+        assert "dynamodb:Select" not in conditions
+
+    def test_update_item_attributes_not_covered_absent_not_crashing(self):
+        """Documented scope limit - UpdateExpression/legacy AttributeUpdates
+        parsing isn't implemented; must stay absent, not a wrong guess."""
+        ctx = self._ddb_ctx("UpdateItem", {
+            "TableName": "T", "Key": {"id": {"S": "1"}},
+            "UpdateExpression": "SET #n = :v", "ExpressionAttributeNames": {"#n": "name"},
+        })
+        conditions = _build_conditions(ctx, self._caller())
+        assert "dynamodb:Attributes" not in conditions

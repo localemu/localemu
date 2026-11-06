@@ -168,6 +168,40 @@ def _sns_topic_tags(arn: str, account_id: str, region: str) -> dict[str, str]:
     return _normalize_tag_list(getattr(topic, "_tags", getattr(topic, "tags", [])))
 
 
+def _secretsmanager_secret_tags(arn: str, account_id: str, region: str) -> dict[str, str]:
+    try:
+        import moto.backends as moto_backends
+
+        backend = moto_backends.get_backend("secretsmanager")[account_id][region]
+        # SecretsStore.get() accepts a full ARN directly and resolves it.
+        secret = backend.secrets.get(arn)
+    except Exception:
+        return {}
+    if secret is None:
+        return {}
+    return _normalize_tag_list(getattr(secret, "tags", []))
+
+
+def _ssm_parameter_tags(arn: str, account_id: str, region: str) -> dict[str, str]:
+    try:
+        import moto.backends as moto_backends
+
+        backend = moto_backends.get_backend("ssm")[account_id][region]
+    except Exception:
+        return {}
+    # ARN shape: arn:aws:ssm:<region>:<account>:parameter/<name-without-leading-slash>.
+    # moto's own parameter store keys everything by the *real* name, which
+    # (unlike the ARN) keeps its leading "/" (e.g. "/goat/s17/param") -
+    # the ARN's resource path never has one, so it must be added back.
+    resource_path = arn.split(":", 5)[-1]
+    name = "/" + resource_path.split("/", 1)[-1] if "/" in resource_path else resource_path
+    try:
+        tags = dict(backend._resource_tags.get("Parameter", {}).get(name, {}))
+    except Exception:
+        return {}
+    return tags
+
+
 def _normalize_tag_list(raw) -> dict[str, str]:
     """Accept moto's various tag shapes: dict, list-of-{Key,Value} dicts,
     list-of-(Key, Value) tuples."""
@@ -195,6 +229,8 @@ _LOADERS = {
     "kms":      _kms_key_tags,             # (arn, account_id, region)
     "sqs":      _sqs_queue_tags,           # (arn, account_id, region)
     "sns":      _sns_topic_tags,           # (arn, account_id, region)
+    "secretsmanager": _secretsmanager_secret_tags,  # (arn, account_id, region)
+    "ssm":      _ssm_parameter_tags,       # (arn, account_id, region)
 }
 
 

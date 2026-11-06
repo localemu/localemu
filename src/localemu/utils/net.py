@@ -200,8 +200,15 @@ def get_free_udp_port(blocklist: list[int] = None) -> int:
 def get_free_tcp_port(blocklist: list[int] = None) -> int:
     """
     Tries to bind a socket to port 0 and returns the port that was assigned by the system. If the port is
-    in the given ``blocklist``, or the port is marked as reserved in ``dynamic_port_range``, the procedure
-    is repeated for up to 50 times.
+    in the given ``blocklist``, or the port cannot be reserved in ``dynamic_port_range``, the procedure is
+    repeated for up to 50 times.
+
+    The check against ``dynamic_port_range`` and the reservation of the port happen atomically (through
+    ``PortRange.reserve_port``), so two concurrent callers racing for the same OS-assigned candidate port
+    cannot both receive it: checking ``is_port_reserved`` and then calling ``mark_reserved`` as two separate
+    steps left a window where both could observe "not reserved" before either marked it, which is exactly
+    the collision this is called under high invocation concurrency (e.g. many simultaneous Lambda
+    invocations each requesting a port).
 
     :param blocklist: an optional list of ports that are not allowed as random ports
     :return: a free TCP port
@@ -212,14 +219,14 @@ def get_free_tcp_port(blocklist: list[int] = None) -> int:
         tcp.bind(("", 0))
         addr, port = tcp.getsockname()
         tcp.close()
-        if port not in blocklist and not dynamic_port_range.is_port_reserved(port):
-            try:
-                dynamic_port_range.mark_reserved(port)
-            except ValueError:
-                # depending on the ephemeral port range of the system, the allocated port may be outside what
-                # we defined as dynamic port range
-                pass
-            return port
+        if port in blocklist:
+            continue
+        try:
+            return dynamic_port_range.reserve_port(port)
+        except PortNotAvailableException:
+            # either outside the configured dynamic port range, already reserved by a concurrent
+            # caller, or no longer bindable - try another candidate
+            continue
     raise Exception(f"Unable to determine free TCP port with blocklist {blocklist}")
 
 

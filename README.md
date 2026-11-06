@@ -147,11 +147,16 @@ http://localhost:4566/_localemu/dashboard
 ```
 
 The dashboard shows:
-- **Service overview** with resource counts and status indicators for all active services
-- **Resource drill-down**: click any service to see tables, buckets, queues, functions, instances, and more
+- **Overview**: endpoint with copyable `AWS_ENDPOINT_URL` exports, version, uptime, IAM enforcement mode, persistence, Docker and Bedrock backend status, a requests-per-second chart with error and denial markers, and a grid of all 132 registered services (32 of them with a live resource counter; the rest show "not counted" instead of a false 0)
+- **Resource drill-down**: click any service to see tables, buckets, queues, functions, instances, IAM roles/users/policies, and more
 - **S3 object browser** and **DynamoDB item viewer** with click-through navigation
-- **CloudTrail event history** with expandable request/response details
-- **Live activity feed** showing API calls as they happen, filterable by service
+- **Command palette** (`Cmd+K`, `Ctrl+K`, or `/`) to jump to any service, resource, or action
+- **Live call panel**: every AWS call with status, error code, principal, resource, account, and handling time — filterable by errors, writes, account, or LocalEmu-internal calls, pausable, and expandable to the full CloudTrail record
+- **Account switcher** to scope the console to one of your accounts
+- **CloudTrail event history** filterable by account and service, with expandable request/response details and the principal of each event
+- Light and dark themes that follow the OS preference until picked manually
+
+Write actions are available for S3 buckets, SQS queues, SNS topics, and DynamoDB tables directly from the console; other services show the sample AWS CLI command to create them.
 
 The dashboard starts automatically with LocalEmu. No configuration needed.
 
@@ -283,8 +288,7 @@ will vary with hardware, but the shape of these numbers won't:
 First call to a given model pays both the Docker pull (one-time,
 network-bound — minutes for an 8B+ model on a slow connection) *and* this
 load time (every time the model has to come off disk into RAM — not
-one-time). Subsequent calls to an already-warm model are fast
-(tens of milliseconds).
+one-time).
 
 **A 16GB machine cannot keep two 8B-class models warm at once.** Ollama
 unloads a model after ~5 minutes idle (`OLLAMA_KEEP_ALIVE`) or sooner if

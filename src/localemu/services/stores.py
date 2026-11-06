@@ -30,7 +30,7 @@ While not recommended, store classes may define member helper functions and prop
 import re
 from collections.abc import Callable, Iterator
 from threading import RLock
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from localemu import config
 from localemu.utils.aws.aws_stack import get_valid_regions_for_service
@@ -188,7 +188,7 @@ class BaseStore:
 #
 
 
-class RegionBundle[BaseStoreType](dict):
+class RegionBundle(dict, Generic[BaseStoreType]):
     """
     Encapsulation for stores across all regions for a specific AWS account ID.
     """
@@ -279,7 +279,7 @@ class RegionBundle[BaseStoreType](dict):
             self.clear()
 
 
-class AccountRegionBundle[BaseStoreType](dict):
+class AccountRegionBundle(dict, Generic[BaseStoreType]):
     """
     Encapsulation for all stores for all AWS account IDs.
     """

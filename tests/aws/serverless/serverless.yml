@@ -186,7 +186,7 @@ functions:
           startingPosition: TRIM_HORIZON
   kinesisConsumerHandler:
     handler: handler.processKinesis
-    runtime: python3.9
+    runtime: python3.11
     events:
       - stream:
           type: kinesis

@@ -1309,6 +1309,10 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
         global_table_region = self.get_global_table_region(context, table_name)
         result = self._forward_request(context=context, region=global_table_region)
         self.fix_consumed_capacity(query_input, result)
+        if query_input.get("Select") == "COUNT":
+            # Real DynamoDB never returns `Items` for Select=COUNT, only Count/ScannedCount.
+            # The backend we forward to doesn't honor that, so strip it here to match AWS.
+            result.pop("Items", None)
         return result
 
     @handler("Scan", expand=False)
@@ -1323,6 +1327,10 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
         )
         global_table_region = self.get_global_table_region(context, table_name)
         result = self._forward_request(context=context, region=global_table_region)
+        if scan_input.get("Select") == "COUNT":
+            # Real DynamoDB never returns `Items` for Select=COUNT, only Count/ScannedCount.
+            # The backend we forward to doesn't honor that, so strip it here to match AWS.
+            result.pop("Items", None)
         return result
 
     #

@@ -1,4 +1,7 @@
+import json
 import logging
+import os
+import re
 import threading
 
 from moto.iam.models import (
@@ -6,6 +9,7 @@ from moto.iam.models import (
     AWSManagedPolicy,
     IAMBackend,
     InlinePolicy,
+    ManagedPolicy,
     Policy,
     User,
 )
@@ -42,6 +46,40 @@ ADDITIONAL_MANAGED_POLICIES = {
         "UpdateDate": "2019-05-20T18:22:18+00:00",
     }
 }
+
+_IAM_PRINCIPAL_ARN = re.compile(r"^arn:aws[a-z-]*:iam::(\d{12}):(user|role)/(?:.*/)?([^/]+)$")
+
+
+def _validate_trust_principals(backend, document: str) -> None:
+    """Reject a trust policy that names an IAM user or role that does not exist.
+
+    AWS resolves every ``Principal: {"AWS": "arn:...:user|role/<name>"}`` when the policy is
+    saved and answers ``MalformedPolicyDocument: Invalid principal in policy`` for a missing one.
+    That answer is what lets an outsider test whether a role exists in somebody else's account,
+    so it is only enforced in enforcement mode, where LocalEmu behaves like a hardened account.
+    """
+    if os.environ.get("IAM_ENFORCEMENT", "").strip().lower() not in ("1", "soft"):
+        return
+    from moto.iam.exceptions import MalformedPolicyDocument
+    from moto.iam.models import iam_backends
+
+    try:
+        statements = json.loads(document).get("Statement") or []
+    except (ValueError, AttributeError):
+        return
+    for statement in [statements] if isinstance(statements, dict) else statements:
+        principal = statement.get("Principal") if isinstance(statement, dict) else None
+        aws = principal.get("AWS") if isinstance(principal, dict) else None
+        for arn in [aws] if isinstance(aws, str) else (aws or []):
+            match = _IAM_PRINCIPAL_ARN.match(str(arn))
+            if not match:
+                continue
+            account_id, kind, name = match.groups()
+            other = iam_backends[account_id]["global"]
+            exists = name in (other.users if kind == "user" else {r.name: r for r in other.roles.values()})
+            if not exists:
+                raise MalformedPolicyDocument(f'Invalid principal in policy: "AWS":"{arn}"')
+
 
 IAM_PATCHED = False
 IAM_PATCH_LOCK = threading.RLock()
@@ -110,6 +148,21 @@ def _do_iam_patches():
         if "tags" in kwargs and TAG_KEY_CUSTOM_ID in kwargs["tags"]:
             self.id = kwargs["tags"][TAG_KEY_CUSTOM_ID]["Value"]
 
+    # moto's own ``update_default_version`` clears ``is_default`` when
+    # called with the version that is *already* the default: it loops over
+    # ``self.versions`` once, and for the matching version both the "set
+    # new default" and the "clear old default" branches fire in the same
+    # iteration (old == new), with the clear running last. Real AWS is a
+    # no-op in that case - the version stays the default. Without this fix,
+    # calling SetDefaultPolicyVersion on the current default leaves every
+    # version with IsDefaultVersion=False and DeletePolicyVersion then
+    # refuses to delete it ("Cannot delete the default version").
+    @patch(ManagedPolicy.update_default_version)
+    def managed_policy_update_default_version(fn, self, new_default_version_id: str):
+        if new_default_version_id == self.default_version_id:
+            return
+        fn(self, new_default_version_id)
+
     @patch(IAMBackend.create_role)
     def iam_backend_create_role(
         fn,
@@ -123,6 +176,7 @@ def _do_iam_patches():
         max_session_duration: str | None,
         linked_service: str | None = None,
     ):
+        _validate_trust_principals(self, assume_role_policy_document)
         role = fn(
             self,
             role_name,
@@ -141,6 +195,11 @@ def _do_iam_patches():
             role.id = new_id
             self.roles[new_id] = self.roles.pop(old_id)
         return role
+
+    @patch(IAMBackend.update_assume_role_policy)
+    def iam_backend_update_assume_role_policy(fn, self, role_name: str, policy_document: str):
+        _validate_trust_principals(self, policy_document)
+        return fn(self, role_name, policy_document)
 
     @patch(InlinePolicy.unapply_policy)
     def inline_policy_unapply_policy(fn, self, backend):

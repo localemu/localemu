@@ -200,3 +200,87 @@ def test_invalid_json_trust_doc_denies():
         caller_arn="arn:aws:iam::000000000000:user/alice",
         caller_account_id="000000000000",
     ) is False
+
+
+# --- Condition evaluation uses the real IAM condition engine -------------
+# (not just hand-checked sts:ExternalId / aws:MultiFactorAuthPresent)
+
+
+def _role_with_condition(condition: dict) -> SimpleNamespace:
+    trust = {
+        "Version": "2012-10-17",
+        "Statement": {
+            "Effect": "Allow",
+            "Principal": {"AWS": "arn:aws:iam::000000000000:root"},
+            "Action": "sts:AssumeRole",
+            "Condition": condition,
+        },
+    }
+    return _role_with_trust_doc(trust)
+
+
+def test_external_id_condition_still_enforced():
+    role = _role_with_condition({"StringEquals": {"sts:ExternalId": "secret"}})
+    common = dict(caller_arn="arn:aws:iam::000000000000:root", caller_account_id="000000000000")
+
+    assert _evaluate_trust_policy(role, **common) is False
+    assert _evaluate_trust_policy(role, external_id="wrong", **common) is False
+    assert _evaluate_trust_policy(role, external_id="secret", **common) is True
+
+
+def test_mfa_condition_still_enforced():
+    role = _role_with_condition({"Bool": {"aws:MultiFactorAuthPresent": "true"}})
+    common = dict(caller_arn="arn:aws:iam::000000000000:root", caller_account_id="000000000000")
+
+    assert _evaluate_trust_policy(role, **common) is False
+    assert _evaluate_trust_policy(role, serial_number="arn:aws:iam::000000000000:mfa/root", **common) is True
+
+
+def test_principal_tag_condition_on_trust_policy_is_enforced(monkeypatch):
+    """A trust policy can require the CALLER to already carry a tag before it
+    may assume the role - this used to be silently ignored (anyone could
+    assume regardless of their own tags)."""
+    role = _role_with_condition({"StringEquals": {"aws:PrincipalTag/Department": "Trusted"}})
+    common = dict(
+        caller_arn="arn:aws:iam::000000000000:user/attacker",
+        caller_account_id="000000000000",
+        access_key_id="AKIAEXAMPLE",
+    )
+
+    import localemu.services.iam_enforcement.identity as identity_module
+
+    def _fake_resolve_caller(access_key_id, account_id, region):
+        return SimpleNamespace(tags={"aws:PrincipalTag/Department": "Untrusted"})
+
+    monkeypatch.setattr(identity_module, "resolve_caller", _fake_resolve_caller)
+    assert _evaluate_trust_policy(role, **common) is False
+
+    def _fake_resolve_caller_trusted(access_key_id, account_id, region):
+        return SimpleNamespace(tags={"aws:PrincipalTag/Department": "Trusted"})
+
+    monkeypatch.setattr(identity_module, "resolve_caller", _fake_resolve_caller_trusted)
+    assert _evaluate_trust_policy(role, **common) is True
+
+
+def test_request_tag_condition_on_trust_policy_checks_the_assume_role_calls_own_session_tags():
+    """``aws:RequestTag/*`` on a trust policy is about the session tags passed
+    TO this AssumeRole call, not the role's own tags."""
+    role = _role_with_condition({"StringEquals": {"aws:RequestTag/Project": "Phoenix"}})
+    common = dict(caller_arn="arn:aws:iam::000000000000:root", caller_account_id="000000000000")
+
+    assert _evaluate_trust_policy(role, **common) is False
+    assert _evaluate_trust_policy(
+        role, session_tags=[{"Key": "Project", "Value": "WrongProject"}], **common
+    ) is False
+    assert _evaluate_trust_policy(
+        role, session_tags=[{"Key": "Project", "Value": "Phoenix"}], **common
+    ) is True
+
+
+def test_source_identity_condition_on_trust_policy():
+    role = _role_with_condition({"StringEquals": {"sts:SourceIdentity": "alice"}})
+    common = dict(caller_arn="arn:aws:iam::000000000000:root", caller_account_id="000000000000")
+
+    assert _evaluate_trust_policy(role, **common) is False
+    assert _evaluate_trust_policy(role, source_identity="bob", **common) is False
+    assert _evaluate_trust_policy(role, source_identity="alice", **common) is True

@@ -84,11 +84,47 @@ def _sns_arn(params: dict, region: str, account_id: str) -> str:
     return f"arn:aws:sns:{region}:{account_id}:{topic_name}"
 
 
+def _ecr_arn(params: dict, region: str, account_id: str) -> str:
+    # ECR's JSON-protocol field name is the lowercase-first
+    # ``repositoryName`` (confirmed against botocore's own service model) -
+    # the generic fallback only checks the PascalCase ``RepositoryName``,
+    # which never matches, so every ECR call evaluated against a wildcard
+    # resource and a Resource-scoped (or repository-policy) statement could
+    # never pin down which repository was actually targeted.
+    repo_name = params.get("repositoryName") or params.get("RepositoryName", "*")
+    if repo_name.startswith("arn:"):
+        return repo_name
+    return f"arn:aws:ecr:{region}:{account_id}:repository/{repo_name}"
+
+
 def _kms_arn(params: dict, region: str, account_id: str) -> str:
-    key_id = params.get("KeyId", "*")
+    key_id = params.get("KeyId")
+    if not key_id:
+        # Decrypt/ReEncrypt don't require a KeyId - the key is determined
+        # by the ciphertext itself, same as real AWS. Without this, every
+        # Decrypt call evaluated against a "key/*" wildcard resource,
+        # silently matching a Resource-scoped policy (or grant) for the
+        # WRONG key as long as a wildcard-resource statement existed.
+        ciphertext = params.get("CiphertextBlob")
+        if ciphertext:
+            key_id = _key_id_from_ciphertext(ciphertext)
+    if not key_id:
+        key_id = "*"
     if key_id.startswith("arn:"):
         return key_id
     return f"arn:aws:kms:{region}:{account_id}:key/{key_id}"
+
+
+def _key_id_from_ciphertext(ciphertext_blob) -> str | None:
+    """Best-effort peek at a moto-structured ciphertext blob's key_id,
+    without decrypting anything (same deserializer moto's own Decrypt uses
+    before it reaches for the key material)."""
+    try:
+        from moto.kms.utils import _deserialize_ciphertext_blob
+
+        return _deserialize_ciphertext_blob(ciphertext_blob=ciphertext_blob).key_id
+    except Exception:
+        return None
 
 
 def _secretsmanager_arn(params: dict, region: str, account_id: str) -> str:
@@ -139,7 +175,17 @@ def _bedrock_runtime_arn(params: dict, region: str, account_id: str) -> str:
 
 def _events_arn(params: dict, region: str, account_id: str) -> str:
     rule_name = params.get("Name", "")
-    event_bus = params.get("EventBusName", "default")
+    # PutEvents has no top-level EventBusName -- each entry in the
+    # Entries list carries its own. All entries in a single call
+    # conventionally target the same bus, so the first entry's is
+    # representative; falling through to the top-level param (and then
+    # "default") still covers every other events:* action, which does
+    # carry EventBusName at the top level.
+    entries = params.get("Entries")
+    if entries and isinstance(entries, list) and entries[0].get("EventBusName"):
+        event_bus = entries[0]["EventBusName"]
+    else:
+        event_bus = params.get("EventBusName", "default")
     if rule_name:
         return f"arn:aws:events:{region}:{account_id}:rule/{event_bus}/{rule_name}"
     return f"arn:aws:events:{region}:{account_id}:event-bus/{event_bus}"
@@ -275,6 +321,7 @@ _SERVICE_ARN_BUILDERS = {
     "sqs": _sqs_arn,
     "sns": _sns_arn,
     "kms": _kms_arn,
+    "ecr": _ecr_arn,
     "secretsmanager": _secretsmanager_arn,
     "ec2": _ec2_arn,
     "ecs": _ecs_arn,

@@ -49,6 +49,7 @@ LOG = logging.getLogger(__name__)
 #     just obtained (GetUser, ChangePassword, UpdateUserAttributes,
 #     etc.). Cognito's own provider handles the AccessToken validation;
 #     blocking these at the SigV4 layer breaks every UI sign-in flow.
+#   * Cognito Identity pools' credential calls (GetId, GetCredentialsForIdentity, ...).
 _EXEMPT_ACTIONS = {
     "sts:GetCallerIdentity",
     "sts:GetSessionToken",
@@ -72,6 +73,12 @@ _EXEMPT_ACTIONS = {
     "cognito-idp:SetUserMFAPreference",
     "cognito-idp:GlobalSignOut",
     "cognito-idp:RevokeToken",
+    # Cognito Identity pools: the calls an app makes before it has any AWS credentials. AWS
+    # requires no signature for them; the pool's configuration decides what the caller gets.
+    "cognito-identity:GetId",
+    "cognito-identity:GetCredentialsForIdentity",
+    "cognito-identity:GetOpenIdToken",
+    "cognito-identity:UnlinkIdentity",
 }
 
 
@@ -125,6 +132,14 @@ class IAMEnforcementHandler(Handler):
         commit message for the full threat-model rationale.
         """
         if context.is_internal_call:
+            # Opt-out: Pipes/Scheduler target delivery sets
+            # ``enforce_role_permissions`` on the DTO to say "I am LocalEmu
+            # plumbing, but I'm acting as a customer-supplied RoleArn - its
+            # own permission policy must still gate this action," rather
+            # than the usual "LocalEmu's own bookkeeping, always exempt."
+            internal_params = getattr(context, "internal_request_params", None) or {}
+            if internal_params.get("enforce_role_permissions"):
+                return False
             return True
         if access_key and access_key in (
             _lemu_constants.INTERNAL_AWS_ACCESS_KEY_ID,
@@ -151,9 +166,11 @@ class IAMEnforcementHandler(Handler):
         # permission, and ``s3:ListBuckets`` requires
         # ``s3:ListAllMyBuckets``. Without this translation, a correctly
         # written policy gets denied on the wire.
-        from localemu.services.iam_enforcement.service_action_map import map_action
+        from localemu.services.iam_enforcement.service_action_map import iam_service_prefix, map_action
 
-        iam_actions = map_action(service_name, context.operation.name)
+        iam_actions = map_action(
+            service_name, context.operation.name, request_params=context.service_request
+        )
         # For exempt/log purposes, surface the *first* mapped action (this
         # is what users see in the AccessDenied message). The evaluator
         # below loops over every entry and only allows the call when
@@ -219,7 +236,7 @@ class IAMEnforcementHandler(Handler):
 
         # Build resource ARN
         resource_arn = build_resource_arn(
-            service=service_name,
+            service=iam_service_prefix(service_name),
             operation=context.operation.name,
             request_params=context.service_request,
             region=context.region or "us-east-1",
@@ -240,6 +257,15 @@ class IAMEnforcementHandler(Handler):
         resource_policy = _get_resource_policy(
             service_name, resource_arn, context.account_id, context.region
         )
+
+        # If this request arrived through a VPC endpoint, fetch that
+        # endpoint's policy so it can be evaluated as its own AND-gate.
+        endpoint_policy = None
+        vpc_endpoint_id = _vpc_endpoint_id_for_request(context)
+        if vpc_endpoint_id:
+            endpoint_policy = _get_endpoint_policy(
+                vpc_endpoint_id, context.account_id or "000000000000", context.region or "us-east-1",
+            )
 
         # S3 Access Point: when the request was routed through an AP,
         # the AP policy is consulted alongside the bucket policy. AWS
@@ -311,7 +337,16 @@ class IAMEnforcementHandler(Handler):
                 resource=resource_arn,
                 conditions=conditions,
                 resource_policy=resource_policy,
+                endpoint_policy=endpoint_policy,
             )
+            if decision == Decision.IMPLICIT_DENY and service_name == "kms" and _kms_grant_allows(
+                caller.arn, iam_action, resource_arn, context.account_id or "000000000000", context.region or "us-east-1",
+            ):
+                # A grant is an alternate allow path, not an override of an
+                # identity/key-policy EXPLICIT deny - only steps in for the
+                # "nothing said yes" case, matching AWS's documented grant
+                # semantics.
+                decision = Decision.ALLOW
             if decision != Decision.ALLOW:
                 action = iam_action  # surface the failing action in the error
                 break
@@ -394,6 +429,118 @@ def _get_user_id(caller) -> str | None:
     return None
 
 
+_DDB_SINGLE_ITEM_KEY_PARAM = {
+    "GetItem": "Key",
+    "DeleteItem": "Key",
+    "PutItem": "Item",
+    "UpdateItem": "Key",
+}
+
+
+def _dynamodb_leading_key(context: RequestContext) -> str | None:
+    """Extract the partition-key VALUE this DynamoDB request targets, for
+    ``dynamodb:LeadingKeys``. Only the single-item operations are covered -
+    see the call site's comment for why Query/Scan/Batch* are out of scope.
+    """
+    try:
+        params = context.service_request or {}
+        key_param = _DDB_SINGLE_ITEM_KEY_PARAM.get(getattr(context.operation, "name", ""))
+        if not key_param:
+            return None
+        item_or_key = params.get(key_param)
+        table_name = params.get("TableName")
+        if not isinstance(item_or_key, dict) or not table_name:
+            return None
+
+        import moto.backends as moto_backends
+
+        backend = moto_backends.get_backend("dynamodb")[context.account_id or "000000000000"][
+            context.region or "us-east-1"
+        ]
+        table = backend.tables.get(table_name)
+        hash_key_attr = getattr(table, "hash_key_attr", None) if table else None
+    except Exception:
+        LOG.debug("dynamodb:LeadingKeys resolution failed", exc_info=True)
+        return None
+    if not hash_key_attr:
+        return None
+    typed_value = item_or_key.get(hash_key_attr)
+    if not isinstance(typed_value, dict):
+        return None
+    # DynamoDB JSON: {"S": "..."}/{"N": "..."}/{"B": b"..."} - LeadingKeys is
+    # defined over string-typed partition keys; non-string types have no
+    # documented AWS condition-key representation, so they're left absent
+    # rather than guessed at.
+    return typed_value.get("S")
+
+
+def _parse_projection_expression(expr: str, expr_attr_names: dict | None) -> list[str]:
+    """Split a ``ProjectionExpression`` into bare attribute names,
+    resolving ``#placeholder`` tokens via ``ExpressionAttributeNames``.
+    Nested paths (``a.b``, ``a[0]``) are reduced to their top-level
+    attribute - AWS's own ``dynamodb:Attributes`` condition key is
+    documented as matching top-level attribute names only."""
+    names = []
+    for raw in expr.split(","):
+        token = raw.strip().split(".", 1)[0].split("[", 1)[0].strip()
+        if not token:
+            continue
+        if token.startswith("#") and expr_attr_names:
+            token = expr_attr_names.get(token, token)
+        names.append(token)
+    return names
+
+
+def _dynamodb_attributes(context: RequestContext) -> list[str] | None:
+    """Extract the top-level attribute NAMES this request touches, for
+    ``dynamodb:Attributes`` - the condition key AWS documents for
+    column-level restriction (e.g. hiding a sensitive attribute from a
+    role via ``ForAllValues:StringEquals``). Covers the operations where
+    "which attributes" has an unambiguous, simple answer:
+      * GetItem/Query/Scan - ``AttributesToGet`` (legacy) or
+        ``ProjectionExpression``.
+      * PutItem - every top-level key of ``Item``.
+    UpdateItem's ``UpdateExpression``/legacy ``AttributeUpdates`` are a
+    small expression grammar in their own right and are deliberately not
+    parsed here rather than guessed at approximately.
+    """
+    try:
+        params = context.service_request or {}
+        op = getattr(context.operation, "name", "")
+        expr_attr_names = params.get("ExpressionAttributeNames")
+
+        if op == "PutItem":
+            item = params.get("Item")
+            if isinstance(item, dict):
+                return list(item.keys())
+            return None
+
+        if op in ("GetItem", "Query", "Scan"):
+            attrs_to_get = params.get("AttributesToGet")
+            if isinstance(attrs_to_get, list) and attrs_to_get:
+                return list(attrs_to_get)
+            projection = params.get("ProjectionExpression")
+            if isinstance(projection, str) and projection.strip():
+                return _parse_projection_expression(projection, expr_attr_names)
+            return None
+    except Exception:
+        LOG.debug("dynamodb:Attributes resolution failed", exc_info=True)
+    return None
+
+
+def _dynamodb_select(context: RequestContext) -> str | None:
+    """``dynamodb:Select`` - the ``Select`` request parameter on
+    Query/Scan (e.g. restricting a caller to ``SPECIFIC_ATTRIBUTES`` so
+    they can never request every column with a single wildcard call)."""
+    try:
+        if getattr(context.operation, "name", "") not in ("Query", "Scan"):
+            return None
+        return (context.service_request or {}).get("Select")
+    except Exception:
+        LOG.debug("dynamodb:Select resolution failed", exc_info=True)
+        return None
+
+
 def _build_conditions(context: RequestContext, caller) -> dict:
     """Build the condition context for policy evaluation.
 
@@ -424,6 +571,22 @@ def _build_conditions(context: RequestContext, caller) -> dict:
         "aws:UserAgent": context.request.headers.get("User-Agent", ""),
         "aws:RequestedRegion": context.region or "us-east-1",
     }
+    # aws:SourceVpce / aws:SourceVpc - only present when this request
+    # arrived through a VPC endpoint (see _vpc_endpoint_id_for_request).
+    # AWS documents both as ABSENT (not merely empty) otherwise, so the
+    # condition evaluator's *IfExists operators behave correctly - do not
+    # default these to "" for a non-endpoint request.
+    endpoint_id = _vpc_endpoint_id_for_request(context)
+    if endpoint_id:
+        conditions["aws:SourceVpce"] = endpoint_id
+        try:
+            from localemu.services.ec2.docker.vpc_endpoint import get_vpc_endpoint_manager
+
+            vpc_id = get_vpc_endpoint_manager().get_vpc_id_for_endpoint(endpoint_id)
+            if vpc_id:
+                conditions["aws:SourceVpc"] = vpc_id
+        except Exception:
+            LOG.debug("Failed to resolve aws:SourceVpc for endpoint %s", endpoint_id, exc_info=True)
     # aws:MultiFactorAuthPresent is ABSENT when the credentials weren't minted
     # via MFA, and "true" only for sessions from AssumeRole/GetSessionToken with
     # --serial-number. Per AWS: BoolIfExists conditions rely on absence to tell
@@ -476,6 +639,25 @@ def _build_conditions(context: RequestContext, caller) -> dict:
             conditions[f"aws:RequestTag/{key}"] = value
         if tag_keys:
             conditions["aws:TagKeys"] = tag_keys
+
+    # dynamodb:LeadingKeys — the partition-key VALUE this request targets,
+    # the standard tenant-isolation condition key
+    # (``Condition: {"ForAllValues:StringEquals": {"dynamodb:LeadingKeys": ["${aws:userid}"]}}``
+    # restricts a caller to items whose partition key is their own id).
+    # Covers the single-item operations (Get/Put/Update/DeleteItem); Query's
+    # KeyConditionExpression parsing and Scan (which AWS itself documents as
+    # not restrictable by LeadingKeys - there is no "the key" for a full
+    # table scan) are not covered here.
+    if getattr(getattr(context, "service", None), "service_name", None) == "dynamodb":
+        leading_key = _dynamodb_leading_key(context)
+        if leading_key is not None:
+            conditions["dynamodb:LeadingKeys"] = leading_key
+        attributes = _dynamodb_attributes(context)
+        if attributes is not None:
+            conditions["dynamodb:Attributes"] = attributes
+        select = _dynamodb_select(context)
+        if select is not None:
+            conditions["dynamodb:Select"] = select
 
     # aws:ResourceTag/<key> — pull tags for the target resource via the
     # per-service loader. Best-effort: when the service / backend shape is
@@ -571,44 +753,62 @@ def _build_conditions(context: RequestContext, caller) -> dict:
     return conditions
 
 
-def _resolve_kms_key_id(backend, resource_arn: str) -> str | None:
-    """Turn any KMS ARN / alias / bare id into the UUID key_id used by moto.
+def _resolve_native_kms_key(account_id: str, region: str, resource_arn_or_id: str):
+    """Resolve a KMS key (LocalEmu's own ``KmsKey`` object) from an ARN,
+    alias, alias ARN, or bare key id.
 
-    KMS accepts four reference forms:
-      - ``arn:aws:kms:region:acct:key/<uuid>``
-      - ``arn:aws:kms:region:acct:alias/<alias-name>``
-      - ``alias/<alias-name>``
-      - bare ``<uuid>``
-
-    ``backend.key_to_aliases`` has flipped direction between moto versions
-    (some store ``{alias: {key_id}}`` and some ``{key_id: {alias, ...}}``); we
-    handle both shapes rather than rely on moto's own
-    ``get_key_id_from_alias`` which is broken for the inverted form.
+    LocalEmu re-implements KMS (``services/kms/models.py``'s own
+    ``kms_stores``) rather than using moto's native backend - same as S3
+    and DynamoDB. Reuses the KMS provider's own canonical id resolver
+    rather than duplicating its ARN/alias parsing.
     """
-    if not resource_arn:
+    if not resource_arn_or_id:
         return None
-    tail = resource_arn.rsplit(":", 1)[-1] if resource_arn.startswith("arn:") else resource_arn
+    try:
+        from localemu.services.kms.models import kms_stores
+        from localemu.services.kms.provider import KmsProvider
 
-    if tail.startswith("alias/"):
-        alias_name = tail
-    elif tail.startswith("key/"):
-        return tail.split("/", 1)[1]
-    elif "/" not in tail:
-        # Bare UUID (or a key_id that happens not to have a prefix)
-        return tail
-    else:
-        # Unknown shape — last-segment fallback matches the old best-effort
-        return tail.rsplit("/", 1)[-1]
+        key_id = KmsProvider._get_key_id_from_any_id(account_id, region, resource_arn_or_id)
+        return kms_stores[account_id][region].keys.get(key_id)
+    except Exception:
+        LOG.debug("KMS key lookup failed for %s", resource_arn_or_id, exc_info=True)
+        return None
 
-    alias_map = getattr(backend, "key_to_aliases", None) or {}
-    for k, v in alias_map.items():
-        if k == alias_name and v:
-            # {alias: {key_id, ...}} form
-            return next(iter(v))
-        if isinstance(v, (set, list, tuple)) and alias_name in v:
-            # {key_id: {alias, ...}} form
-            return k
-    return None
+
+def _kms_grant_allows(caller_arn: str, action: str, resource_arn: str, account_id: str, region: str) -> bool:
+    """True if an active ``kms:CreateGrant`` grant on this key authorises
+    ``caller_arn`` to perform ``action``.
+
+    Grants are an AWS-documented alternate authorization path: a grant lets
+    its ``GranteePrincipal`` perform the granted operations on the key even
+    when neither the identity policy nor the key policy would otherwise
+    allow it. They were previously stored (moto's own, never-populated
+    backend) but never consulted during authorization - only an
+    identity/resource-policy Allow ever worked, so ``CreateGrant`` had no
+    actual effect.
+    """
+    if not action.startswith("kms:"):
+        return False
+    operation = action.split(":", 1)[1]
+    key = _resolve_native_kms_key(account_id, region, resource_arn)
+    if not key:
+        return False
+    key_id = key.metadata.get("KeyId")
+    try:
+        from localemu.services.kms.models import kms_stores
+
+        store = kms_stores[account_id][region]
+        for grant in store.grants.values():
+            meta = grant.metadata
+            if (
+                meta.get("KeyId") == key_id
+                and meta.get("GranteePrincipal") == caller_arn
+                and operation in (meta.get("Operations") or [])
+            ):
+                return True
+    except Exception:
+        LOG.debug("KMS grant lookup failed for %s on %s", caller_arn, resource_arn, exc_info=True)
+    return False
 
 
 def _get_resource_policy(service: str, resource_arn: str, account_id: str, region: str) -> dict | None:
@@ -659,13 +859,32 @@ def _get_resource_policy(service: str, resource_arn: str, account_id: str, regio
                     return json.loads(policy)
 
         elif service == "kms":
-            from moto.kms.models import kms_backends
-            backend = kms_backends[account_id][region]
-            key_id = _resolve_kms_key_id(backend, resource_arn)
-            if key_id:
-                key = backend.keys.get(key_id)
-                if key and getattr(key, "policy", None):
-                    return json.loads(key.policy)
+            # LocalEmu re-implements KMS (services/kms/models.py's own
+            # ``kms_stores``) rather than using moto's native KMS backend,
+            # same as S3. ``moto.kms.models.kms_backends`` is never
+            # populated by LocalEmu's KMS provider, so reading key
+            # policy/grants from it silently always returned nothing - a
+            # key policy Deny targeting a specific principal had no effect.
+            key = _resolve_native_kms_key(account_id, region, resource_arn)
+            if key and getattr(key, "policy", None):
+                return json.loads(key.policy)
+
+        elif service == "ecr":
+            from moto.ecr.models import ecr_backends
+
+            backend = ecr_backends[account_id][region]
+            repo_name = resource_arn.rsplit(":repository/", 1)[-1]
+            repo = backend.repositories.get(repo_name)
+            if repo and getattr(repo, "policy", None):
+                return json.loads(repo.policy)
+
+        elif service == "secretsmanager":
+            from moto.secretsmanager.models import secretsmanager_backends
+
+            backend = secretsmanager_backends[account_id][region]
+            secret = backend.secrets.get(resource_arn)
+            if secret and getattr(secret, "policy", None):
+                return json.loads(secret.policy)
 
         elif service in ("lambda", "lambda_"):
             # Lambda function resource policy lives on the Function object
@@ -708,6 +927,45 @@ def _get_resource_policy(service: str, resource_arn: str, account_id: str, regio
     except Exception as e:
         LOG.debug("Failed to get resource policy for %s: %s", resource_arn, e)
 
+    return None
+
+
+def _vpc_endpoint_id_for_request(context: RequestContext) -> str | None:
+    """Return the VPC endpoint ID this request arrived through, or None for
+    a request that didn't (the common case - a direct call from the host,
+    or from a container with no VPC endpoint in the path).
+
+    Set by ``handlers.tag_vpc_endpoint`` (``aws/handlers/vpc_endpoint.py``),
+    which runs earlier in the request handler chain - it reads the local
+    port the connection was accepted on (``SERVER_PORT``) and resolves it
+    against the VPC-endpoint-proxy listener registry. Each proxy forwards
+    to a dedicated host-side port rather than everyone sharing :4566,
+    because on Docker Desktop all container->host traffic is NATed to
+    127.0.0.1 by vpnkit - source-IP based attribution was tried, tested
+    live, and verified to never work on that platform; the port it arrived
+    on is the only signal that survives the NAT.
+    """
+    return getattr(context, "vpc_endpoint_id", None)
+
+
+def _get_endpoint_policy(endpoint_id: str, account_id: str, region: str) -> dict | None:
+    """Retrieve the policy attached to a VPC endpoint from moto's EC2 backend.
+
+    ``VPCEndPoint.policy_document`` is always a JSON string - moto sets it to
+    an Allow-all default (``{"Effect":"Allow","Principal":"*","Action":"*",
+    "Resource":"*"}``) when no custom policy was supplied at creation, so a
+    caller never has to special-case "endpoint has no policy" vs. "endpoint
+    has the default policy": both parse to the same permissive document.
+    """
+    try:
+        from moto.ec2.models import ec2_backends
+
+        backend = ec2_backends[account_id][region]
+        endpoint = backend.vpc_end_points.get(endpoint_id)
+        if endpoint is not None and endpoint.policy_document:
+            return json.loads(endpoint.policy_document)
+    except Exception as e:
+        LOG.debug("Failed to get VPC endpoint policy for %s: %s", endpoint_id, e)
     return None
 
 

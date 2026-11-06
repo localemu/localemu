@@ -1,6 +1,6 @@
 """Real-Docker integration test for the ENI lifecycle.
 
-Tarek's rule: 'unit tests are good, but the truth is E2E'.
+Rule of thumb: unit tests are good, but the truth is E2E.
 
 This test exercises the full ENI control plane against a live Docker
 daemon. It does NOT go through the EC2 provider HTTP API (that path is

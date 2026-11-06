@@ -1,5 +1,6 @@
 import abc
 import copy
+from typing import Generic, TypeVar
 
 from localemu.services.stepfunctions.asl.component.eval_component import EvalComponent
 from localemu.services.stepfunctions.asl.component.state.state import CommonStateField
@@ -15,7 +16,10 @@ from localemu.services.stepfunctions.backend.test_state.test_state_mock import (
 )
 
 
-class MockedBaseState[T: CommonStateField](abc.ABC):
+T = TypeVar("T", bound=CommonStateField)
+
+
+class MockedBaseState(abc.ABC, Generic[T]):
     is_single_state: bool
     _wrapped: T
 

@@ -69,9 +69,17 @@ class TestNetworksForExecutor:
         with mock.patch.object(
             dre, "get_all_container_networks_for_lambda",
             return_value=["localemu-main"],
-        ):
+        ), mock.patch(
+            "localemu.services.ec2.docker.vpc_network.get_vpc_network_manager"
+        ) as mock_get_mgr:
+            mock_get_mgr.return_value.ensure_network_for_vpc.return_value = (
+                "localemu-vpc-vpc-abc"
+            )
             nets = ex._get_networks_for_executor()
         assert nets == ["localemu-main", "localemu-vpc-vpc-abc"]
+        mock_get_mgr.return_value.ensure_network_for_vpc.assert_called_once_with(
+            "vpc-abc"
+        )
         # Primary (first) is still the control-plane network so the Lambda
         # runtime can reach host.docker.internal:4566.
         assert nets[0] == "localemu-main"
@@ -96,6 +104,11 @@ class TestNetworksForExecutor:
         with mock.patch.object(
             dre, "get_all_container_networks_for_lambda",
             return_value=["net-a", "net-b"],
-        ):
+        ), mock.patch(
+            "localemu.services.ec2.docker.vpc_network.get_vpc_network_manager"
+        ) as mock_get_mgr:
+            mock_get_mgr.return_value.ensure_network_for_vpc.return_value = (
+                "localemu-vpc-vpc-123"
+            )
             nets = ex._get_networks_for_executor()
         assert nets == ["net-a", "net-b", "localemu-vpc-vpc-123"]

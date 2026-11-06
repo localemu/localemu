@@ -61,7 +61,7 @@ def test_noop_when_bridge_already_matches_pool():
 
 
 def test_shifts_pool_when_bridge_fell_back():
-    """The collision case Tarek hit: subnet was registered with
+    """A real collision case: subnet was registered with
     aws_cidr=docker_cidr=10.86.1.0/24, then the VPC bridge fell back
     to 10.0.0.0/16. Realign must force-re-register the pool with
     docker_cidr=10.0.1.0/24 so the next reserve returns an IP Docker

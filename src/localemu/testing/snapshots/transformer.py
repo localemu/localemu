@@ -62,9 +62,6 @@ def _register_serialized_reference_replacement(
         SNAPSHOT_LOGGER.error(message)
         raise TransformerException(message)
 
-    if '"' in reference_value:
-        reference_value = reference_value.replace('"', '\\"')
-
     cache = transform_context._cache.setdefault("regexcache", set())
     cache_key = reference_value
     if cache_key not in cache:
@@ -72,11 +69,20 @@ def _register_serialized_reference_replacement(
         cache.add(cache_key)
 
         def _helper(bound_result, bound_replacement):
+            # `bound_result` always originates as a complete JSON string value (captured via
+            # jsonpath from the snapshotted dict itself), so its only legitimate match in the
+            # serialized text is its own quoted occurrence. Matching the bare substring instead
+            # corrupts unrelated data that happens to contain it incidentally (e.g. a short
+            # numeric value like a sequence number "1" matching inside an unrelated base64
+            # blob), producing invalid JSON.
+            quoted_result = json.dumps(bound_result)
+            quoted_replacement = json.dumps(bound_replacement)
+
             def replace_val(s):
                 SNAPSHOT_LOGGER.debug(
                     f"Replacing '{bound_result}' in snapshot with '{bound_replacement}'"
                 )
-                return s.replace(bound_result, bound_replacement, -1)
+                return s.replace(quoted_result, quoted_replacement, -1)
 
             return replace_val
 

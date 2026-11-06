@@ -26,15 +26,19 @@ CONTAINER_NAME = "localemu-bedrock-ollama"
 IMAGE = "ollama/ollama:latest"
 CONTAINER_LABEL = "localemu.service=bedrock-ollama"
 
+_OLLAMA_PORT = 11434
+
 _lock = threading.Lock()
 _host_port: int | None = None
+_base_url: str | None = None
 _pulled_tags: set[str] = set()
 
 
 def _ensure_container() -> int:
     """Start the shared Ollama container if it isn't already running.
 
-    Returns the host port it's reachable on. Thread-safe and idempotent -
+    Returns the host port it is published on (see ``_url`` for the address
+    this process reaches it at). Thread-safe and idempotent -
     safe to call before every InvokeModel.
     """
     global _host_port
@@ -84,26 +88,56 @@ def _ensure_container() -> int:
         DOCKER_CLIENT.create_container_from_config(config)
         DOCKER_CLIENT.start_container(CONTAINER_NAME)
 
-        _wait_for_ready(host_port)
         _host_port = host_port
-        LOG.info("Ollama sidecar ready on port %s", host_port)
+        LOG.info("Ollama sidecar started on port %s", host_port)
         return _host_port
 
 
-def _wait_for_ready(port: int, timeout: int = 60) -> None:
+def _candidate_urls(host_port: int) -> list[str]:
+    """Where the sidecar may be reachable from this process.
+
+    When LocalEmu itself runs in a container, ``localhost:<published port>`` is
+    that container, not the Docker host, so the sidecar's own address on the
+    Docker network is tried first. ``localhost:<published port>`` stays as the
+    fallback for LocalEmu running directly on the host (Docker Desktop does not
+    route to container addresses from the host).
+    """
+    urls = []
+    try:
+        if ip := DOCKER_CLIENT.get_container_ip(CONTAINER_NAME):
+            urls.append(f"http://{ip}:{_OLLAMA_PORT}")
+    except Exception:
+        pass
+    urls.append(f"http://localhost:{host_port}")
+    return urls
+
+
+def _wait_for_ready(host_port: int, timeout: int = 60) -> str:
+    """Wait until the sidecar answers and return the base URL that worked."""
     import time
 
     import requests
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            if requests.get(f"http://localhost:{port}/api/tags", timeout=3).status_code == 200:
-                return
-        except Exception:
-            pass
+        for url in _candidate_urls(host_port):
+            try:
+                if requests.get(f"{url}/api/tags", timeout=3).status_code == 200:
+                    return url
+            except Exception:
+                pass
         time.sleep(1)
     raise RuntimeError(f"Ollama sidecar did not become ready within {timeout}s")
+
+
+def _url() -> str:
+    """Base URL of the running sidecar, starting it first if needed."""
+    global _base_url
+    host_port = _ensure_container()
+    with _lock:
+        if _base_url is None:
+            _base_url = _wait_for_ready(host_port)
+        return _base_url
 
 
 def ensure_model_pulled(tag: str) -> None:
@@ -115,13 +149,13 @@ def ensure_model_pulled(tag: str) -> None:
     """
     if tag in _pulled_tags:
         return
-    port = _ensure_container()
+    base = _url()
 
     import requests
 
     LOG.info("Pulling Ollama model %s (this can take a while on first use)...", tag)
     with requests.post(
-        f"http://localhost:{port}/api/pull", json={"name": tag}, stream=True, timeout=None,
+        f"{base}/api/pull", json={"name": tag}, stream=True, timeout=None,
     ) as resp:
         resp.raise_for_status()
         for line in resp.iter_lines():
@@ -141,7 +175,7 @@ def ensure_model_pulled(tag: str) -> None:
 
 def generate(tag: str, prompt: str, system: str | None = None) -> str:
     ensure_model_pulled(tag)
-    port = _ensure_container()
+    base = _url()
 
     import requests
 
@@ -149,7 +183,7 @@ def generate(tag: str, prompt: str, system: str | None = None) -> str:
     if system:
         payload["system"] = system
     resp = requests.post(
-        f"http://localhost:{port}/api/generate", json=payload, timeout=300,
+        f"{base}/api/generate", json=payload, timeout=300,
     )
     resp.raise_for_status()
     return resp.json().get("response", "")
@@ -157,12 +191,12 @@ def generate(tag: str, prompt: str, system: str | None = None) -> str:
 
 def embed(tag: str, text: str) -> list[float]:
     ensure_model_pulled(tag)
-    port = _ensure_container()
+    base = _url()
 
     import requests
 
     resp = requests.post(
-        f"http://localhost:{port}/api/embeddings",
+        f"{base}/api/embeddings",
         json={"model": tag, "prompt": text},
         timeout=120,
     )

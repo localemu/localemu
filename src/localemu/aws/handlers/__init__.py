@@ -16,6 +16,7 @@ from . import (
     throttling,
     tracing,
     validation,
+    vpc_endpoint,
 )
 
 handle_runtime_shutdown = internal.RuntimeShutdownHandler()
@@ -38,6 +39,7 @@ log_response = logging.ResponseLogger()
 handle_service_exception = service.ServiceExceptionSerializer()
 handle_internal_failure = fallback.InternalFailureHandler()
 simulate_throttling = throttling.ThrottlingHandler()
+tag_vpc_endpoint = vpc_endpoint.VpcEndpointContextEnricher()
 serve_custom_service_request_handlers = chain.CompositeHandler()
 serve_localemu_resources = internal.LocalemuResourceHandler()
 run_custom_response_handlers = chain.CompositeResponseHandler()

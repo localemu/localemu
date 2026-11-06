@@ -97,6 +97,40 @@ def _handle_create_cluster(
         # Extract Kubernetes version from request
         kubernetes_version = request.get("version")
 
+        # endpointPrivateAccess: real network isolation (join the VPC's
+        # Docker bridge, block the public port at the host level) rather
+        # than metadata-only echo-back. Resolving vpc_id from the first
+        # subnet ID mirrors how services/ec2/docker/vpc_network.py's
+        # ``get_vpc_id_for_subnet`` is used elsewhere for the same
+        # "subnets imply a VPC" lookup - EKS's CreateCluster request has
+        # no direct ``vpcId`` field, only ``resourcesVpcConfig.subnetIds``.
+        vpc_config = request.get("resourcesVpcConfig") or {}
+        endpoint_private_access = bool(vpc_config.get("endpointPrivateAccess"))
+        vpc_id = None
+        if endpoint_private_access:
+            subnet_ids = vpc_config.get("subnetIds") or []
+            if subnet_ids:
+                try:
+                    from localemu.services.ec2.docker.vpc_network import (
+                        get_vpc_network_manager,
+                    )
+                    vpc_id = get_vpc_network_manager().get_vpc_id_for_subnet(
+                        subnet_ids[0], context.account_id, context.region,
+                    )
+                except Exception:
+                    LOG.debug(
+                        "EKS %s: failed to resolve VPC from subnet %s",
+                        cluster_name, subnet_ids[0], exc_info=True,
+                    )
+            if not vpc_id:
+                LOG.warning(
+                    "EKS %s: endpointPrivateAccess=true but no VPC could be "
+                    "resolved from resourcesVpcConfig.subnetIds=%s - private "
+                    "access will NOT be enforced; the API server stays "
+                    "reachable at its public endpoint.",
+                    cluster_name, subnet_ids,
+                )
+
         if cluster_name:
             # Return CREATING status immediately, create in
             # background. The status has to be written into moto's stored
@@ -120,6 +154,8 @@ def _handle_create_cluster(
                         kubernetes_version=kubernetes_version,
                         account_id=context.account_id,
                         region=context.region,
+                        endpoint_private_access=endpoint_private_access,
+                        vpc_id=vpc_id,
                     )
                     # Update the Moto cluster object with endpoint and CA cert
                     try:
@@ -207,7 +243,6 @@ def _handle_describe_cluster(
     """DescribeCluster: let Moto return the record, then enrich with real details.
 
     Add platformVersion, kubernetesNetworkConfig, identity.oidc.
-    QUALITY-02/Expose kubeconfig via response.
     """
     result = call_moto(context)
 
@@ -225,9 +260,6 @@ def _handle_describe_cluster(
                 cluster["endpoint"] = info.endpoint
                 cluster["certificateAuthority"] = {"data": info.ca_cert_data}
                 cluster["status"] = info.status
-                # QUALITY-02/Expose kubeconfig for tools that need it
-                if info.kubeconfig:
-                    cluster["kubeconfig"] = info.kubeconfig
 
     # Add missing fields that AWS returns
     if result.get("cluster"):
@@ -383,12 +415,10 @@ def _handle_kubeconfig_route(request, cluster_name: str):
     AWS's ``eks update-kubeconfig`` emits an ``exec: aws eks get-token``
     auth section that depends on the real AWS CLI + STS — not workable
     against LocalEmu, where the cluster is a local k3d. The
-    ``cluster.kubeconfig`` field LocalEmu attaches to DescribeCluster
-    can't survive moto's response schema either (botocore strips fields
-    not in the service model). This route exposes the kubeconfig
-    verbatim so
+    EKS service model has no kubeconfig field on DescribeCluster. This
+    route exposes the kubeconfig verbatim so
 
-        curl http://localhost:4566/_localemu/eks/<name>/kubeconfig > kc.yaml
+        curl http://localhost:4566/_localemu_eks/<name>/kubeconfig > kc.yaml
         kubectl --kubeconfig kc.yaml get nodes
 
     just works.

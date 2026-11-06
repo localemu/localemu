@@ -140,11 +140,13 @@
             DASH.utils.showToast("Instance ID copied", "ok");
           } },
         { id: "stop", label: "Stop",
+          visible: function (row) { return row.state === "running"; },
           run: function (row) {
             DASH.utils.copyToClipboard("awsemu ec2 stop-instances --instance-ids " + row.instance_id);
             DASH.utils.showToast("Copied stop command", "ok");
           } },
         { id: "start", label: "Start",
+          visible: function (row) { return row.state === "stopped"; },
           run: function (row) {
             DASH.utils.copyToClipboard("awsemu ec2 start-instances --instance-ids " + row.instance_id);
             DASH.utils.showToast("Copied start command", "ok");

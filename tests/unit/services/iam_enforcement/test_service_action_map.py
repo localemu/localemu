@@ -168,3 +168,39 @@ def test_bedrock_runtime_uses_the_bedrock_iam_prefix() -> None:
     assert map_action("bedrock-runtime", "InvokeModelWithResponseStream") == [
         "bedrock:InvokeModelWithResponseStream"
     ]
+
+
+def test_stepfunctions_calls_are_authorised_as_states_actions():
+    assert map_action("stepfunctions", "DescribeExecution") == ["states:DescribeExecution"]
+
+
+def test_services_whose_iam_prefix_differs_from_the_client_name():
+    assert map_action("elbv2", "DescribeLoadBalancers") == ["elasticloadbalancing:DescribeLoadBalancers"]
+    assert map_action("opensearch", "DescribeDomain") == ["es:DescribeDomain"]
+    assert map_action("lambda", "ListFunctions") == ["lambda:ListFunctions"]
+
+
+def test_api_gateway_management_calls_use_http_verbs():
+    assert map_action("apigateway", "GetRestApis") == ["apigateway:GET"]
+    assert map_action("apigateway", "CreateRestApi") == ["apigateway:POST"]
+    assert map_action("apigateway", "UpdateStage") == ["apigateway:PATCH"]
+    assert map_action("apigateway", "DeleteRestApi") == ["apigateway:DELETE"]
+
+
+def test_s3_get_object_requires_get_object_version_when_version_id_is_present():
+    """A GetObject/DeleteObject call that includes a ``VersionId`` (even the
+    literal ``"null"`` AWS uses for pre-versioning objects) requires the
+    ...Version IAM action on real AWS, not the unversioned one."""
+    assert map_action("s3", "GetObject", {"Bucket": "b", "Key": "k"}) == ["s3:GetObject"]
+    assert map_action(
+        "s3", "GetObject", {"Bucket": "b", "Key": "k", "VersionId": "abc123"}
+    ) == ["s3:GetObjectVersion"]
+    assert map_action(
+        "s3", "GetObject", {"Bucket": "b", "Key": "k", "VersionId": "null"}
+    ) == ["s3:GetObjectVersion"]
+    assert map_action("s3", "DeleteObject", {"Bucket": "b", "Key": "k"}) == ["s3:DeleteObject"]
+    assert map_action(
+        "s3", "DeleteObject", {"Bucket": "b", "Key": "k", "VersionId": "abc123"}
+    ) == ["s3:DeleteObjectVersion"]
+    assert map_action("s3", "GetObject", None) == ["s3:GetObject"]
+    assert map_action("apigatewayv2", "GetApis") == ["apigateway:GET"]

@@ -201,7 +201,7 @@ def wait_active():
 
 @step("06-invoke-function-and-verify-handler-ran")
 def invoke():
-    payload = {"who": "tarek", "tag": TAG}
+    payload = {"who": "localemu", "tag": TAG}
     r = lam.invoke(
         FunctionName=FN_NAME,
         Payload=json.dumps(payload).encode(),

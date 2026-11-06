@@ -83,3 +83,4 @@ gen/
 *.raw.snapshot.json
 
 .test_durations
+.local_test_reports/

@@ -88,3 +88,39 @@ def test_responses_are_labeled_synthetic():
     """Anyone reading a response should immediately see it's not a real model."""
     body = synthetic_backend.invoke("meta.llama3-1-8b-instruct-v1:0", {"prompt": "hi"})
     assert "synthetic" in body["generation"].lower()
+
+
+class TestPromptDigestIsAPublicContract:
+    """Labs build attack chains on top of ``prompt-digest=<hex>`` (using it
+    as an XOR key, an ``sts:ExternalId``, etc). Pins the EXACT formula
+    documented in the module docstring, not just "a digest exists" - a
+    change to the hash, truncation length, or JSON separators would
+    silently break every lab depending on it without any test failing
+    elsewhere."""
+
+    def test_anthropic_digest_matches_sha256_of_default_json_dumps_messages(self):
+        import hashlib
+        import json
+
+        messages = [{"role": "user", "content": "hello world"}]
+        body = synthetic_backend.invoke(
+            "anthropic.claude-3-haiku-20240307-v1:0", {"messages": messages},
+        )
+        expected = hashlib.sha256(json.dumps(messages).encode()).hexdigest()[:12]
+        assert f"prompt-digest={expected}" in body["content"][0]["text"]
+
+    def test_anthropic_digest_is_unaffected_by_model_id(self):
+        messages = [{"role": "user", "content": "same prompt"}]
+        a = synthetic_backend.invoke("anthropic.claude-3-haiku-20240307-v1:0", {"messages": messages})
+        b = synthetic_backend.invoke("anthropic.claude-3-5-sonnet-20241022-v2:0", {"messages": messages})
+        digest_a = a["content"][0]["text"].split("prompt-digest=")[1].split("]")[0]
+        digest_b = b["content"][0]["text"].split("prompt-digest=")[1].split("]")[0]
+        assert digest_a == digest_b
+
+    def test_amazon_titan_digest_matches_sha256_of_raw_input_text(self):
+        import hashlib
+
+        text = "hello world"
+        body = synthetic_backend.invoke("amazon.titan-text-express-v1", {"inputText": text})
+        expected = hashlib.sha256(text.encode()).hexdigest()[:12]
+        assert f"prompt-digest={expected}" in body["results"][0]["outputText"]

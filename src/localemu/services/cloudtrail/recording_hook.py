@@ -39,7 +39,37 @@ LOG = logging.getLogger(__name__)
 # ordering property without adding a real dependency on wall-clock timing
 # for the common case (direct PutEvents delivery to archives is unaffected
 # and stays synchronous).
-_EVB_FORWARDING_DELAY_SECONDS = 60
+#
+# The delays are measured, not guessed. On a real AWS account (us-east-1,
+# 20 to 40 events per API, delivery timed from the API call to the
+# EventBridge target) latency differs by service: IAM, STS, Secrets Manager,
+# EC2 and ECR deliver in a few seconds, S3 and SSM in 5 to 8 s, CloudWatch
+# Logs in 13 s, Lambda, DynamoDB, SQS and SNS in 16 to 18 s.
+# Each service below uses its measured median (the slowest API of that
+# service when several were measured). Services without a measurement use
+# the default, which is the median of all measured events.
+_EVB_FORWARDING_DELAY_SECONDS = 5.3
+
+_EVB_FORWARDING_DELAY_BY_SERVICE = {
+    "iam": 2.4,
+    "sts": 2.1,
+    "secretsmanager": 1.8,
+    "ec2": 3.4,
+    "ecr": 3.4,
+    "ssm": 5.3,
+    "s3": 7.7,
+    "logs": 12.6,
+    "sqs": 16.5,
+    "sns": 16.3,
+    "lambda": 17.5,
+    "dynamodb": 18.0,
+}
+
+
+def _forwarding_delay(service_name: str) -> float:
+    return _EVB_FORWARDING_DELAY_BY_SERVICE.get(
+        (service_name or "").lower(), _EVB_FORWARDING_DELAY_SECONDS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +173,7 @@ def _emit_cloudtrail_to_eventbridge(
                 exc_info=True,
             )
 
-    timer = threading.Timer(_EVB_FORWARDING_DELAY_SECONDS, _deliver)
+    timer = threading.Timer(_forwarding_delay(service_name), _deliver)
     timer.daemon = True
     timer.start()
 
@@ -157,6 +187,44 @@ def _emit_cloudtrail_to_eventbridge(
 # identity, so that hot reloads importing a fresh module object still
 # recognise an already-registered handler.
 # ---------------------------------------------------------------------------
+def _caller_identity(access_key_id: str, account_id: str, region: str) -> tuple[dict | None, str | None]:
+    """CloudTrail's ``userIdentity`` for the caller and its ``Username``, from the IAM state.
+
+    Temporary credentials are reported as an assumed role (with the role as session issuer), the
+    account's own keys as Root, unsigned calls as the anonymous principal. ``(None, None)`` when
+    the key cannot be resolved, which keeps the legacy "IAM user named after the key" shape.
+    """
+    try:
+        from localemu.constants import ANONYMOUS_ACCESS_KEY_ID
+        from localemu.services.iam_enforcement.identity import resolve_caller
+
+        if not access_key_id or access_key_id == ANONYMOUS_ACCESS_KEY_ID:
+            return {"type": "AWSAccount", "principalId": "", "accountId": "ANONYMOUS_PRINCIPAL"}, "ANONYMOUS_PRINCIPAL"
+        caller = resolve_caller(access_key_id, account_id, "us-east-1")
+        if caller is None:
+            return None, None
+        base = {"accountId": caller.account_id, "accessKeyId": access_key_id}
+        if caller.principal_type == "Root":
+            return {"type": "Root", "principalId": caller.account_id, "arn": caller.arn, **base}, "root"
+        if caller.principal_type == "User":
+            return {"type": "IAMUser", "principalId": access_key_id, "arn": caller.arn, "userName": caller.username, **base}, caller.username
+        if caller.principal_type == "AssumedRole":
+            issuer = f"arn:aws:iam::{caller.account_id}:role/{caller.role_name}"
+            return {
+                "type": "AssumedRole",
+                "principalId": f"{caller.role_name}:{caller.session_name}",
+                "arn": caller.arn,
+                "sessionContext": {
+                    "sessionIssuer": {"type": "Role", "arn": issuer, "accountId": caller.account_id, "userName": caller.role_name},
+                    "attributes": {"mfaAuthenticated": "false"},
+                },
+                **base,
+            }, caller.session_name
+    except Exception:  # noqa: BLE001
+        LOG.debug("CloudTrail: could not resolve caller identity", exc_info=True)
+    return None, None
+
+
 def cloudtrail_activity_handler(chain, context, response):
     """Record API activity to the CloudTrail event store (single source of truth)."""
     try:
@@ -280,6 +348,7 @@ def cloudtrail_activity_handler(chain, context, response):
             if context.request:
                 source_ip = getattr(context.request, "remote_addr", None) or "127.0.0.1"
 
+            user_identity, identity_name = _caller_identity(access_key_id, account_id, region)
             event = create_event_from_context(
                 service_name=service_name,
                 operation_name=operation_name,
@@ -289,7 +358,8 @@ def cloudtrail_activity_handler(chain, context, response):
                 user_agent=user_agent,
                 request_id=request_id,
                 access_key_id=access_key_id,
-                username=access_key_id or "localemu",
+                username=identity_name or access_key_id or "localemu",
+                user_identity=user_identity,
                 error_code=error_code,
                 error_message=error_message,
                 service_request=service_request,

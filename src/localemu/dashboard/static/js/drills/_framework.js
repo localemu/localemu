@@ -154,6 +154,10 @@
     html += '<span class="tier-badge ' + badge.cls + '">' + u.esc(badge.label) + '</span>';
     if (subtitleHtml) html += '<span class="drill-subtitle">' + u.esc(subtitleHtml) + '</span>';
     (spec.actions || []).forEach(function (a) {
+      // Optional per-row visibility (e.g. EC2's Start only makes sense on
+      // a stopped instance, Stop only on a running one) - actions with no
+      // `visible` predicate render unconditionally, same as before.
+      if (typeof a.visible === "function" && !a.visible(row)) return;
       var cls = "row-action" + (a.primary ? " primary" : "") + (a.destructive ? " destructive" : "");
       html += '<button class="' + cls + '" data-drill-action="' + u.esc(a.id) + '">' + u.esc(a.label) + '</button>';
     });
@@ -369,7 +373,16 @@
     // Strip our extra-hop service-id suffixes like "events.amazonaws.com"
     // that CloudTrail does not natively produce.
     var f = { eventSource: source };
-    var rn = row.name || row.key || row.arn || row.key_id || row.id;
+    // Resource id field names vary by service/row shape (S3 uses `name`,
+    // KMS `key_id`, EC2 `instance_id`, etc.) - without a match here,
+    // `resourceName` silently never gets set and this tab falls back to
+    // every event for the whole SERVICE, not this specific resource
+    // (e.g. an EC2 instance's "Recent activity" showing CreateVpc/
+    // CreateSubnet/CreateSecurityGroup from unrelated setup calls).
+    var rn = row.name || row.key || row.arn || row.key_id || row.id ||
+      row.instance_id || row.cluster_id || row.cluster_name || row.table_name ||
+      row.function_name || row.queue_name || row.topic_arn || row.bucket ||
+      row.db_instance_identifier || row.domain_id;
     if (rn) f.resourceName = String(rn);
     return f;
   }

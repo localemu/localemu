@@ -65,7 +65,6 @@ def _build_self_signed_cert(host: str, serial_number: int) -> tuple[str, str]:
 
     san_general_names: list[x509.GeneralName] = [
         x509.DNSName("localhost"),
-        x509.DNSName("test.localhost.atlassian.io"),
     ]
     if host and host != "localhost":
         try:

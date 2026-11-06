@@ -55,11 +55,20 @@ class ServiceSpec:
     copy_cmd_template: str | None = None
     banner: str | None = None
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    # False for dashboard-only navigation entries that aren't a real,
+    # distinct AWS service/API (e.g. "vpc", which is part of the ec2 API
+    # in real AWS and in botocore). Excluded from any "N AWS services"
+    # count so the dashboard's own headline figures match the one
+    # source of truth (scripts/generate_coverage.py / coverage.json),
+    # while staying fully visible, searchable, and drillable like any
+    # other registered entry.
+    aws_service: bool = True
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "tier": self.tier.value,
+            "aws_service": self.aws_service,
             "label": self.label,
             "group": self.group,
             "icon": self.icon,
@@ -100,6 +109,16 @@ def all_specs() -> list[ServiceSpec]:
 
 def by_tier(tier: Tier) -> list[ServiceSpec]:
     return [s for s in all_specs() if s.tier is tier]
+
+
+def aws_service_names() -> set[str]:
+    """Names of real, distinct AWS services in the registry.
+
+    Excludes dashboard-only navigation entries (currently just "vpc")
+    so any "N AWS services" count matches the one source of truth,
+    scripts/generate_coverage.py / coverage.json.
+    """
+    return {s.name for s in all_specs() if s.aws_service}
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +294,11 @@ _register(ServiceSpec(
 _register(ServiceSpec(
     name="vpc", tier=Tier.LIVE, label="VPC", group="networking",
     always_show=True,
+    # Not a real, distinct AWS service: VPC operations are part of the
+    # ec2 API in both real AWS and botocore. This is a dashboard-only
+    # navigation convenience for browsing VPC resources separately from
+    # the rest of EC2 -- see the aws_service field on ServiceSpec.
+    aws_service=False,
     columns=("VPC ID", "CIDR", "Subnets", "IGW", "Default", "Docker network", "Region"),
     empty_state=(
         "awsemu ec2 create-vpc --cidr-block 10.0.0.0/16  "
@@ -292,10 +316,6 @@ _register(ServiceSpec(
 ))
 _register(ServiceSpec(
     name="cognito-idp", tier=Tier.LIVE, label="Cognito User Pools", group="security",
-))
-_register(ServiceSpec(
-    name="transcribe", tier=Tier.LIVE, label="Transcribe", group="ml",
-    banner="Real speech-to-text via Vosk (model downloads on first job per language).",
 ))
 _register(ServiceSpec(
     name="cloudfront", tier=Tier.LIVE, label="CloudFront", group="networking",
@@ -377,8 +397,8 @@ _register(ServiceSpec(
     copy_cmd_template="awsemu glue get-database --name {name}",
 ))
 _register(ServiceSpec(
-    name="wafv2", tier=Tier.METADATA, label="WAFv2", group="security",
-    banner="Metadata only: web ACLs, IP sets, regex sets, and rule groups are stored but no request inspection runs.",
+    name="wafv2", tier=Tier.LIVE, label="WAFv2", group="security",
+    banner="Real enforcement for ALB: ByteMatch/SizeConstraint/RegexPatternSet/IPSet statements (plus And/Or/Not) actually Block/Allow/Count a request's traffic through an associated ALB. CloudFront and API Gateway associations are still metadata only - no request inspection runs there yet.",
     columns=("Name", "Kind", "Scope", "Rules", "Associated", "Region"),
     empty_state=(
         "awsemu wafv2 create-web-acl --name demo --scope REGIONAL "
@@ -386,6 +406,40 @@ _register(ServiceSpec(
         "--rules '[]'"
     ),
     copy_cmd_template="awsemu wafv2 get-web-acl --name {name} --scope REGIONAL --id <id>",
+))
+_register(ServiceSpec(
+    name="bedrock-runtime", tier=Tier.LIVE, label="Bedrock Runtime", group="ml",
+    banner="InvokeModel runs for real: BEDROCK_BACKEND=synthetic (default, deterministic) or =ollama (real local inference via a Docker sidecar).",
+    columns=("Model ID", "Backend", "Last Invoked"),
+    empty_state=(
+        "awsemu bedrock-runtime invoke-model --model-id anthropic.claude-3-haiku-20240307-v1:0 "
+        "--body '{\"prompt\":\"Hello\"}' --cli-binary-format raw-in-base64-out out.json"
+    ),
+    copy_cmd_template="awsemu bedrock-runtime invoke-model --model-id {name} --body '{{}}' --cli-binary-format raw-in-base64-out out.json",
+))
+_register(ServiceSpec(
+    name="sts", tier=Tier.LIVE, label="STS", group="security",
+    always_show=True,
+    banner=(
+        "Every temporary-credential path is real: AssumeRole, AssumeRoleWithWebIdentity "
+        "(including OIDC trust-policy condition matching), GetSessionToken and GetFederationToken "
+        "all mint working credentials IAM enforcement actually checks. STS has no persisted "
+        "resource of its own to list here (real AWS doesn't either) - watch calls to it in the "
+        "live panel or CloudTrail events instead."
+    ),
+    empty_state="awsemu sts get-caller-identity",
+))
+_register(ServiceSpec(
+    name="ec2-instance-connect", tier=Tier.LIVE, label="EC2 Instance Connect", group="compute",
+    banner=(
+        "SendSSHPublicKey pushes a real key into the target EC2 instance's real Docker container, "
+        "usable immediately over SSH. There's no persisted resource to list here (real AWS doesn't "
+        "have one either) - watch calls to it in the live panel or CloudTrail events instead."
+    ),
+    empty_state=(
+        "awsemu ec2-instance-connect send-ssh-public-key --instance-id {instance_id} "
+        "--instance-os-user ubuntu --ssh-public-key file://id_rsa.pub"
+    ),
 ))
 
 

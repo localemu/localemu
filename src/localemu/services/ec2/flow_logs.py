@@ -31,7 +31,7 @@ LOG = logging.getLogger(__name__)
 
 # Backwards-compat: when no subscription matches an entry, fall back
 # to this group so dashboards built against the legacy path keep
-# seeing records. Tarek can opt out via FLOW_LOGS_LEGACY_GROUP=0.
+# seeing records. Opt out via FLOW_LOGS_LEGACY_GROUP=0.
 LEGACY_GROUP = "/localemu/vpc-flow-logs"
 
 

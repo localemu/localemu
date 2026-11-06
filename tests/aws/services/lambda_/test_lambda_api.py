@@ -11,7 +11,6 @@ Don't add tests for asynchronous, blocking or implicit behavior here.
 
 import base64
 import io
-import itertools
 import json
 import logging
 import re
@@ -6213,7 +6212,10 @@ class TestLambdaLayer:
     @markers.lambda_runtime_update
     @markers.aws.validated
     # AWS only allows a max of 15 compatible runtimes, split runtimes and run two tests
-    @pytest.mark.parametrize("runtimes", list(itertools.batched(ALL_RUNTIMES, 15, strict=False)))
+    @pytest.mark.parametrize(
+        "runtimes",
+        [ALL_RUNTIMES[i : i + 15] for i in range(0, len(ALL_RUNTIMES), 15)],
+    )
     def test_layer_compatibilities(self, snapshot, dummylayer, cleanups, aws_client, runtimes):
         """Creates a single layer which is compatible with all"""
         layer_name = f"testlayer-{short_uid()}"

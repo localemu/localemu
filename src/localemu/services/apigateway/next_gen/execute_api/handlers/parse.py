@@ -103,6 +103,12 @@ class InvocationRequestParser(RestApiGatewayHandler):
                     flags=re.IGNORECASE,
                 )
 
+            # A redundant slash prepended before the stage (e.g. `//<stage>/foo`) is just URL
+            # noise and must not be confused with a literal double slash the caller put in the
+            # resource path itself (e.g. `/<stage>//foo`, which AWS preserves as-is). Collapse
+            # only the *leading* slashes here, before removing the stage, so the stage-removal
+            # below can't accidentally consume one of them and leave a stray slash behind.
+            raw_uri = "/" + raw_uri.lstrip("/")
             # remove the stage from the path, only replace the first occurrence
             raw_uri = raw_uri.replace(f"/{context.stage}", "", 1)
 

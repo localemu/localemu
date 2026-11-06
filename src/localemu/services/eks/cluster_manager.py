@@ -128,6 +128,12 @@ class ClusterInfo:
     api_port: int
     status: str = "CREATING"
     kubeconfig: str = ""
+    # Set only when ``endpointPrivateAccess=True`` was threaded through -
+    # the server's address as reachable from INSIDE the cluster's VPC
+    # Docker network (container-name-based, so it resolves via Docker's
+    # embedded DNS once a caller container joins that network). None for
+    # clusters created without private-access scoping.
+    vpc_endpoint: str | None = None
 
 
 class K3dClusterManager:
@@ -202,6 +208,8 @@ class K3dClusterManager:
         kubernetes_version: str | None = None,
         account_id: str = "",
         region: str = "",
+        endpoint_private_access: bool = False,
+        vpc_id: str | None = None,
     ) -> ClusterInfo:
         """Create a k3d cluster backing an EKS cluster.
 
@@ -209,6 +217,21 @@ class K3dClusterManager:
         :param kubernetes_version: optional Kubernetes version (e.g. "1.29")
         :param account_id: AWS account ID for multi-account support
         :param region: AWS region for multi-region support
+        :param endpoint_private_access: when True AND ``vpc_id`` resolves to
+            a real Docker network, the cluster's k3s API server is also
+            joined to that VPC's ``--internal=true`` Docker bridge, and the
+            host-published port (the ``--api-port`` loopback mapping every
+            cluster gets) is firewalled off at the host level so it is no
+            longer reachable from outside the VPC - including from the
+            LocalEmu host itself, which stands in for "outside the VPC" in
+            this single-host emulator. Reachability from INSIDE the VPC
+            network continues to work over a *different* address (the
+            container's VPC-bridge IP / container-name DNS), which the
+            host-level rule never touches. False (the default) preserves
+            the exact pre-existing behavior - this parameter is additive.
+        :param vpc_id: the EKS cluster's VPC, used to resolve/create the
+            Docker network to join when ``endpoint_private_access`` is True.
+            Ignored otherwise.
         :returns: ClusterInfo with endpoint, CA cert, and kubeconfig
         :raises RuntimeError: if k3d is not installed or cluster creation fails
         """
@@ -222,13 +245,16 @@ class K3dClusterManager:
                 return self._clusters[key]
 
         k3d_name = self._k3d_cluster_name(name, account_id, region)
+        server_node_name = f"k3d-{k3d_name}-server-0"
         api_port = get_free_tcp_port()
 
         LOG.info(
-            "Creating k3d cluster %s (api_port=%s, k8s_version=%s)",
+            "Creating k3d cluster %s (api_port=%s, k8s_version=%s, "
+            "endpoint_private_access=%s)",
             k3d_name,
             api_port,
             kubernetes_version or "default",
+            endpoint_private_access,
         )
 
         # Build k3d cluster create command
@@ -246,6 +272,15 @@ class K3dClusterManager:
             "--k3s-arg",
             "--disable=traefik@server:0",
         ]
+        if endpoint_private_access:
+            # The server's own container name is a stable identifier we
+            # know before creation (unlike the VPC-bridge IP, assigned only
+            # once we join that network below) - Docker's embedded DNS
+            # resolves it on any custom network the container later joins,
+            # so a caller inside the VPC network can reach it as
+            # ``https://<server_node_name>:6443`` with a cert the k3s
+            # server itself issued, no "accept any cert" workaround needed.
+            cmd.extend(["--k3s-arg", f"--tls-san={server_node_name}@server:0"])
 
         # Pass Kubernetes version via --image flag
         # Map EKS version to k3s image tag when available
@@ -308,6 +343,12 @@ class K3dClusterManager:
         # Override endpoint to use the allocated port on localhost
         endpoint = f"https://127.0.0.1:{api_port}"
 
+        vpc_endpoint = None
+        if endpoint_private_access and vpc_id:
+            vpc_endpoint = self._apply_private_access(
+                server_node_name, k3d_name, vpc_id,
+            )
+
         info = ClusterInfo(
             name=name,
             k3d_name=k3d_name,
@@ -316,6 +357,7 @@ class K3dClusterManager:
             api_port=api_port,
             status="ACTIVE",
             kubeconfig=kubeconfig_raw,
+            vpc_endpoint=vpc_endpoint,
         )
 
         with self._lock:
@@ -327,6 +369,96 @@ class K3dClusterManager:
             endpoint,
         )
         return info
+
+    def _apply_private_access(
+        self, server_node_name: str, k3d_name: str, vpc_id: str,
+    ) -> str | None:
+        """Join the k3s server to the cluster's VPC Docker network and
+        firewall off the host-published API port, so the API server is
+        reachable only from inside that VPC network.
+
+        Returns the in-VPC endpoint URL on success, or None if any step
+        failed - callers must treat a None return as "private-access
+        enforcement did NOT take effect" (log loudly, do not silently
+        pretend it worked), not as a soft no-op. The cluster itself is
+        still created and usable either way; this only controls whether
+        isolation is real.
+        """
+        try:
+            from localemu.utils.docker_utils import DOCKER_CLIENT
+            from localemu.services.ec2.docker.vpc_network import (
+                get_vpc_network_manager,
+            )
+            from localemu.services.ec2.docker.host_iptables import (
+                install_eks_private_access_block,
+            )
+        except Exception:
+            LOG.warning(
+                "EKS %s: private-access dependencies unavailable; "
+                "cluster created WITHOUT network isolation", k3d_name,
+                exc_info=True,
+            )
+            return None
+
+        vpc_network_name = get_vpc_network_manager().ensure_network_for_vpc(vpc_id)
+        if not vpc_network_name:
+            LOG.warning(
+                "EKS %s: VPC %s has no Docker network (and none could be "
+                "created) - endpointPrivateAccess requested but NOT "
+                "enforced; the API server remains reachable at the "
+                "public 127.0.0.1 endpoint.",
+                k3d_name, vpc_id,
+            )
+            return None
+
+        # The IP the server container holds on k3d's OWN network - this is
+        # where the host's published-port DNAT actually lands. Resolve it
+        # BEFORE joining the VPC network so there's no ambiguity about
+        # which of the container's (soon to be two) IPs this is.
+        k3d_network_name = f"k3d-{k3d_name}"
+        try:
+            k3d_side_ip = DOCKER_CLIENT.get_container_ipv4_for_network(
+                server_node_name, k3d_network_name,
+            )
+        except Exception:
+            k3d_side_ip = None
+        if not k3d_side_ip:
+            LOG.warning(
+                "EKS %s: could not resolve server container's k3d-network "
+                "IP - endpointPrivateAccess NOT enforced.", k3d_name,
+            )
+            return None
+
+        try:
+            DOCKER_CLIENT.connect_container_to_network(
+                vpc_network_name, server_node_name,
+            )
+        except Exception:
+            LOG.warning(
+                "EKS %s: failed to join VPC network %s - "
+                "endpointPrivateAccess NOT enforced.",
+                k3d_name, vpc_network_name, exc_info=True,
+            )
+            return None
+
+        if not install_eks_private_access_block(k3d_name, k3d_side_ip):
+            LOG.warning(
+                "EKS %s: joined VPC network %s but the host-level block "
+                "on the published API port could not be installed - the "
+                "cluster is reachable from the VPC network AND still "
+                "reachable via the public 127.0.0.1 endpoint. "
+                "endpointPrivateAccess is NOT enforced.",
+                k3d_name, vpc_network_name,
+            )
+            return None
+
+        LOG.info(
+            "EKS %s: endpointPrivateAccess enforced - joined %s, "
+            "blocked public access to %s:6443. In-VPC endpoint: "
+            "https://%s:6443",
+            k3d_name, vpc_network_name, k3d_side_ip, server_node_name,
+        )
+        return f"https://{server_node_name}:6443"
 
     def _parse_kubeconfig(self, kubeconfig_raw: str) -> tuple[str, str]:
         """Parse kubeconfig YAML to extract server endpoint and CA cert.
@@ -421,6 +553,18 @@ class K3dClusterManager:
         k3d_name = info.k3d_name if info else self._k3d_cluster_name(name, account_id, region)
 
         LOG.info("Deleting k3d cluster %s", k3d_name)
+
+        if info and info.vpc_endpoint:
+            try:
+                from localemu.services.ec2.docker.host_iptables import (
+                    remove_eks_private_access_block,
+                )
+                remove_eks_private_access_block(k3d_name)
+            except Exception:
+                LOG.debug(
+                    "EKS %s: private-access block removal raised", k3d_name,
+                    exc_info=True,
+                )
 
         try:
             result = subprocess.run(
@@ -630,6 +774,17 @@ class K3dClusterManager:
             entries = list(self._clusters.items())
             self._clusters.clear()
         for key, info in entries:
+            if info.vpc_endpoint:
+                try:
+                    from localemu.services.ec2.docker.host_iptables import (
+                        remove_eks_private_access_block,
+                    )
+                    remove_eks_private_access_block(info.k3d_name)
+                except Exception:
+                    LOG.debug(
+                        "EKS %s: private-access block removal raised",
+                        info.k3d_name, exc_info=True,
+                    )
             try:
                 subprocess.run(
                     ["k3d", "cluster", "delete", info.k3d_name],

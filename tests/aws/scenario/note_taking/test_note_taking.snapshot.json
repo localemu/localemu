@@ -1,6 +1,6 @@
 {
   "tests/aws/scenario/note_taking/test_note_taking.py::TestNoteTakingScenario::test_validate_infra_setup": {
-    "recorded-date": "15-07-2025, 19:26:03",
+    "recorded-date": "23-10-2026, 13:31:40",
     "recorded-content": {
       "describe_stack_resources": {
         "StackResources": [
@@ -486,8 +486,12 @@
               "AttributeType": "S"
             }
           ],
+          "BillingModeSummary": {
+            "BillingMode": "PROVISIONED"
+          },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -495,6 +499,7 @@
               "KeyType": "HASH"
             }
           ],
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 5,
@@ -564,11 +569,6 @@
           },
           "Version": "$LATEST"
         },
-        "Tags": {
-          "aws:cloudformation:logical-id": "<logical-resource-id:25>",
-          "aws:cloudformation:stack-id": "arn:<partition>:cloudformation:<region>:111111111111:stack/NoteTakingStack/<resource:1>",
-          "aws:cloudformation:stack-name": "NoteTakingStack"
-        },
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 200
@@ -621,11 +621,6 @@
             "Mode": "PassThrough"
           },
           "Version": "$LATEST"
-        },
-        "Tags": {
-          "aws:cloudformation:logical-id": "<logical-resource-id:26>",
-          "aws:cloudformation:stack-id": "arn:<partition>:cloudformation:<region>:111111111111:stack/NoteTakingStack/<resource:1>",
-          "aws:cloudformation:stack-name": "NoteTakingStack"
         },
         "ResponseMetadata": {
           "HTTPHeaders": {},
@@ -680,11 +675,6 @@
           },
           "Version": "$LATEST"
         },
-        "Tags": {
-          "aws:cloudformation:logical-id": "<logical-resource-id:27>",
-          "aws:cloudformation:stack-id": "arn:<partition>:cloudformation:<region>:111111111111:stack/NoteTakingStack/<resource:1>",
-          "aws:cloudformation:stack-name": "NoteTakingStack"
-        },
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 200
@@ -737,11 +727,6 @@
             "Mode": "PassThrough"
           },
           "Version": "$LATEST"
-        },
-        "Tags": {
-          "aws:cloudformation:logical-id": "<logical-resource-id:28>",
-          "aws:cloudformation:stack-id": "arn:<partition>:cloudformation:<region>:111111111111:stack/NoteTakingStack/<resource:1>",
-          "aws:cloudformation:stack-name": "NoteTakingStack"
         },
         "ResponseMetadata": {
           "HTTPHeaders": {},
@@ -796,11 +781,6 @@
           },
           "Version": "$LATEST"
         },
-        "Tags": {
-          "aws:cloudformation:logical-id": "<logical-resource-id:29>",
-          "aws:cloudformation:stack-id": "arn:<partition>:cloudformation:<region>:111111111111:stack/NoteTakingStack/<resource:1>",
-          "aws:cloudformation:stack-name": "NoteTakingStack"
-        },
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 200
@@ -841,8 +821,36 @@
             "path": "/notes",
             "pathPart": "notes",
             "resourceMethods": {
-              "GET": {},
-              "POST": {}
+              "GET": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "GET",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "1xdiqpmhbk",
+                  "httpMethod": "POST",
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "timeoutInMillis": 29000,
+                  "type": "AWS_PROXY",
+                  "uri": "arn:<partition>:apigateway:<region>:lambda:path/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name:4>/invocations"
+                },
+                "methodResponses": {}
+              },
+              "POST": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "POST",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "1xdiqpmhbk",
+                  "httpMethod": "POST",
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "timeoutInMillis": 29000,
+                  "type": "AWS_PROXY",
+                  "uri": "arn:<partition>:apigateway:<region>:lambda:path/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name:1>/invocations"
+                },
+                "methodResponses": {}
+              }
             }
           },
           {
@@ -851,10 +859,86 @@
             "path": "/notes/{id}",
             "pathPart": "{id}",
             "resourceMethods": {
-              "DELETE": {},
-              "GET": {},
-              "OPTIONS": {},
-              "PUT": {}
+              "DELETE": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "DELETE",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "3kecwtrdoc",
+                  "httpMethod": "POST",
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "timeoutInMillis": 29000,
+                  "type": "AWS_PROXY",
+                  "uri": "arn:<partition>:apigateway:<region>:lambda:path/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name:2>/invocations"
+                },
+                "methodResponses": {}
+              },
+              "GET": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "GET",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "3kecwtrdoc",
+                  "httpMethod": "POST",
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "timeoutInMillis": 29000,
+                  "type": "AWS_PROXY",
+                  "uri": "arn:<partition>:apigateway:<region>:lambda:path/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name:3>/invocations"
+                },
+                "methodResponses": {}
+              },
+              "OPTIONS": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "OPTIONS",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "3kecwtrdoc",
+                  "integrationResponses": {
+                    "204": {
+                      "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'",
+                        "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'",
+                        "method.response.header.Access-Control-Allow-Origin": "'*'"
+                      },
+                      "statusCode": "204"
+                    }
+                  },
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "requestTemplates": {
+                    "application/json": "{ statusCode: 200 }"
+                  },
+                  "timeoutInMillis": 29000,
+                  "type": "MOCK"
+                },
+                "methodResponses": {
+                  "204": {
+                    "responseParameters": {
+                      "method.response.header.Access-Control-Allow-Headers": true,
+                      "method.response.header.Access-Control-Allow-Methods": true,
+                      "method.response.header.Access-Control-Allow-Origin": true
+                    },
+                    "statusCode": "204"
+                  }
+                }
+              },
+              "PUT": {
+                "apiKeyRequired": false,
+                "authorizationType": "NONE",
+                "httpMethod": "PUT",
+                "methodIntegration": {
+                  "cacheKeyParameters": [],
+                  "cacheNamespace": "3kecwtrdoc",
+                  "httpMethod": "POST",
+                  "passthroughBehavior": "WHEN_NO_MATCH",
+                  "timeoutInMillis": 29000,
+                  "type": "AWS_PROXY",
+                  "uri": "arn:<partition>:apigateway:<region>:lambda:path/2015-03-31/functions/arn:<partition>:lambda:<region>:111111111111:function:<function-name:5>/invocations"
+                },
+                "methodResponses": {}
+              }
             }
           }
         ],

@@ -28,6 +28,7 @@ from localemu.utils.container_utils.container_client import (
     PortMappings,
 )
 from localemu.utils.docker_utils import DOCKER_CLIENT
+from localemu.utils.sidecar import wait_for_sidecar_port
 from localemu.utils.net import get_free_tcp_port
 
 LOG = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ class ClusterManager:
             DOCKER_CLIENT.remove_container(container_name, force=True)
             raise
         actual_port = self._reconcile_host_port(container_name) or host_port
-        if not self._wait_for_port(actual_port):
+        if not self._wait_for_port(actual_port, container_name=container_name, container_port=9092):
             try:
                 DOCKER_CLIENT.stop_container(container_name, timeout=5)
                 DOCKER_CLIENT.remove_container(container_name, force=True)
@@ -302,12 +303,23 @@ class ClusterManager:
         port: int,
         host: str = "127.0.0.1",
         timeout: int = _READINESS_TIMEOUT_SEC,
+        container_name: str | None = None,
+        container_port: int | None = None,
     ) -> bool:
-        """Block until *host:port* accepts a TCP connection, then wait
+        """Block until the broker accepts a TCP connection, then wait
         an extra :data:`_POST_TCP_SETTLE_SEC` for Kafka's controller
         quorum to finish electing before we let an AWS client through.
         First-time client metadata requests can otherwise timeout
-        because the broker is still resolving its own role."""
+        because the broker is still resolving its own role.
+
+        With ``container_name`` the container's own address is tried as well
+        as the published host port (see ``localemu.utils.sidecar``)."""
+        if container_name:
+            return wait_for_sidecar_port(
+                container_name, container_port, port,
+                timeout=timeout, interval=_PORT_PROBE_INTERVAL_SEC,
+                settle=_POST_TCP_SETTLE_SEC,
+            ) is not None
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:

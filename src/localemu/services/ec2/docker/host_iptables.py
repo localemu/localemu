@@ -36,10 +36,12 @@ regardless of in-memory state.
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import threading
 from typing import Optional
 
+from localemu.utils.container_utils.container_client import ContainerException
 from localemu.utils.docker_utils import DOCKER_CLIENT
 from localemu.services.ec2.docker.vpc_network import VPC_NETWORK_PREFIX
 
@@ -61,6 +63,12 @@ _HELPER_IMAGE = "alpine:3.19"
 _install_lock = threading.Lock()
 
 
+def _decode(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
 def _run_host_iptables(script: str, *, what: str) -> tuple[int, str, str]:
     """Run an iptables shell snippet inside a one-shot host-netns
     container. Returns (exit_code, stdout, stderr).
@@ -75,6 +83,27 @@ def _run_host_iptables(script: str, *, what: str) -> tuple[int, str, str]:
     without the bridge ACCEPT rule (it just won't unblock cross-subnet
     traffic until LocalEmu can install the rule).
     """
+    full_script = (
+        "apk add --quiet --no-cache iptables >/dev/null 2>&1; " + script
+    )
+    if shutil.which("docker") is None:
+        # LocalEmu running in its own container has no ``docker`` CLI,
+        # only the Docker socket: run the one-shot through the SDK client.
+        try:
+            out, err = DOCKER_CLIENT.run_container(
+                _HELPER_IMAGE,
+                remove=True,
+                network="host",
+                cap_add=["NET_ADMIN"],
+                entrypoint="sh",
+                command=["-c", full_script],
+            )
+            return 0, _decode(out), _decode(err)
+        except ContainerException as exc:
+            return 1, _decode(exc.stdout), _decode(exc.stderr) or str(exc)
+        except Exception as exc:
+            LOG.warning("host iptables: %s failed: %s", what, exc)
+            return 1, "", str(exc)
     try:
         # Use the underlying ``docker run`` CLI directly rather than the
         # DOCKER_CLIENT wrapper: the wrapper is tuned for long-lived
@@ -89,7 +118,7 @@ def _run_host_iptables(script: str, *, what: str) -> tuple[int, str, str]:
                 # Install iptables silently and execute the script.
                 # We tolerate the "iptables already installed" path
                 # (since the image may be pre-warmed).
-                "apk add --quiet --no-cache iptables >/dev/null 2>&1; " + script,
+                full_script,
             ],
             capture_output=True, text=True, timeout=30,
         )
@@ -206,6 +235,77 @@ def remove_vpc_bridge_intra_accept(vpc_id: str) -> None:
         )
     else:
         LOG.debug("host iptables: vpc-intra-accept removed for %s", vpc_id)
+
+
+def install_eks_private_access_block(k3d_cluster_name: str, published_ip: str) -> bool:
+    """Block host/outside-VPC reachability of an EKS k3d server's
+    published API port, for ``endpointPrivateAccess``.
+
+    ``published_ip`` is the server container's IP on k3d's OWN (non-VPC)
+    Docker network - the address the host's ``-p 127.0.0.1:<port>:6443``
+    publish actually DNATs to. The rule drops ALL forwarded traffic to
+    ``<published_ip>:6443/tcp`` unconditionally (no interface exception
+    needed): legitimate in-VPC access reaches the same container over a
+    DIFFERENT IP (its address on the VPC's own bridge, joined separately),
+    which this rule never matches - so blocking the k3d-network address
+    outright closes the public path without touching the private one.
+
+    Idempotent, same comment-tag pattern as ``install_vpc_bridge_intra_accept``.
+    Returns True on success, False on failure (callers must treat False as
+    "isolation did not take effect", not a soft degradation).
+    """
+    comment = f"{_COMMENT_PREFIX}eks-private:{k3d_cluster_name}"
+    script = (
+        f"iptables -C DOCKER-USER -d {published_ip} -p tcp --dport 6443 "
+        f"-m comment --comment '{comment}' -j DROP 2>/dev/null "
+        f"&& iptables -D DOCKER-USER -d {published_ip} -p tcp --dport 6443 "
+        f"-m comment --comment '{comment}' -j DROP; "
+        f"iptables -I DOCKER-USER 1 -d {published_ip} -p tcp --dport 6443 "
+        f"-m comment --comment '{comment}' -j DROP"
+    )
+    with _install_lock:
+        rc, _out, err = _run_host_iptables(
+            script, what=f"install eks-private-access block for {k3d_cluster_name}",
+        )
+    if rc != 0:
+        LOG.warning(
+            "host iptables: install eks-private-access block for %s failed "
+            "(rc=%s): %s", k3d_cluster_name, rc, err.strip(),
+        )
+        return False
+    LOG.info(
+        "host iptables: eks-private-access block installed (%s, ip=%s)",
+        k3d_cluster_name, published_ip,
+    )
+    return True
+
+
+def remove_eks_private_access_block(k3d_cluster_name: str) -> None:
+    """Remove the host-level block installed by
+    ``install_eks_private_access_block``. Best-effort, same comment-tag
+    deletion idiom as ``remove_vpc_bridge_intra_accept``."""
+    comment = f"{_COMMENT_PREFIX}eks-private:{k3d_cluster_name}"
+    script = (
+        f"iptables-save | grep -F -- '{comment}' | "
+        f"sed 's/^-A /-D /' | "
+        f"while read -r line; do "
+        f"  echo \"$line\" | xargs -r iptables; "
+        f"done"
+    )
+    with _install_lock:
+        rc, _out, err = _run_host_iptables(
+            script, what=f"remove eks-private-access block for {k3d_cluster_name}",
+        )
+    if rc != 0:
+        LOG.debug(
+            "host iptables: remove eks-private-access block for %s rc=%s err=%s",
+            k3d_cluster_name, rc, err.strip(),
+        )
+    else:
+        LOG.debug(
+            "host iptables: eks-private-access block removed for %s",
+            k3d_cluster_name,
+        )
 
 
 def cleanup_all_localemu_host_rules() -> int:

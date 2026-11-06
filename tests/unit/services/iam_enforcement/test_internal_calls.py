@@ -28,9 +28,11 @@ from localemu import constants as _lemu_constants
 from localemu.services.iam_enforcement.enforcer import IAMEnforcementHandler
 
 
-def _ctx(*, is_internal: bool) -> SimpleNamespace:
+def _ctx(*, is_internal: bool, internal_request_params: dict | None = None) -> SimpleNamespace:
     """Minimal RequestContext stand-in; only ``is_internal_call`` is read
     by the helper, so the rest of the request-context surface is moot."""
+    if internal_request_params is not None:
+        return SimpleNamespace(is_internal_call=is_internal, internal_request_params=internal_request_params)
     return SimpleNamespace(is_internal_call=is_internal)
 
 
@@ -101,6 +103,37 @@ class TestNegativeCases:
         assert not IAMEnforcementHandler._is_internal_call(
             _ctx(is_internal=False),
             access_key="AKIA" + _lemu_constants.INTERNAL_AWS_ACCESS_KEY_ID,
+        )
+
+
+class TestEnforceRolePermissionsOverride:
+    """Pipes/Scheduler target delivery sets ``enforce_role_permissions`` on
+    the DTO: this specific internal call must NOT get the bypass, because
+    it's acting as a customer-supplied RoleArn, not LocalEmu's own
+    bookkeeping."""
+
+    def test_override_flag_defeats_the_internal_bypass(self):
+        assert not IAMEnforcementHandler._is_internal_call(
+            _ctx(is_internal=True, internal_request_params={"enforce_role_permissions": True}),
+            access_key=None,
+        )
+
+    def test_absent_flag_keeps_the_usual_bypass(self):
+        assert IAMEnforcementHandler._is_internal_call(
+            _ctx(is_internal=True, internal_request_params={"source_arn": "arn:aws:events:x"}),
+            access_key=None,
+        )
+
+    def test_flag_explicitly_false_keeps_the_usual_bypass(self):
+        assert IAMEnforcementHandler._is_internal_call(
+            _ctx(is_internal=True, internal_request_params={"enforce_role_permissions": False}),
+            access_key=None,
+        )
+
+    def test_empty_internal_request_params_does_not_crash(self):
+        assert IAMEnforcementHandler._is_internal_call(
+            _ctx(is_internal=True, internal_request_params={}),
+            access_key=None,
         )
 
 

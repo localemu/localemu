@@ -132,3 +132,108 @@ class TestInvocation:
             "arn:aws:scheduler:us-east-1:000000000000:schedule/default/s"
         )
         assert kw["rule_name"] == "s"
+
+    def test_v1_targets_opt_in_to_role_permission_enforcement(self):
+        """Pipes/Scheduler delivery must gate on the role's own permission
+        policy, not just its trust policy - previously a role with zero
+        attached permissions still relayed/invoked successfully."""
+        with patch(
+            "localemu.services.scheduler.target_invoker.TargetSenderFactory"
+        ) as MockFactory:
+            MockFactory.return_value.get_target_sender.return_value = MagicMock()
+            target_invoker.invoke(
+                schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+                schedule_name="s",
+                target=_target(),
+                account_id="000000000000",
+                region="us-east-1",
+            )
+        assert MockFactory.call_args.kwargs["enforce_role_permissions"] is True
+
+
+class TestSnakeCase:
+    def test_lower_camel_case_to_snake_case(self):
+        assert target_invoker._snake_case("getParameter") == "get_parameter"
+        assert target_invoker._snake_case("sendMessage") == "send_message"
+        assert target_invoker._snake_case("listObjectsV2") == "list_objects_v2"
+
+
+class TestUniversalTarget:
+    """``arn:aws:scheduler:::aws-sdk:<service>:<action>`` calls an arbitrary
+    AWS SDK action directly - previously unrecognised, so the schedule
+    silently never fired at all."""
+
+    def _universal_target(self, service="ssm", action="getParameter", input_=None, role=True):
+        t = {"Arn": f"arn:aws:scheduler:::aws-sdk:{service}:{action}"}
+        if role:
+            t["RoleArn"] = "arn:aws:iam::000000000000:role/r"
+        if input_ is not None:
+            t["Input"] = input_
+        return t
+
+    def test_does_not_go_through_the_target_sender_factory(self):
+        """Universal targets have no event/retry/DLQ semantics on real AWS -
+        they must never reach TargetSenderFactory at all."""
+        with patch("localemu.services.scheduler.target_invoker.connect_to") as mock_connect, \
+             patch("localemu.services.scheduler.target_invoker.TargetSenderFactory") as MockFactory:
+            mock_client = MagicMock()
+            mock_connect.with_assumed_role.return_value.get_client.return_value = mock_client
+            mock_client.request_metadata.return_value = mock_client
+
+            target_invoker.invoke(
+                schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+                schedule_name="s",
+                target=self._universal_target(input_=json.dumps({"Name": "/x"})),
+                account_id="000000000000",
+                region="us-east-1",
+            )
+        MockFactory.assert_not_called()
+        mock_client.get_parameter.assert_called_once_with(Name="/x")
+
+    def test_enforce_role_permissions_is_set_on_the_universal_target_call(self):
+        with patch("localemu.services.scheduler.target_invoker.connect_to") as mock_connect:
+            mock_client = MagicMock()
+            mock_connect.with_assumed_role.return_value.get_client.return_value = mock_client
+            mock_client.request_metadata.return_value = mock_client
+
+            target_invoker.invoke(
+                schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+                schedule_name="s",
+                target=self._universal_target(),
+                account_id="000000000000",
+                region="us-east-1",
+            )
+        assert mock_client.request_metadata.call_args.kwargs["enforce_role_permissions"] is True
+
+    def test_missing_role_arn_does_not_raise(self):
+        target_invoker.invoke(
+            schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+            schedule_name="s",
+            target=self._universal_target(role=False),
+            account_id="000000000000",
+            region="us-east-1",
+        )
+
+    def test_malformed_arn_does_not_raise(self):
+        target_invoker.invoke(
+            schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+            schedule_name="s",
+            target={"Arn": "arn:aws:scheduler:::aws-sdk:onlyservice", "RoleArn": "r"},
+            account_id="000000000000",
+            region="us-east-1",
+        )
+
+    def test_non_json_input_does_not_raise(self):
+        with patch("localemu.services.scheduler.target_invoker.connect_to") as mock_connect:
+            mock_client = MagicMock()
+            mock_connect.with_assumed_role.return_value.get_client.return_value = mock_client
+            mock_client.request_metadata.return_value = mock_client
+
+            target_invoker.invoke(
+                schedule_arn="arn:aws:scheduler:us-east-1:000000000000:schedule/default/s",
+                schedule_name="s",
+                target=self._universal_target(input_="not json {"),
+                account_id="000000000000",
+                region="us-east-1",
+            )
+        mock_client.get_parameter.assert_not_called()

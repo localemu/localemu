@@ -105,6 +105,7 @@ def alias_own_vpc_ip_on_pcx(
 
 def add_peer_host_route(
     container: str, pcx_iface: str, peer_vpc_ip: str, peer_pcx_ip: str,
+    src_ip: Optional[str] = None,
 ) -> bool:
     """Add a host (/32) route on ``container`` so traffic to a specific
     peer instance's VPC IP goes via that peer's pcx-bridge IP. Plus
@@ -113,6 +114,11 @@ def add_peer_host_route(
     wire traffic pure pcx-to-pcx (which Docker's bridge-netfilter
     doesn't molest) while conntrack reverses the DNAT on the return
     so the application still sees the peer's real VPC IP.
+
+    ``src_ip`` is the container's own VPC IP. The route carries it as
+    its preferred source, so packets leave with the real VPC address
+    and the receiver's security-group rules (written in VPC CIDRs)
+    evaluate the same source a real AWS instance would see.
 
     Idempotent: the DNAT rule is ``-C`` checked before ``-A``.
     """
@@ -128,6 +134,7 @@ def add_peer_host_route(
     )
     route = (
         f"ip route replace {peer_vpc_ip}/32 via {peer_pcx_ip} dev {pcx_iface}"
+        + (f" src {src_ip}" if src_ip else "")
     )
     rc, _, err = _run(container, f"{route} ; {check} || {add} ; exit 0")
     if rc != 0:
@@ -198,19 +205,22 @@ def program_peering_routes(
     container: str, pcx_iface: str, own_vpc_ip: str, own_pcx_ip: str,
     peer_instances: list[tuple[str, str]],
 ) -> bool:
-    """One-shot helper: alias own VPC IP on pcx + install full NAT
-    (DNAT per peer + blanket SNAT on pcx egress).
+    """One-shot helper: alias own VPC IP on pcx + install the per-peer
+    DNAT and /32 route (the route's source is the own VPC IP, so no
+    source rewrite is needed).
 
     ``peer_instances`` is ``[(peer_vpc_ip, peer_pcx_ip), …]``.
-    Returns True iff the base rules (alias + SNAT) landed.
+    Returns True iff the base rule (alias) landed.
     """
     if not (container and pcx_iface and own_vpc_ip and own_pcx_ip):
         return False
     alias_ok = alias_own_vpc_ip_on_pcx(container, pcx_iface, own_vpc_ip)
-    snat_ok = add_snat_for_pcx(container, pcx_iface, own_pcx_ip)
     for peer_vpc_ip, peer_pcx_ip in peer_instances or []:
-        add_peer_host_route(container, pcx_iface, peer_vpc_ip, peer_pcx_ip)
-    return alias_ok and snat_ok
+        add_peer_host_route(
+            container, pcx_iface, peer_vpc_ip, peer_pcx_ip,
+            src_ip=own_vpc_ip,
+        )
+    return alias_ok
 
 
 def unprogram_peering_routes(

@@ -92,7 +92,7 @@
       }
     };
     // Server-side event kinds (see dashboard/bus.py).
-    ["activity", "count", "resource", "state", "hello", "dropped", "ping"].forEach(function (kind) {
+    ["activity", "call", "count", "resource", "state", "hello", "dropped", "ping"].forEach(function (kind) {
       es.addEventListener(kind, function (msg) {
         var data = null;
         try { data = msg.data ? JSON.parse(msg.data) : {}; } catch (e) { data = {}; }
@@ -115,7 +115,28 @@
     if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
   }
 
+  // Console call records (latency, principal, denials) in the same
+  // order SSE would deliver them. Cursor = highest seq seen.
+  var lastCallSeq = null;
+  function noteCallSeq(seq) {
+    if (typeof seq === "number" && (lastCallSeq === null || seq > lastCallSeq)) lastCallSeq = seq;
+  }
+  subscribe("call", function (c) { if (c) noteCallSeq(c.seq); });
+  function pollCalls() {
+    var url = "/_localemu/api/calls?limit=200" + (lastCallSeq !== null ? "&since=" + lastCallSeq : "");
+    DASH.api.fetchJSON(url, { etag: false, timeoutMs: 5000 }).then(function (r) {
+      var calls = (r.data && r.data.calls) || [];
+      if (lastCallSeq === null) {
+        // First poll only establishes the cursor; wire.js hydrates history.
+        calls.forEach(function (c) { noteCallSeq(c.seq); });
+        return;
+      }
+      for (var i = calls.length - 1; i >= 0; i--) emit("call", calls[i], null);
+    }).catch(function () {});
+  }
+
   function pollOnce() {
+    pollCalls();
     var url = URL_ACTIVITY + (lastActivityCursor ? "?since=" + encodeURIComponent(lastActivityCursor) : "?limit=50");
     DASH.api.fetchJSON(url, { etag: false, timeoutMs: 5000 }).then(function (r) {
       var events = (r.data && r.data.events) ? r.data.events : [];

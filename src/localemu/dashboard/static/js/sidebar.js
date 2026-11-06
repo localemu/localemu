@@ -1,140 +1,163 @@
-// Sidebar: discovers all services from overview, groups them, renders
-// collapsible categories. Hooks into SSE `count` and `resource` events
-// to update badge counts without re-fetching overview.
+// Service catalog + left navigation.
+//
+// DASH.catalog joins the three real sources every service view needs:
+//   - the service registry (/_localemu/api/registry, 132 services: label,
+//     group, tier),
+//   - the per-account counts (/_localemu/api/overview?account=),
+//   - per-service call volume from request telemetry
+//     (/_localemu/api/metrics/services, polled by overview.js),
+// plus which services can run Docker containers (/_localemu/api/system).
+//
+// The nav shows the pinned anchors and anything in use; typing in the
+// filter matches across every registered service.
 (function () {
   "use strict";
 
-  var collapsed = {};
-  try {
-    var raw = localStorage.getItem("localemu-collapsed-groups");
-    if (raw) collapsed = JSON.parse(raw) || {};
-  } catch (_) { collapsed = {}; }
-  function persistCollapsed() {
-    try { localStorage.setItem("localemu-collapsed-groups", JSON.stringify(collapsed)); } catch (_) {}
-  }
+  // ── catalog ──
+  var activity = {};   // service -> [calls per minute, oldest first]
 
-  var search = "";
-  function setSearch(v) {
-    search = String(v || "");
-    render();
+  function services() {
+    var reg = DASH.registry.all();
+    if (reg.length) return reg.map(function (s) { return s.name; });
+    // Registry not loaded yet: fall back to what the overview reported.
+    var ov = (DASH.app.state.overview && DASH.app.state.overview.services) || {};
+    return Object.keys(ov).filter(function (n) { return n !== "accounts"; });
   }
+  function label(name) { return DASH.registry.label(name); }
+  function group(name) {
+    var spec = DASH.registry.get(name);
+    return (spec && spec.group) || DASH.services.group(name) || "other";
+  }
+  function info(name) {
+    var ov = (DASH.app.state.overview && DASH.app.state.overview.services) || {};
+    return ov[name] || null;
+  }
+  function count(name) { var i = info(name); return i ? (i.resources || 0) : 0; }
+  function counted(name) { var i = info(name); return !!(i && i.counted); }
+  function calls(name) { return activity[name] || null; }
+  function recentCalls(name) {
+    var a = activity[name];
+    if (!a) return 0;
+    return a.reduce(function (x, y) { return x + y; }, 0);
+  }
+  // Calls in the last 5 one-minute buckets (the current one is partial).
+  function calls5m(name) {
+    var a = activity[name];
+    if (!a || !a.length) return 0;
+    return a.slice(-5).reduce(function (x, y) { return x + y; }, 0);
+  }
+  function pinned(name) { return DASH.services.alwaysShow(name) && name !== "accounts"; }
+  function inUse(name) { return count(name) > 0 || recentCalls(name) > 0; }
+  function dockerBackends() {
+    var sys = DASH.app.state.system;
+    return (sys && sys.docker_backends) || {};
+  }
+  function isDockerBacked(name) { return !!dockerBackends()[name]; }
+  function containers(name) {
+    var sys = DASH.app.state.system;
+    var by = sys && sys.docker && sys.docker.containers && sys.docker.containers.by_service;
+    return (by && by[name]) || null;
+  }
+  function setActivity(map) { activity = map || {}; }
+
+  window.DASH.catalog = {
+    services: services, label: label, group: group, info: info, count: count,
+    counted: counted, calls: calls, calls5m: calls5m, recentCalls: recentCalls,
+    pinned: pinned, inUse: inUse, isDockerBacked: isDockerBacked, containers: containers,
+    dockerBackends: dockerBackends, setActivity: setActivity
+  };
+
+  // ── nav ──
+  var CLOSED_KEY = "localemu-console-closed-groups";
+  var closed = { devtools: 1, media: 1, iot: 1, migration: 1, billing: 1 };
+  try {
+    var raw = localStorage.getItem(CLOSED_KEY);
+    if (raw) closed = JSON.parse(raw) || closed;
+  } catch (_) {}
+  function persist() { try { localStorage.setItem(CLOSED_KEY, JSON.stringify(closed)); } catch (_) {} }
+
+  var filter = "";
+  var lastCounts = {};
 
   function render() {
-    var state = DASH.app.state;
-    var services = (state.overview && state.overview.services) || {};
-    var u = DASH.utils, s = DASH.services;
-    var elList = document.getElementById("sidebar-list");
-    if (!elList) return;
-
-    var filter = search.toLowerCase();
-
-    // Bucket services by group.
+    var u = DASH.utils, c = DASH.catalog;
+    var box = document.getElementById("navGroups");
+    if (!box) return;
+    var q = filter.trim().toLowerCase();
+    var sel = DASH.app.state.route.service;
     var byGroup = {};
-    Object.keys(services).forEach(function (name) {
-      var info = services[name] || { status: "available", resources: 0 };
-      var count = info.resources || 0;
-      // Visibility rule: the curated 21 anchors are always shown so
-      // first-time users land on a populated sidebar. Anything else
-      // appears as soon as it has at least one resource.
-      var visible = s.alwaysShow(name) || count > 0;
-      if (!visible) return;
-      if (filter) {
-        var lbl = s.label(name).toLowerCase();
-        if (lbl.indexOf(filter) === -1 && name.indexOf(filter) === -1) return;
+    services().forEach(function (name) {
+      if (q) {
+        if (label(name).toLowerCase().indexOf(q) === -1 && name.indexOf(q) === -1) return;
+      } else if (!pinned(name) && !inUse(name)) {
+        return;
       }
-      var gid = s.group(name);
-      if (!byGroup[gid]) byGroup[gid] = [];
-      byGroup[gid].push({ name: name, count: count, status: info.status });
-    });
-
-    var key = JSON.stringify({
-      sel: state.route.service,
-      groups: Object.keys(byGroup).sort().map(function (g) {
-        return g + ":" + byGroup[g].map(function (e) { return e.name + ":" + e.count; }).join(",");
-      }),
-      collapsed: collapsed,
-      filter: filter
+      var g = group(name);
+      (byGroup[g] = byGroup[g] || []).push(name);
     });
 
     var html = "";
-    s.GROUPS.forEach(function (g) {
-      var items = (byGroup[g.id] || []).sort(function (a, b) { return a.name.localeCompare(b.name); });
-      if (items.length === 0) return;
-      var isClosed = !!collapsed[g.id];
-      html += '<div class="sidebar-group' + (isClosed ? " collapsed" : "") + '">';
-      html += '<button class="sidebar-group-header" type="button" data-group="' + u.esc(g.id) + '">';
-      html += '<span>' + u.esc(g.label) + '</span>';
-      html += '<span class="sidebar-group-caret">▾</span></button>';
-      html += '<div class="sidebar-group-body">';
-      items.forEach(function (svc) {
-        var sel = state.route.service === svc.name ? " selected" : "";
-        var labelHtml = filter ? u.highlight(s.label(svc.name), filter) : u.esc(s.label(svc.name));
-        var countCls = svc.count > 0 ? "" : " zero";
-        html += '<div class="service-item' + sel + '" data-service="' + u.esc(svc.name) + '" role="button" tabindex="0">';
-        html += u.iconHtml(svc.name, 22);
-        html += '<span class="service-name">' + labelHtml + '</span>';
-        html += '<span class="count-badge' + countCls + '">' + u.esc(svc.count) + '</span>';
-        html += '</div>';
+    DASH.services.GROUPS.forEach(function (g) {
+      var items = byGroup[g.id];
+      if (!items || !items.length) return;
+      items.sort(function (a, b) { return label(a).localeCompare(label(b)); });
+      var used = items.filter(inUse).length;
+      var isClosed = !q && closed[g.id];
+      html += '<div class="group' + (isClosed ? " closed" : "") + '"><button class="group-head" type="button" data-group="' +
+        u.esc(g.id) + '" aria-expanded="' + (!isClosed) + '">' + u.ICON.chev + u.esc(g.label) +
+        '<span class="gcount">' + used + "/" + items.length + "</span></button><div class=\"group-items\">";
+      items.forEach(function (name) {
+        var n = count(name), isCounted = counted(name);
+        var running = c.containers(name);
+        var flash = lastCounts[name] !== undefined && n > lastCounts[name];
+        html += '<button class="svc-link' + (inUse(name) ? "" : " idle") + (sel === name ? " on" : "") +
+          '" type="button" data-go-svc="' + u.esc(name) + '">' + u.tile(name, "sm") +
+          '<span class="lbl">' + (q ? u.highlight(label(name), q) : u.esc(label(name))) + "</span>" +
+          (running && running.running ? '<span class="box-dot" title="' + running.running + ' Docker container(s) running"></span>' : "") +
+          '<span class="badge num' + (n ? "" : " zero") + (flash ? " flash" : "") + '" title="' +
+          (isCounted ? n + " resources" : "resource count not available for this service") + '">' +
+          (isCounted ? n : "&ndash;") + "</span></button>";
       });
-      html += '</div></div>';
+      html += "</div></div>";
     });
+    services().forEach(function (n) { lastCounts[n] = count(n); });
+    box.innerHTML = html || '<div class="nav-hint">No service matches "' + u.esc(q) + '". ' +
+      DASH.registry.aws().length + " services are registered.</div>";
+    var hint = document.getElementById("navHint");
+    if (hint) hint.textContent = q ? "Matching across all " + DASH.registry.aws().length + " services" :
+      "Pinned and in-use services. Type to find the rest.";
+    document.querySelectorAll(".nav-link").forEach(function (b) {
+      var r = b.getAttribute("data-route");
+      b.classList.toggle("on", (r === "overview" && !sel) || r === sel);
+    });
+  }
 
-    DASH.render.renderInto(elList, key, html);
+  var pending = false;
+  function schedule() {
+    if (pending) return;
+    pending = true;
+    (window.requestAnimationFrame || setTimeout)(function () { pending = false; render(); });
   }
 
   function init() {
-    var elList = document.getElementById("sidebar-list");
-    var elSearch = document.getElementById("sidebar-search");
-
-    elList.addEventListener("click", function (e) {
-      var hdr = e.target.closest(".sidebar-group-header");
-      if (hdr) {
-        var g = hdr.dataset.group;
-        collapsed[g] = !collapsed[g];
-        persistCollapsed();
-        render();
-        return;
-      }
-      var item = e.target.closest(".service-item");
-      if (item) {
-        DASH.app.navigate({ service: item.dataset.service, resource: null });
+    var box = document.getElementById("navGroups");
+    box.addEventListener("click", function (e) {
+      var h = e.target.closest(".group-head");
+      if (!h) return;
+      var g = h.getAttribute("data-group");
+      if (closed[g]) delete closed[g]; else closed[g] = 1;
+      persist();
+      render();
+    });
+    var f = document.getElementById("navFilter");
+    f.addEventListener("input", DASH.utils.debounce(function () { filter = f.value; render(); }, 80));
+    f.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        var first = document.querySelector("#navGroups .svc-link");
+        if (first) first.click();
       }
     });
-    elList.addEventListener("keydown", function (e) {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      var item = e.target.closest(".service-item");
-      if (item) {
-        e.preventDefault();
-        DASH.app.navigate({ service: item.dataset.service, resource: null });
-      }
-    });
-
-    if (elSearch) {
-      elSearch.addEventListener("input", DASH.utils.debounce(function () {
-        setSearch(elSearch.value);
-      }, 120));
-    }
-
-    // Listen for SSE count updates so badges refresh without polling.
-    // Debounced via rAF: count + resource events can fire several
-    // times per second under load (every mutating AWS call publishes
-    // a resource event), and each render() JSON-serialises the whole
-    // sidebar state for cache-key comparison.
-    var pendingRender = false;
-    function scheduleRender() {
-      if (pendingRender) return;
-      pendingRender = true;
-      var fire = function () { pendingRender = false; render(); };
-      if (typeof requestAnimationFrame === "function") requestAnimationFrame(fire);
-      else setTimeout(fire, 16);
-    }
-    DASH.bus.subscribe("count", scheduleRender);
-    DASH.bus.subscribe("resource", scheduleRender);
   }
 
-  window.DASH.sidebar = {
-    init: init,
-    render: render,
-    setSearch: setSearch
-  };
+  window.DASH.sidebar = { init: init, render: render, schedule: schedule };
 })();

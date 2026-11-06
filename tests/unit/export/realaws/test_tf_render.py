@@ -110,7 +110,7 @@ def test_renders_s3_lambda_iam(tmp_path: Path) -> None:
 @pytest.mark.skipif(
     shutil.which("terraform") is None, reason="terraform not installed"
 )
-def test_terraform_validates(tmp_path: Path) -> None:
+def test_terraform_validates(tmp_path: Path, terraform_lockfile: Path | None) -> None:
     """Rendered output must pass ``terraform validate``.
 
     Does not hit AWS; ``init -backend=false`` and ``validate`` are offline.
@@ -137,6 +137,10 @@ def test_terraform_validates(tmp_path: Path) -> None:
         target_region="us-east-1",
     )
     ex._write_terraform(final, tmp_path, slots)
+
+    from tests.unit.export.conftest import seed_terraform_lockfile
+
+    seed_terraform_lockfile(tmp_path, terraform_lockfile)
 
     # terraform init -backend=false does not talk to AWS.
     init = subprocess.run(

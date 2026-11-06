@@ -18,6 +18,7 @@ import logging
 import threading
 import time
 
+from localemu.utils.container_utils.container_client import NoSuchNetwork
 from localemu.utils.docker_utils import DOCKER_CLIENT
 
 LOG = logging.getLogger(__name__)
@@ -302,22 +303,35 @@ class VpcNetworkManager:
         # (e.g. the Quiet Router scenario where a route table directs
         # traffic via an instance to a non-VPC destination) is silently
         # dropped by br_netfilter before reaching the next-hop instance.
-        # Best-effort and done OUTSIDE the lock: the docker-run spawn
-        # for the host-netns helper takes ~50ms and we don't want
-        # CreateVpc callers to serialize behind it. A failure here
-        # doesn't roll back the VPC create, just degrades the
-        # cross-subnet route-table data plane until the rule is
-        # re-applied.
-        try:
-            from localemu.services.ec2.docker.host_iptables import (
-                install_vpc_bridge_intra_accept,
-            )
-            install_vpc_bridge_intra_accept(vpc_id)
-        except Exception:
-            LOG.debug(
-                "VPC %s: host-iptables intra-accept install raised",
-                vpc_id, exc_info=True,
-            )
+        # Best-effort and actually async this time: this spawns a
+        # throwaway Docker container for the host-netns helper, which
+        # can take well over 10s under load (observed 13-17s), not the
+        # ~50ms a prior comment here assumed - that made CreateVpc
+        # itself slow enough to blow past common client read timeouts
+        # and trigger duplicate-VPC retries. Run it in a background
+        # thread so CreateVpc returns as soon as the Docker network
+        # exists. A failure/delay here doesn't roll back the VPC
+        # create, just degrades the cross-subnet route-table data
+        # plane until the rule is applied.
+        def _install_intra_accept_async(target_vpc_id: str) -> None:
+            try:
+                from localemu.services.ec2.docker.host_iptables import (
+                    install_vpc_bridge_intra_accept,
+                )
+                install_vpc_bridge_intra_accept(target_vpc_id)
+            except Exception:
+                LOG.debug(
+                    "VPC %s: host-iptables intra-accept install raised",
+                    target_vpc_id, exc_info=True,
+                )
+
+        from localemu.utils.threads import start_worker_thread
+
+        # FuncThread.run() always calls ``func(params)`` positionally -
+        # pass vpc_id via params, not a default-arg closure trick.
+        start_worker_thread(
+            _install_intra_accept_async, params=vpc_id, name="vpc-intra-accept-install"
+        )
 
         return network_name
 
@@ -731,9 +745,12 @@ class VpcNetworkManager:
         # recognise orphan networks across a LocalEmu restart when moto
         # state has been reset but Docker hasn't.
         try:
+            # Non-internal, like the TGW bridge: Docker's DOCKER-INTERNAL
+            # rules drop any frame whose source lies outside the bridge
+            # subnet, and peering traffic keeps its real VPC source.
             network_id = DOCKER_CLIENT.create_network(
                 network_name=peering_net_name,
-                internal=True,
+                internal=False,
                 labels={
                     "localemu.kind": "vpc-peering",
                     "localemu.pcx-id": peering_id,
@@ -948,8 +965,7 @@ class VpcNetworkManager:
             )
             # (2) Install /32 route on every existing peer container
             # pointing at the newcomer's VPC IP via the newcomer's
-            # pcx IP (peers' SNAT rules already cover their own
-            # outbound direction; they just need the host route).
+            # pcx IP (carrying their own VPC IP as the route's source).
             peer_containers = list(
                 (self._vpcs.get(peer_vpc_id) or {}).get("containers", set())
             )
@@ -957,8 +973,15 @@ class VpcNetworkManager:
                 peer_iface = resolve_pcx_iface(peer_c, peer_net)
                 if not peer_iface:
                     continue
+                try:
+                    peer_own_vpc_ip = DOCKER_CLIENT.get_container_ipv4_for_network(
+                        peer_c, f"{VPC_NETWORK_PREFIX}{peer_vpc_id}",
+                    )
+                except Exception:
+                    peer_own_vpc_ip = None
                 add_peer_host_route(
                     peer_c, peer_iface, own_vpc_ip, new_pcx_ip,
+                    src_ip=peer_own_vpc_ip,
                 )
 
     def deregister_container(self, vpc_id: str, container_name: str) -> None:
@@ -1049,7 +1072,20 @@ class VpcNetworkManager:
         with self._lock:
             vpc_info = self._vpcs.get(vpc_id)
             if vpc_info and vpc_info.get("network_id"):
-                return vpc_info["network_name"]
+                network_name = vpc_info["network_name"]
+                try:
+                    DOCKER_CLIENT.inspect_network(network_name)
+                    return network_name
+                except NoSuchNetwork:
+                    # the cached network was removed from under us (e.g. by another
+                    # test's teardown reusing the same VPC id) - drop the stale entry
+                    # and fall through to recreate it below
+                    LOG.debug(
+                        "Cached Docker network %s for VPC %s no longer exists, recreating",
+                        network_name,
+                        vpc_id,
+                    )
+                    self._vpcs.pop(vpc_id, None)
             ts = self._failed_creates.get(vpc_id)
             in_cooldown = ts is not None and (
                 time.time() - ts

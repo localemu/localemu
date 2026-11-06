@@ -273,12 +273,10 @@ class TgwNetworkManager:
     ) -> None:
         """For ``container`` (in ``own_vpc_id``), install:
           - alias own VPC IP on the TGW iface
-          - blanket SNAT on the TGW iface
           - DNAT + /32 route per peer-instance in other VPCs
         """
         from localemu.services.ec2.docker.container_routing import (
-            add_peer_host_route, add_snat_for_pcx,
-            alias_own_vpc_ip_on_pcx, resolve_pcx_iface,
+            add_peer_host_route, alias_own_vpc_ip_on_pcx, resolve_pcx_iface,
         )
         from localemu.services.ec2.docker.vpc_network import VPC_NETWORK_PREFIX
 
@@ -298,7 +296,6 @@ class TgwNetworkManager:
         if not tgw_iface:
             return
         alias_own_vpc_ip_on_pcx(container, tgw_iface, own_vpc_ip)
-        add_snat_for_pcx(container, tgw_iface, own_tgw_ip)
         # DNAT + host route per peer instance of every OTHER attached VPC.
         for peer_att in peers.values():
             peer_vpc_id = peer_att["vpc_id"]
@@ -320,6 +317,7 @@ class TgwNetworkManager:
                     continue
                 add_peer_host_route(
                     container, tgw_iface, peer_vpc_ip, peer_tgw_ip,
+                    src_ip=own_vpc_ip,
                 )
 
     def _program_peers_for_new_container(
@@ -353,7 +351,16 @@ class TgwNetworkManager:
                 iface = resolve_pcx_iface(peer_c, net_name)
                 if not iface:
                     continue
-                add_peer_host_route(peer_c, iface, new_vpc_ip, new_tgw_ip)
+                try:
+                    peer_own_vpc_ip = DOCKER_CLIENT.get_container_ipv4_for_network(
+                        peer_c, f"{VPC_NETWORK_PREFIX}{peer_att['vpc_id']}",
+                    )
+                except Exception:
+                    peer_own_vpc_ip = None
+                add_peer_host_route(
+                    peer_c, iface, new_vpc_ip, new_tgw_ip,
+                    src_ip=peer_own_vpc_ip,
+                )
 
     def _unprogram_for_detached(self, detached_att: dict, peers: dict, vpc_mgr) -> None:
         """Remove /32 DNAT rules that target the detached VPC's CIDR on

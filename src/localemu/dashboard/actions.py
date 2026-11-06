@@ -18,6 +18,7 @@ a modal.
 from __future__ import annotations
 
 import base64
+import contextvars
 import json
 import logging
 from typing import Any
@@ -83,13 +84,31 @@ class _ActionError(Exception):
         self.status = status
 
 
+# Account the console has selected (``account_id`` in the action body).
+# Set by ``ActionsResource`` for the duration of one action so every
+# handler's client targets that account without each handler having to
+# thread the value through.
+_ACTION_ACCOUNT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dashboard_action_account", default=None,
+)
+
+
+# User-agent marker on every console action, so the console's request
+# telemetry can label these calls "via console" (they are internal
+# connect_to calls, like LocalEmu's own service-to-service traffic).
+CONSOLE_USER_AGENT_EXTRA = "LocalEmu-Console/action"
+
+
 def _connect(service: str, region: str | None = None, account_id: str | None = None):
     """Obtain a boto3 client wired to the local gateway."""
+    from botocore.config import Config
+
     from localemu.aws.connect import connect_to
 
     target = connect_to(
-        aws_access_key_id=account_id or DEFAULT_AWS_ACCOUNT_ID,
+        aws_access_key_id=account_id or _ACTION_ACCOUNT.get() or DEFAULT_AWS_ACCOUNT_ID,
         region_name=region or DEFAULT_REGION,
+        config=Config(user_agent_extra=CONSOLE_USER_AGENT_EXTRA),
     )
     return getattr(target, service)
 
@@ -420,11 +439,73 @@ def _action_dynamodb_query(body: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Create / purge (console "Create" button and SQS "Purge" row action)
+# ---------------------------------------------------------------------------
+
+
+def _required_name(body: dict) -> str:
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise _ActionError("'name' is required")
+    return name
+
+
+def _action_s3_create_bucket(body: dict) -> dict:
+    name = _required_name(body)
+    region = body.get("region") or DEFAULT_REGION
+    kwargs: dict[str, Any] = {"Bucket": name}
+    if region != "us-east-1":
+        kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
+    resp = _connect("s3", region=region).create_bucket(**kwargs)
+    return {"bucket": name, "location": resp.get("Location")}
+
+
+def _action_sqs_create_queue(body: dict) -> dict:
+    name = _required_name(body)
+    attrs = {}
+    if name.endswith(".fifo"):
+        attrs["FifoQueue"] = "true"
+    resp = _connect("sqs", region=body.get("region")).create_queue(QueueName=name, Attributes=attrs)
+    return {"queue_url": resp.get("QueueUrl")}
+
+
+def _action_sqs_purge_queue(body: dict) -> dict:
+    region = body.get("region")
+    queue_url = _resolve_queue_url(body, region)
+    _connect("sqs", region=region).purge_queue(QueueUrl=queue_url)
+    return {"purged": queue_url}
+
+
+def _action_sns_create_topic(body: dict) -> dict:
+    name = _required_name(body)
+    resp = _connect("sns", region=body.get("region")).create_topic(Name=name)
+    return {"topic_arn": resp.get("TopicArn")}
+
+
+def _action_dynamodb_create_table(body: dict) -> dict:
+    name = _required_name(body)
+    pk = (body.get("partition_key") or "id").strip()
+    resp = _connect("dynamodb", region=body.get("region")).create_table(
+        TableName=name,
+        AttributeDefinitions=[{"AttributeName": pk, "AttributeType": "S"}],
+        KeySchema=[{"AttributeName": pk, "KeyType": "HASH"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    desc = resp.get("TableDescription") or {}
+    return {"table_arn": desc.get("TableArn"), "status": desc.get("TableStatus")}
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
 
 _DISPATCH: dict[tuple[str, str], Any] = {
+    ("s3", "create-bucket"): _action_s3_create_bucket,
+    ("sqs", "create-queue"): _action_sqs_create_queue,
+    ("sqs", "purge-queue"): _action_sqs_purge_queue,
+    ("sns", "create-topic"): _action_sns_create_topic,
+    ("dynamodb", "create-table"): _action_dynamodb_create_table,
     ("lambda", "invoke"): _action_lambda_invoke,
     ("sqs", "send-message"): _action_sqs_send_message,
     ("sns", "publish"): _action_sns_publish,
@@ -447,8 +528,14 @@ class ActionsResource:
             return _json_response(
                 {"error": f"Unknown action: {service}/{action}"}, status=404,
             )
+        token = None
         try:
             body = _parse_body(request)
+            account = str(body.get("account_id") or "").strip()
+            if account:
+                if not (len(account) == 12 and account.isdigit()):
+                    raise _ActionError("'account_id' must be a 12-digit account id")
+                token = _ACTION_ACCOUNT.set(account)
             result = handler(body)
             return _json_response({"ok": True, "result": result})
         except _ActionError as exc:
@@ -468,3 +555,6 @@ class ActionsResource:
             return _json_response(
                 {"error": str(exc), "error_code": code}, status=500,
             )
+        finally:
+            if token is not None:
+                _ACTION_ACCOUNT.reset(token)

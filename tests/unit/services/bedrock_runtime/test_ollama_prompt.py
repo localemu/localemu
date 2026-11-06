@@ -91,14 +91,16 @@ def test_generate_sends_system_only_when_given(monkeypatch):
         def json(self): return {"response": "ok"}
 
     import requests
-    monkeypatch.setattr(requests, "post", lambda url, json=None, **kw: sent.append(json) or _Resp())
+    urls = []
+    monkeypatch.setattr(requests, "post", lambda url, json=None, **kw: (urls.append(url), sent.append(json), _Resp())[2])
     monkeypatch.setattr(ollama_backend, "ensure_model_pulled", lambda tag: None)
-    monkeypatch.setattr(ollama_backend, "_ensure_container", lambda: 1234)
+    monkeypatch.setattr(ollama_backend, "_url", lambda: "http://sidecar:11434")
 
     ollama_backend.generate("m", "p")
     ollama_backend.generate("m", "p", system="S")
     assert "system" not in sent[0]
     assert sent[1]["system"] == "S"
+    assert urls == ["http://sidecar:11434/api/generate"] * 2
 
 
 def test_invoke_ollama_end_to_end_wiring(monkeypatch):

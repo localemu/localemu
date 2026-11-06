@@ -213,7 +213,7 @@
     }
   },
   "tests/aws/scenario/loan_broker/test_loan_broker.py::TestLoanBrokerScenario::test_prefill_dynamodb_table": {
-    "recorded-date": "13-10-2025, 18:54:57",
+    "recorded-date": "23-10-2026, 13:31:36",
     "recorded-content": {
       "describe_table": {
         "Table": {
@@ -224,11 +224,11 @@
             }
           ],
           "BillingModeSummary": {
-            "BillingMode": "PAY_PER_REQUEST",
-            "LastUpdateToPayPerRequestDateTime": "datetime"
+            "BillingMode": "PAY_PER_REQUEST"
           },
           "CreationDateTime": "datetime",
           "DeletionProtectionEnabled": false,
+          "GlobalSecondaryIndexes": [],
           "ItemCount": 0,
           "KeySchema": [
             {
@@ -236,6 +236,7 @@
               "KeyType": "HASH"
             }
           ],
+          "LocalSecondaryIndexes": [],
           "ProvisionedThroughput": {
             "NumberOfDecreasesToday": 0,
             "ReadCapacityUnits": 0,
@@ -318,6 +319,11 @@
         }
       },
       "update_item": {
+        "Attributes": {},
+        "ConsumedCapacity": {
+          "CapacityUnits": 0.5,
+          "TableName": "LoanBrokerBanksTable"
+        },
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 200
@@ -348,6 +354,7 @@
         }
       },
       "delete_item": {
+        "Attributes": {},
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 200

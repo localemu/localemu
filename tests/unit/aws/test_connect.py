@@ -315,6 +315,30 @@ class TestClientFactory:
         external_lambda_client.list_functions()
         assert internal_dto is None
 
+    def test_internal_call_with_enforce_role_permissions_flag(self, create_dummy_request_parameter_gateway):
+        """``request_metadata(enforce_role_permissions=True)`` (used by
+        Pipes/Scheduler target delivery so the assumed role's own
+        permission policy still gates the action) must ride along on the
+        DTO like ``source_arn``/``service_principal`` - it's still an
+        internal call carrying LocalEmu's DTO, just with this one extra
+        signal for the enforcer to act on."""
+        factory = InternalClientFactory()
+        test_params = {}
+
+        def echo_request_handler(_: HandlerChain, context: RequestContext, response: Response):
+            test_params["is_internal"] = context.is_internal_call
+            if context.internal_request_params:
+                test_params.update(context.internal_request_params)
+            response.status_code = 200
+
+        endpoint_url = create_dummy_request_parameter_gateway([echo_request_handler])
+
+        factory(endpoint_url=endpoint_url).lambda_.request_metadata(
+            enforce_role_permissions=True
+        ).list_functions()
+
+        assert test_params == {"is_internal": True, "enforce_role_permissions": True}
+
     def test_internal_call(self, create_dummy_request_parameter_gateway):
         """Test the creation of a strictly internal client"""
         # TODO add utility to simplify (second iteration)

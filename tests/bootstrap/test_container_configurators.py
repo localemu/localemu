@@ -117,7 +117,6 @@ def test_default_localemu_container_configurator(
 
     monkeypatch.setenv("DEBUG", "1")
     monkeypatch.setenv("LOCALEMU_API_KEY", "")
-    monkeypatch.setenv("ACTIVATE_PRO", "0")
     monkeypatch.setattr(config, "DEBUG", True)
     monkeypatch.setattr(config, "VOLUME_DIR", str(volume))
     monkeypatch.setattr(config, "DOCKER_FLAGS", "-p 23456:4566 -e MY_TEST_VAR=foobar")

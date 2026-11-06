@@ -18,19 +18,13 @@
         // the existing per-topic endpoint.
         return DASH.api.fetchJSON("/_localemu/api/resources/sns/" + name + "/subscriptions", { etag: false, timeoutMs: 6000 })
           .then(function (r) {
-            var subs = (r && r.data && r.data.subscriptions) || [];
+            var d = (r && r.data) || {};
             return {
               name: key,
-              subscriptions: subs,
+              subscriptions: d.subscriptions || [],
+              arn: d.arn || "",
+              region: d.region || "",
             };
-          }).then(function (data) {
-            // Enrich with the listing row (for arn + region).
-            var hit = (DASH.app.state.resources || []).find(function (x) { return x.name === key; });
-            if (hit) {
-              data.arn = hit.arn || data.arn;
-              data.region = hit.region || data.region;
-            }
-            return data;
           });
       },
       defaultTab: "details",

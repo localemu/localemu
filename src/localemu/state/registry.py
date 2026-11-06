@@ -24,7 +24,6 @@ NATIVE_STORES = {
     "route53":         ("localemu.services.route53.models", "route53_stores"),
     "route53resolver": ("localemu.services.route53resolver.models", "route53resolver_stores"),
     "opensearch":      ("localemu.services.opensearch.models", "opensearch_stores"),
-    "transcribe":      ("localemu.services.transcribe.models", "transcribe_stores"),
     "events_v1":       ("localemu.services.events.v1.models", "events_stores"),
     "sts":             ("localemu.services.sts.models", "sts_stores"),
     # CloudFront keeps a native sidecar store with the OAC / OAI bucket
@@ -83,7 +82,7 @@ LOAD_ORDER = [
     ["s3", "sqs", "sns", "dynamodb", "dynamodbstreams", "kinesis",
      "secretsmanager", "ssm", "route53", "route53resolver", "guardduty_findings"],
     # Tier 2: depends on S3 (Lambda code) + Tier 0-1
-    ["lambda_", "cloudwatch", "logs", "opensearch", "transcribe"],
+    ["lambda_", "cloudwatch", "logs", "opensearch"],
     # Tier 3: depends on Lambda + messaging
     ["apigateway", "events", "events_v1", "stepfunctions",
      "cloudtrail", "firehose", "scheduler",

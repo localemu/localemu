@@ -1009,6 +1009,19 @@ LAMBDA_INVOKE_WAIT_FOR_ACTIVE_SECONDS = float(
     os.environ.get("LAMBDA_INVOKE_WAIT_FOR_ACTIVE_SECONDS") or 5
 )
 
+# PUBLIC: 90 (default), 0 disables the ceiling (waits forever, old behavior)
+# Hard ceiling on how long a version's startup (prepare_version - docker
+# image pull/build, runtime-init) is allowed to run before the version is
+# forced to State=Failed with a StateReason instead of staying Pending
+# forever. Observed root cause of a function stuck Pending for 90s+ on a
+# cold Docker image cache; a stuck Pending version makes
+# UpdateFunctionConfiguration fail too ("cannot be updated if an old one
+# is not running"), so this ceiling exists even though the slow path
+# itself is intermittent and not always the image cache.
+LAMBDA_VERSION_START_TIMEOUT_SECONDS = float(
+    os.environ.get("LAMBDA_VERSION_START_TIMEOUT_SECONDS") or 90
+)
+
 # PUBLIC: base images for Lambda (default) https://docs.aws.amazon.com/lambda/latest/dg/runtimes-images.html
 # localemu/services/lambda_/invocation/lambda_models.py:IMAGE_MAPPING
 # Customize the Docker image of Lambda runtimes, either by:

@@ -61,6 +61,10 @@ class PipeTargetDispatcher:
             # the AWS-documented trust policy for Pipes-managed roles
             # names that principal.
             caller_service_principal="pipes",
+            # The role's own permission policy gates delivery too, not
+            # just its trust policy - a role with zero attached
+            # permissions must not be able to relay anything.
+            enforce_role_permissions=True,
         )
         self._sender = factory.get_target_sender()
         return self._sender

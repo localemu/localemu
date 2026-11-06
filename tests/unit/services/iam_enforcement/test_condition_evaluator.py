@@ -191,10 +191,37 @@ class TestSetOperators:
         assert matches_conditions(stmt, ctx) is False
 
     def test_for_all_values_empty_context_treated_as_absent(self):
-        """Empty list in context is treated as absent key."""
+        """Empty list in context is treated as an absent key; ForAllValues is vacuously true for it
+        (AWS behaviour, confirmed against iam:SimulateCustomPolicy)."""
         stmt = _stmt({"ForAllValues:StringEquals": {"aws:TagKeys": ["env"]}})
         ctx = {"aws:TagKeys": []}
-        assert matches_conditions(stmt, ctx) is False
+        assert matches_conditions(stmt, ctx) is True
+
+    def test_for_all_values_absent_key_is_true(self):
+        stmt = _stmt({"ForAllValues:StringEquals": {"aws:TagKeys": ["env", "team"]}})
+        assert matches_conditions(stmt, {}) is True
+
+    def test_for_any_value_absent_key_is_false(self):
+        stmt = _stmt({"ForAnyValue:StringEquals": {"aws:TagKeys": ["env", "team"]}})
+        assert matches_conditions(stmt, {}) is False
+
+    def test_negated_operator_absent_key_is_true(self):
+        for op, values in (("StringNotEquals", "vpc-1"), ("StringNotLike", "b*"), ("NotIpAddress", "10.0.0.0/8"),
+                           ("ArnNotLike", "arn:aws:iam::*:user/b*")):
+            key = {"NotIpAddress": "aws:SourceIp", "ArnNotLike": "aws:PrincipalArn"}.get(op, "aws:SourceVpc")
+            assert matches_conditions(_stmt({op: {key: values}}), {}) is True, op
+
+    def test_negated_operator_with_several_values_means_none_may_match(self):
+        stmt = _stmt({"StringNotEquals": {"aws:username": ["alice", "bob"]}})
+        assert matches_conditions(stmt, {"aws:username": "alice"}) is False
+        assert matches_conditions(stmt, {"aws:username": "bob"}) is False
+        assert matches_conditions(stmt, {"aws:username": "carol"}) is True
+        ip = _stmt({"NotIpAddress": {"aws:SourceIp": ["10.0.0.0/8", "192.168.0.0/16"]}})
+        assert matches_conditions(ip, {"aws:SourceIp": "10.2.3.4"}) is False
+        assert matches_conditions(ip, {"aws:SourceIp": "8.8.8.8"}) is True
+
+    def test_positive_operator_absent_key_stays_false(self):
+        assert matches_conditions(_stmt({"StringEquals": {"aws:username": "alice"}}), {}) is False
 
     def test_for_any_value_single_context_value(self):
         """Single (non-list) context value is wrapped in a list."""

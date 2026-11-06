@@ -12,6 +12,8 @@ Provides REST endpoints for:
 from __future__ import annotations
 
 import collections
+import contextlib
+import contextvars
 import logging
 import threading
 import time
@@ -29,10 +31,115 @@ _start_time = time.time()
 
 
 # ---------------------------------------------------------------------------
+# Account scope
+#
+# The console's account switcher scopes the overview counts and the
+# per-service resource lists to one AWS account. Rather than threading an
+# ``account_id`` argument through ~60 counter / lister functions, the
+# request handler sets this ContextVar for the duration of the call and the
+# two iteration primitives every counter and lister goes through
+# (``_iter_moto_backends`` for moto-backed services and ``_iter_stores``
+# for LocalEmu-native AccountRegionBundle stores) skip other accounts.
+# Unset (the default) means "all accounts", which is the historical
+# behaviour every existing caller relies on.
+# ---------------------------------------------------------------------------
+_ACCOUNT_SCOPE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dashboard_account_scope", default=None,
+)
+
+
+def _account_in_scope(account_id) -> bool:
+    scope = _ACCOUNT_SCOPE.get()
+    return scope is None or str(account_id) == scope
+
+
+@contextlib.contextmanager
+def account_scope(account_id: str | None):
+    """Restrict counters and listers to ``account_id`` (``None`` = all)."""
+    token = _ACCOUNT_SCOPE.set(account_id or None)
+    try:
+        yield
+    finally:
+        _ACCOUNT_SCOPE.reset(token)
+
+
+def _wafv2_scope(obj, arn: str) -> str:
+    """WAFv2's moto model never sets ``self.scope`` on ACL/IPSet/RuleGroup
+    objects (confirmed: not assigned anywhere in ``FakeWebACL.__init__``
+    etc.), so the real signal is the ARN's ``regional/`` vs ``global/``
+    segment (``moto/wafv2/utils.py: make_arn``)."""
+    direct = getattr(obj, "scope", "") or ""
+    if direct:
+        return direct
+    if "global/" in (arn or ""):
+        return "CLOUDFRONT"
+    if "regional/" in (arn or ""):
+        return "REGIONAL"
+    return "-"
+
+
+def _epoch_to_iso(v) -> str:
+    """ISO-8601 string from a Unix-epoch float/int (as several moto models
+    store ``last_changed_date``-style fields), or ``""`` if empty/unparseable."""
+    if not v:
+        return ""
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(float(v), tz=_dt.timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return str(v)
+
+
+def _enum_value(v, default: str = "-") -> str:
+    """Plain string value of a ``str``-mixin ``Enum`` member (``.value``,
+    e.g. ``"MUTABLE"``) rather than its ``str()`` repr (e.g.
+    ``"RepoTagMutability.MUTABLE"``), or the value unchanged if it's
+    already a plain string."""
+    if v is None:
+        return default
+    return str(getattr(v, "value", v))
+
+
+def _dashboard_obj_to_dict(obj):
+    """Best-effort dict view of a value that's either already a (Typed)dict
+    or a plain object - some LocalEmu config fields (e.g. Lambda's
+    ``snap_start``) are TypedDicts, others (e.g. ``vpc_config``) are real
+    dataclass instances, and ``.__dict__`` only works on the latter."""
+    if not obj:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    return getattr(obj, "__dict__", None)
+
+
+def _iter_stores(bundle):
+    """``bundle.iter_stores()`` restricted to the current account scope."""
+    for account_id, region, store in bundle.iter_stores():
+        if _account_in_scope(account_id):
+            yield account_id, region, store
+
+
+def _valid_account_param(value) -> str | None:
+    """Return a 12-digit account id from a query parameter, else ``None``."""
+    value = (value or "").strip()
+    if len(value) == 12 and value.isdigit():
+        return value
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Moto backend iteration helper - iterates ALL accounts and ALL regions
 # ---------------------------------------------------------------------------
 
 def _iter_moto_backends(service_name: str):
+    """Yield ``(account_id, region, backend)`` restricted to the account
+    scope (see :func:`account_scope`)."""
+    for account_id, region, backend in _iter_moto_backends_all(service_name):
+        if _account_in_scope(account_id):
+            yield account_id, region, backend
+
+
+def _iter_moto_backends_all(service_name: str):
     """Yield ``(account_id, region, backend)`` for every instantiated
     account/region combination in the given moto BackendDict.
 
@@ -273,7 +380,7 @@ def record_activity(
             )
             # Invalidate the server-side count cache for this service
             # so the next /api/overview reflects the change.
-            _count_cache.pop(service, None)
+            invalidate_count_cache(service)
     except Exception:
         LOG.debug("bus publish failed for %s.%s", service, operation, exc_info=True)
 
@@ -291,11 +398,48 @@ def _get_enabled_features() -> dict[str, bool]:
         "persistence": bool(getattr(config, "PERSISTENCE", False)),
         "lambda_docker": bool(getattr(config, "LAMBDA_RUNTIME_EXECUTOR", "") == "docker"),
         "debug": bool(getattr(config, "DEBUG", False)),
+        "iam_enforcement": iam_enforcement_mode() != "off",
     }
 
 
+def iam_enforcement_mode() -> str:
+    """``"enforce"`` / ``"audit"`` / ``"off"``, read the same way the
+    enforcer reads it (``IAM_ENFORCEMENT`` env var at call time)."""
+    import os
+
+    mode = os.environ.get("IAM_ENFORCEMENT", "").strip().lower()
+    if mode == "1":
+        return "enforce"
+    if mode == "soft":
+        return "audit"
+    return "off"
+
+
 _count_cache: dict[str, tuple[float, int]] = {}  # service → (timestamp, count)
+# Per-account counts, keyed ``(account_id, service)``. Kept separate from
+# ``_count_cache`` because the CloudTrail recording hook invalidates
+# ``_count_cache`` by bare service name.
+_count_cache_scoped: dict[tuple[str, str], tuple[float, int]] = {}
 _COUNT_CACHE_TTL = 5.0  # seconds
+
+# Services that have a real counter in ``_count_resources_uncached``.
+# Every other service reports 0 because nothing counts it, not because
+# it is known to be empty; the overview payload exposes this as
+# ``counted: false`` so the console can say so instead of showing 0.
+COUNTED_SERVICES = frozenset({
+    "s3", "sqs", "lambda", "cloudwatch", "dynamodb", "sns", "logs", "ecs",
+    "eks", "ec2", "rds", "opensearch", "cloudtrail", "secretsmanager",
+    "stepfunctions", "kinesis", "events", "apigateway", "apigatewayv2",
+    "iam", "vpc", "route53", "elbv2", "kms", "ssm", "cognito-idp", "ecr",
+    "batch", "pipes", "scheduler", "wafv2", "glue",
+})
+
+
+def invalidate_count_cache(service_name: str) -> None:
+    """Drop every cached count (all-accounts and per-account) for a service."""
+    _count_cache.pop(service_name, None)
+    for key in [k for k in _count_cache_scoped if k[1] == service_name]:
+        _count_cache_scoped.pop(key, None)
 
 
 def _count_resources(service_name: str) -> int:
@@ -303,13 +447,25 @@ def _count_resources(service_name: str) -> int:
     Best-effort count of resources currently held by *service_name*.
     Returns 0 if the service store is unavailable or not yet loaded.
     Cached with 5-second TTL to avoid expensive iteration on every request (3.2 fix).
+    Honours :func:`account_scope`.
     """
-    cached = _count_cache.get(service_name)
+    scope = _ACCOUNT_SCOPE.get()
+    if service_name == "cloudtrail":
+        # Grows on every call, so a cached value is stale immediately.
+        # Unscoped it is an O(1) store size.
+        return _count_resources_uncached(service_name)
+    if scope is None:
+        cached = _count_cache.get(service_name)
+    else:
+        cached = _count_cache_scoped.get((scope, service_name))
     if cached and (time.time() - cached[0]) < _COUNT_CACHE_TTL:
         return cached[1]
 
     count = _count_resources_uncached(service_name)
-    _count_cache[service_name] = (time.time(), count)
+    if scope is None:
+        _count_cache[service_name] = (time.time(), count)
+    else:
+        _count_cache_scoped[(scope, service_name)] = (time.time(), count)
     return count
 
 
@@ -319,7 +475,7 @@ def _count_resources_uncached(service_name: str) -> int:
             from localemu.services.s3.models import s3_stores
 
             total = 0
-            for _account_id, _region, store in s3_stores.iter_stores():
+            for _account_id, _region, store in _iter_stores(s3_stores):
                 total += len(store.buckets)
             return total
 
@@ -327,7 +483,7 @@ def _count_resources_uncached(service_name: str) -> int:
             from localemu.services.sqs.models import sqs_stores
 
             total = 0
-            for _account_id, _region, store in sqs_stores.iter_stores():
+            for _account_id, _region, store in _iter_stores(sqs_stores):
                 total += len(store.queues)
             return total
 
@@ -335,7 +491,7 @@ def _count_resources_uncached(service_name: str) -> int:
             from localemu.services.lambda_.invocation.models import lambda_stores
 
             total = 0
-            for _account_id, _region, store in lambda_stores.iter_stores():
+            for _account_id, _region, store in _iter_stores(lambda_stores):
                 total += len(store.functions)
             return total
 
@@ -369,7 +525,14 @@ def _count_resources_uncached(service_name: str) -> int:
         if service_name == "cloudtrail":
             try:
                 from localemu.services.cloudtrail.event_store import get_event_store
-                return get_event_store().get_event_count()
+                store = get_event_store()
+                scope = _ACCOUNT_SCOPE.get()
+                if scope is None:
+                    return store.get_event_count()
+                return sum(
+                    1 for e in store.get_recent(limit=store.get_event_count())
+                    if (e.account_id or "") == scope
+                )
             except Exception:
                 return len(_activity_log)
 
@@ -464,7 +627,7 @@ def _count_kms() -> int:
     from localemu.services.kms.models import kms_stores
 
     total = 0
-    for _acct, _region, store in kms_stores.iter_stores():
+    for _acct, _region, store in _iter_stores(kms_stores):
         total += len(store.keys)
     return total
 
@@ -518,7 +681,7 @@ def _count_sns_topics() -> int:
     from localemu.services.sns.models import sns_stores
 
     total = 0
-    for _account_id, _region, store in sns_stores.iter_stores():
+    for _account_id, _region, store in _iter_stores(sns_stores):
         total += len(store.topics)
     return total
 
@@ -584,7 +747,7 @@ def _count_stepfunctions() -> int:
     from localemu.services.stepfunctions.backend.models import sfn_stores
 
     total = 0
-    for _acct, _region, store in sfn_stores.iter_stores():
+    for _acct, _region, store in _iter_stores(sfn_stores):
         total += len(store.state_machines)
     return total
 
@@ -604,7 +767,7 @@ def _count_events() -> int:
     from localemu.services.events.models import events_stores
 
     total = 0
-    for _acct, _region, store in events_stores.iter_stores():
+    for _acct, _region, store in _iter_stores(events_stores):
         for _name, bus in store.event_buses.items():
             total += len(bus.rules)
     return total
@@ -615,7 +778,7 @@ def _count_apigateway() -> int:
     from localemu.services.apigateway.models import apigateway_stores
 
     total = 0
-    for _acct, _region, store in apigateway_stores.iter_stores():
+    for _acct, _region, store in _iter_stores(apigateway_stores):
         total += len(store.rest_apis)
     return total
 
@@ -762,41 +925,73 @@ class OverviewResource:
         # ETag derived from the global generation. Any publish() bumps
         # it, so the next poll sees a fresh tag and we serve real data;
         # if nothing happened, we return 304.
-        etag = get_bus().etag_for("*")
+        account = _valid_account_param(request.args.get("account"))
+        etag = get_bus().etag_for("*")[:-1] + f'-{account or "all"}"'
 
         states = SERVICE_PLUGINS.get_states()
 
         service_data: dict[str, dict] = {}
-        for svc_name, state in sorted(states.items()):
-            count = _count_resources(svc_name)
-            service_data[svc_name] = {
-                "status": state.value if hasattr(state, "value") else str(state),
-                "resources": count,
-            }
+        with account_scope(account):
+            for svc_name, state in sorted(states.items()):
+                count = _count_resources(svc_name)
+                service_data[svc_name] = {
+                    "status": state.value if hasattr(state, "value") else str(state),
+                    "resources": count,
+                    "counted": svc_name in COUNTED_SERVICES,
+                }
 
-        # VPC is part of EC2, not a separate plugin -- inject manually
-        vpc_count = _count_vpc()
-        service_data["vpc"] = {"status": "available", "resources": vpc_count}
+            # VPC is part of EC2, not a separate plugin -- inject manually
+            vpc_count = _count_resources("vpc")
+            service_data["vpc"] = {
+                "status": "available", "resources": vpc_count, "counted": True,
+            }
 
         # Accounts panel surfaces the central account registry. It is not
         # a real AWS service but the dashboard treats it as one so the
         # sidebar can route to it. Resource count = number of accounts
         # currently known to this instance.
         try:
-            from localemu.accounts import get_registry
-            account_count = len(get_registry().list())
+            account_count = len(_dashboard_visible_accounts())
         except Exception:
             account_count = 0
         service_data["accounts"] = {
-            "status": "available", "resources": account_count,
+            "status": "available", "resources": account_count, "counted": True,
         }
+
+        from .registry import all_specs, aws_service_names
+
+        registry_names = {spec.name for spec in all_specs()}
+        counted_registry = sorted(registry_names & (COUNTED_SERVICES | {"vpc"}))
+        total_resources = sum(
+            info["resources"] for name, info in service_data.items()
+            if name in registry_names and name != "cloudtrail"
+        )
+        in_use = sorted(
+            name for name, info in service_data.items()
+            if name in registry_names and info["resources"] > 0
+        )
 
         payload = {
             "version": constants.VERSION,
             "uptime_seconds": int(time.time() - _start_time),
             "port": config.GATEWAY_LISTEN[0].port,
             "features": _get_enabled_features(),
+            "account": account,
             "services": service_data,
+            "totals": {
+                # Sum over registry services that have a counter. CloudTrail's
+                # "count" is the number of recorded events, not resources, so
+                # it is excluded from the resource total.
+                "resources": total_resources,
+                "services_in_use": len(in_use),
+                # Real, distinct AWS services only -- excludes the "vpc"
+                # dashboard-navigation entry so this matches the site's one
+                # source of truth (coverage.json's total_services). "vpc" is
+                # still fully present in `services`/in_use/resource totals
+                # above; it's just not counted as a 134th AWS service.
+                "services_total": len(registry_names & aws_service_names()),
+                "services_counted": len(counted_registry),
+            },
         }
         return _etag_response(payload, etag, request, cache_max_age=10)
 
@@ -834,10 +1029,12 @@ class ResourcesResource:
 
         from .bus import get_bus
 
-        etag = get_bus().etag_for(f"resources:{service}")
+        account = _valid_account_param(request.args.get("account"))
+        etag = get_bus().etag_for(f"resources:{service}")[:-1] + f'-{account or "all"}"'
 
         try:
-            items = self._list_resources(service)
+            with account_scope(account):
+                items = self._list_resources(service)
         except Exception:
             LOG.debug("error listing resources for %s", service, exc_info=True)
             return _json_response({"service": service, "resources": None, "error": "backend error", "total": 0})
@@ -925,6 +1122,30 @@ class ResourcesResource:
             return ResourcesResource._list_wafv2()
         if service == "glue":
             return ResourcesResource._list_glue()
+        if service == "cloudformation":
+            return ResourcesResource._list_cloudformation()
+        if service == "athena":
+            return ResourcesResource._list_athena()
+        if service == "cognito-idp":
+            return ResourcesResource._list_cognito_idp()
+        if service == "cloudfront":
+            return ResourcesResource._list_cloudfront()
+        if service == "kafka":
+            return ResourcesResource._list_kafka()
+        if service == "mq":
+            return ResourcesResource._list_mq()
+        if service == "firehose":
+            return ResourcesResource._list_firehose()
+        if service == "acm":
+            return ResourcesResource._list_acm()
+        if service == "ses":
+            return ResourcesResource._list_ses()
+        if service == "sesv2":
+            return ResourcesResource._list_sesv2()
+        if service == "resource-groups":
+            return ResourcesResource._list_resource_groups()
+        if service == "resourcegroupstaggingapi":
+            return ResourcesResource._list_resourcegroupstaggingapi()
         return []
 
     @staticmethod
@@ -942,7 +1163,7 @@ class ResourcesResource:
 
         buckets: list[dict] = []
         seen: set[tuple[str, str]] = set()
-        for account_id, _region, store in s3_stores.iter_stores():
+        for account_id, _region, store in _iter_stores(s3_stores):
             for name, bucket in store.buckets.items():
                 key = (account_id, name)
                 if key in seen:
@@ -973,7 +1194,7 @@ class ResourcesResource:
         from localemu.services.sqs.models import sqs_stores
 
         queues: list[dict] = []
-        for _account_id, region, store in sqs_stores.iter_stores():
+        for _account_id, region, store in _iter_stores(sqs_stores):
             for name, queue in store.queues.items():
                 try:
                     messages = queue.approximate_number_of_messages
@@ -994,7 +1215,7 @@ class ResourcesResource:
         from localemu.services.lambda_.invocation.models import lambda_stores
 
         functions: list[dict] = []
-        for _account_id, _region, store in lambda_stores.iter_stores():
+        for _account_id, _region, store in _iter_stores(lambda_stores):
             for fn_name, fn in store.functions.items():
                 latest = fn.latest()
                 if latest:
@@ -1051,7 +1272,7 @@ class ResourcesResource:
         from localemu.services.sns.models import sns_stores
 
         topics: list[dict] = []
-        for _account_id, region, store in sns_stores.iter_stores():
+        for _account_id, region, store in _iter_stores(sns_stores):
             for arn, topic in store.topics.items():
                 sub_arns = topic.get("subscriptions", []) if isinstance(topic, dict) else getattr(topic, "subscriptions", [])
                 sub_count = len(sub_arns) if sub_arns else 0
@@ -1292,7 +1513,7 @@ class ResourcesResource:
         from localemu.services.stepfunctions.backend.models import sfn_stores
 
         machines: list[dict] = []
-        for _acct, region, store in sfn_stores.iter_stores():
+        for _acct, region, store in _iter_stores(sfn_stores):
             for arn, sm in store.state_machines.items():
                 machines.append(
                     {
@@ -1331,7 +1552,7 @@ class ResourcesResource:
         from localemu.services.events.models import events_stores
 
         rules: list[dict] = []
-        for _acct, region, store in events_stores.iter_stores():
+        for _acct, region, store in _iter_stores(events_stores):
             for bus_name, bus in store.event_buses.items():
                 for rule_name, rule in bus.rules.items():
                     state = getattr(rule, "state", "ENABLED")
@@ -1353,7 +1574,7 @@ class ResourcesResource:
         from localemu.services.apigateway.models import apigateway_stores
 
         apis: list[dict] = []
-        for _acct, region, store in apigateway_stores.iter_stores():
+        for _acct, region, store in _iter_stores(apigateway_stores):
             for api_id, container in store.rest_apis.items():
                 rest_api = getattr(container, "rest_api", None) or container
                 name = getattr(rest_api, "name", api_id)
@@ -1614,7 +1835,7 @@ class ResourcesResource:
             for lb_arn, lb in getattr(backend, "load_balancers", {}).items():
                 name = getattr(lb, "name", lb_arn.split("/")[-2] if "/" in lb_arn else lb_arn)
                 scheme = getattr(lb, "scheme", "-")
-                lb_type = getattr(lb, "load_balancer_type", "-")
+                lb_type = getattr(lb, "type", "-")
                 state = getattr(lb, "state", None)
                 state_str = getattr(state, "code", state) if state is not None else "-"
                 dns = getattr(lb, "dns_name", "-")
@@ -1640,7 +1861,7 @@ class ResourcesResource:
         from localemu.services.kms.models import kms_stores
 
         keys: list[dict] = []
-        for _acct, region, store in kms_stores.iter_stores():
+        for _acct, region, store in _iter_stores(kms_stores):
             # Build a key_id -> [alias_name, ...] index once per store.
             alias_index: dict[str, list[str]] = {}
             for alias_name, alias in (store.aliases or {}).items():
@@ -1683,7 +1904,7 @@ class ResourcesResource:
                 latest = versions[-1] if isinstance(versions, list) else versions
                 params.append({
                     "name": name,
-                    "type": str(getattr(latest, "type", "-")),
+                    "type": str(getattr(latest, "parameter_type", "-")),
                     "version": getattr(latest, "version", "-"),
                     "last_modified": str(getattr(latest, "last_modified_date", "-")),
                     "region": region,
@@ -1729,7 +1950,7 @@ class ResourcesResource:
                     "name": name,
                     "uri": getattr(repo, "uri", ""),
                     "arn": getattr(repo, "arn", ""),
-                    "tag_mutability": str(getattr(repo, "image_tag_mutability", "-")),
+                    "tag_mutability": _enum_value(getattr(repo, "image_tag_mutability", None)),
                     "scan_on_push": bool(
                         (getattr(repo, "image_scanning_configuration", {}) or {})
                         .get("scanOnPush", False)
@@ -1866,7 +2087,7 @@ class ResourcesResource:
                     "kind": "web-acl",
                     "arn": arn,
                     "id": getattr(acl, "id", ""),
-                    "scope": getattr(acl, "scope", "-"),
+                    "scope": _wafv2_scope(acl, arn),
                     "rules": len(getattr(acl, "rules", []) or []),
                     "associated": len(getattr(acl, "associated_resources", []) or []),
                     "region": region,
@@ -1877,7 +2098,7 @@ class ResourcesResource:
                     "kind": "ip-set",
                     "arn": arn,
                     "id": getattr(ip_set, "ip_set_id", ""),
-                    "scope": getattr(ip_set, "scope", "-"),
+                    "scope": _wafv2_scope(ip_set, arn),
                     "rules": len(getattr(ip_set, "addresses", []) or []),
                     "associated": 0,
                     "region": region,
@@ -1888,7 +2109,7 @@ class ResourcesResource:
                     "kind": "rule-group",
                     "arn": arn,
                     "id": getattr(rg, "id", ""),
-                    "scope": getattr(rg, "scope", "-"),
+                    "scope": _wafv2_scope(rg, arn),
                     "rules": len(getattr(rg, "rules", []) or []),
                     "associated": 0,
                     "region": region,
@@ -2007,6 +2228,161 @@ class ResourcesResource:
                     })
 
         return rows
+
+    @staticmethod
+    def _list_cloudformation() -> list[dict]:
+        from localemu.services.cloudformation.stores import cloudformation_stores
+
+        rows: list[dict] = []
+        for _acct, region, store in _iter_stores(cloudformation_stores):
+            # v2 engine is the default (``cloudformation:default`` in
+            # plux.ini) - it's ``stacks_v2``, not the legacy ``stacks``,
+            # that actually gets populated by CreateStack today.
+            for stack_id, stack in (getattr(store, "stacks_v2", {}) or {}).items():
+                status = getattr(stack, "status", "-")
+                rows.append({
+                    "name": getattr(stack, "stack_name", stack_id),
+                    "arn": getattr(stack, "stack_id", stack_id),
+                    "status": _enum_value(status) if not isinstance(status, str) else status,
+                    "region": region,
+                })
+            for stack_id, stack in (getattr(store, "stacks", {}) or {}).items():
+                rows.append({
+                    "name": getattr(stack, "stack_name", stack_id),
+                    "arn": getattr(stack, "stack_id", stack_id),
+                    "status": getattr(stack, "status", "-"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_athena() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("athena"):
+            for name, wg in (getattr(backend, "work_groups", {}) or {}).items():
+                rows.append({
+                    "name": name,
+                    "state": getattr(wg, "state", "ENABLED"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_cognito_idp() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("cognito-idp"):
+            for pool_id, pool in (getattr(backend, "user_pools", {}) or {}).items():
+                rows.append({
+                    "name": getattr(pool, "name", "") or pool_id,
+                    "id": pool_id,
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_cloudfront() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("cloudfront"):
+            for dist_id, dist in (getattr(backend, "distributions", {}) or {}).items():
+                rows.append({
+                    "name": dist_id,
+                    "arn": getattr(dist, "arn", "") or "",
+                    "status": getattr(dist, "status", "-"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_kafka() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("kafka"):
+            for arn, cluster in (getattr(backend, "clusters", {}) or {}).items():
+                rows.append({
+                    "name": getattr(cluster, "cluster_name", "") or arn,
+                    "arn": arn,
+                    "state": getattr(cluster, "state", "-"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_mq() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("mq"):
+            for broker_id, broker in (getattr(backend, "brokers", {}) or {}).items():
+                rows.append({
+                    "name": getattr(broker, "name", "") or broker_id,
+                    "broker_id": broker_id,
+                    "state": getattr(broker, "broker_state", "-"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_acm() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("acm"):
+            certs = getattr(backend, "_certificates", None)
+            if certs is None:
+                certs = getattr(backend, "certificates", {}) or {}
+            for arn, cert in certs.items():
+                rows.append({
+                    "name": getattr(cert, "common_name", "") or arn,
+                    "arn": arn,
+                    "status": getattr(cert, "status", "-"),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_ses() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("ses"):
+            for address in (getattr(backend, "email_identities", {}) or {}):
+                rows.append({"name": address, "region": region})
+        return rows
+
+    @staticmethod
+    def _list_sesv2() -> list[dict]:
+        # SESv2 identities live on the same underlying SES backend - there is
+        # no separate v2-only identity store (moto/sesv2/models.py delegates
+        # via ``self.core_backend = ses_backends[account][region]``).
+        return ResourcesResource._list_ses()
+
+    @staticmethod
+    def _list_resource_groups() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("resource-groups"):
+            groups = getattr(backend, "groups", None)
+            by_name = getattr(groups, "by_name", {}) if groups is not None else {}
+            for name, group in by_name.items():
+                rows.append({
+                    "name": name,
+                    "arn": getattr(group, "arn", "") or "",
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_resourcegroupstaggingapi() -> list[dict]:
+        rows: list[dict] = []
+        for _acct, region, backend in _iter_moto_backends("resourcegroupstaggingapi"):
+            try:
+                _token, mappings = backend.get_resources()
+            except Exception:
+                mappings = []
+            for m in mappings or []:
+                rows.append({
+                    "name": m.get("ResourceARN", ""),
+                    "arn": m.get("ResourceARN", ""),
+                    "tags": m.get("Tags", []),
+                    "region": region,
+                })
+        return rows
+
+    @staticmethod
+    def _list_firehose() -> list[dict]:
+        return FirehoseDeliveryStreamDetailResource._list()
 
 
 class RdsInstanceDetailResource:
@@ -2442,30 +2818,45 @@ class KinesisStreamDetailResource:
 
 class FirehoseDeliveryStreamDetailResource:
     def on_get(self, request: Request, name: str = ""):
-        for _acct, region, backend in _iter_moto_backends("firehose"):
-            stream = (getattr(backend, "delivery_streams", {}) or {}).get(name)
+        from localemu.services.firehose.models import firehose_stores
+
+        for _acct, region, store in _iter_stores(firehose_stores):
+            stream = (getattr(store, "delivery_streams", {}) or {}).get(name)
             if stream is None:
                 continue
             destinations = []
-            for d in (getattr(stream, "destinations", []) or []):
-                if isinstance(d, dict):
-                    destinations.append(d)
-                else:
-                    destinations.append({"raw": str(d)})
+            for d in (stream.get("Destinations", []) or []):
+                destinations.append(d if isinstance(d, dict) else {"raw": str(d)})
             return _json_response({
                 "name": name,
-                "arn": getattr(stream, "delivery_stream_arn", "") or "",
-                "status": getattr(stream, "delivery_stream_status", "ACTIVE"),
-                "type": getattr(stream, "delivery_stream_type", "DirectPut"),
-                "created": str(getattr(stream, "create_timestamp", "") or ""),
-                "last_updated": str(getattr(stream, "last_update_timestamp", "") or ""),
-                "encryption": getattr(stream, "delivery_stream_encryption_configuration", {}) or {},
-                "version_id": getattr(stream, "version_id", None),
+                "arn": stream.get("DeliveryStreamARN", "") or "",
+                "status": stream.get("DeliveryStreamStatus", "ACTIVE"),
+                "type": stream.get("DeliveryStreamType", "DirectPut"),
+                "created": str(stream.get("CreateTimestamp", "") or ""),
+                "last_updated": str(stream.get("LastUpdateTimestamp", "") or ""),
+                "encryption": stream.get("DeliveryStreamEncryptionConfiguration", {}) or {},
+                "version_id": stream.get("VersionId", None),
                 "destinations": destinations,
-                "tags": getattr(stream, "tags", []) or [],
+                "tags": [],
                 "region": region,
             })
         return _json_response({"error": "not found", "name": name}, status=404)
+
+    @staticmethod
+    def _list() -> list[dict]:
+        from localemu.services.firehose.models import firehose_stores
+
+        rows: list[dict] = []
+        for _acct, region, store in _iter_stores(firehose_stores):
+            for sname, stream in (getattr(store, "delivery_streams", {}) or {}).items():
+                rows.append({
+                    "name": sname,
+                    "arn": stream.get("DeliveryStreamARN", "") or "",
+                    "status": stream.get("DeliveryStreamStatus", "ACTIVE"),
+                    "type": stream.get("DeliveryStreamType", "DirectPut"),
+                    "region": region,
+                })
+        return rows
 
 
 class MskClusterDetailResource:
@@ -2504,7 +2895,7 @@ class MskClusterDetailResource:
                 "type": getattr(cluster, "cluster_type", "PROVISIONED"),
                 "state": getattr(cluster, "state", "ACTIVE"),
                 "kafka_version": getattr(cluster, "kafka_version", "") or "",
-                "broker_count": len(getattr(cluster, "broker_node_group_info", {}).get("client_subnets", [])) if isinstance(getattr(cluster, "broker_node_group_info", None), dict) else 0,
+                "broker_count": len(getattr(cluster, "broker_node_group_info", {}).get("clientSubnets", [])) if isinstance(getattr(cluster, "broker_node_group_info", None), dict) else 0,
                 "broker_node_group_info": getattr(cluster, "broker_node_group_info", {}) or {},
                 "encryption_info": getattr(cluster, "encryption_info", {}) or {},
                 "current_version": getattr(cluster, "current_version", "") or "",
@@ -2541,7 +2932,7 @@ class MqBrokerDetailResource:
                 container_info = None
             return _json_response({
                 "broker_id": broker_id,
-                "name": getattr(broker, "broker_name", "") or "",
+                "name": getattr(broker, "name", "") or "",
                 "engine_type": getattr(broker, "engine_type", "") or "",
                 "engine_version": getattr(broker, "engine_version", "") or "",
                 "deployment_mode": getattr(broker, "deployment_mode", "") or "",
@@ -2568,7 +2959,10 @@ class AcmCertificateDetailResource:
                 cd = getattr(cert, "describe", None)
                 if callable(cd):
                     try:
-                        return _json_response({"detail": cd(), "region": region})
+                        described = cd()
+                        if isinstance(described, dict) and "Certificate" in described:
+                            described = described["Certificate"]
+                        return _json_response({"detail": described, "region": region})
                     except Exception:
                         pass
                 return _json_response({
@@ -2595,9 +2989,15 @@ class EfsFileSystemDetailResource:
             fs = (getattr(backend, "file_systems_by_id", {}) or {}).get(fs_id)
             if fs is None:
                 continue
+            try:
+                tags = getattr(fs, "_context", None).list_tags_for_resource(fs_id) or []
+            except Exception:
+                tags = []
+            name = next((t.get("Value", "") for t in tags if t.get("Key") == "Name"), "")
+            backup_policy = getattr(fs, "backup_policy", None) or {}
             return _json_response({
                 "file_system_id": fs_id,
-                "name": getattr(fs, "name", "") or "",
+                "name": name,
                 "performance_mode": getattr(fs, "performance_mode", "") or "",
                 "throughput_mode": getattr(fs, "throughput_mode", "") or "",
                 "encrypted": bool(getattr(fs, "encrypted", False)),
@@ -2605,9 +3005,9 @@ class EfsFileSystemDetailResource:
                 "size_in_bytes": getattr(fs, "size_in_bytes", {}) or {},
                 "creation_time": str(getattr(fs, "creation_time", "") or ""),
                 "life_cycle_state": getattr(fs, "life_cycle_state", "available"),
-                "tags": getattr(fs, "_tags", []) or getattr(fs, "tags", []) or [],
+                "tags": tags,
                 "lifecycle_policies": list(getattr(fs, "lifecycle_policies", []) or []),
-                "backup_policy_status": getattr(getattr(fs, "backup_policy", None), "status", "DISABLED"),
+                "backup_policy_status": backup_policy.get("Status", "DISABLED"),
                 "region": region,
             })
         return _json_response({"error": "not found", "fs_id": fs_id}, status=404)
@@ -2694,45 +3094,84 @@ class CloudFormationStackDetailResource:
 
     def on_get(self, request: Request, name: str = ""):
         try:
-            from localemu.services.cloudformation.stores import cfn_stores
+            from localemu.services.cloudformation.stores import cloudformation_stores
         except Exception:
             return _json_response({"error": "cloudformation backend not available"}, status=404)
 
-        for _acct, region, store in cfn_stores.iter_stores():
-            stack = (getattr(store, "stacks", {}) or {}).get(name)
+        for _acct, region, store in _iter_stores(cloudformation_stores):
+            # The v2 engine (``cloudformation:default`` in plux.ini) is what
+            # actually handles CreateStack today - it stores into
+            # ``stacks_v2`` (keyed by stack_id, dict-shaped TypedDict events
+            # and resources), not the legacy ``stacks`` dict this used to
+            # read exclusively. Try v2 first, fall back to v1 for anyone
+            # still on ``cloudformation:engine-legacy``.
+            stack = None
+            is_v2 = False
+            for sid, s in (getattr(store, "stacks_v2", {}) or {}).items():
+                if sid == name or getattr(s, "stack_name", None) == name or getattr(s, "stack_id", None) == name:
+                    stack, is_v2 = s, True
+                    break
+            if stack is None:
+                stack = (getattr(store, "stacks", {}) or {}).get(name)
             if stack is None:
                 continue
+
             events = []
-            for ev in (getattr(stack, "events", []) or [])[-100:]:
-                events.append({
-                    "timestamp": str(getattr(ev, "timestamp", "") or ""),
-                    "logical_resource_id": getattr(ev, "logical_resource_id", "") or "",
-                    "resource_type": getattr(ev, "resource_type", "") or "",
-                    "resource_status": getattr(ev, "resource_status", "") or "",
-                    "resource_status_reason": getattr(ev, "resource_status_reason", "") or "",
-                })
-            resources = []
-            for res in (getattr(stack, "resources", []) or []):
-                if isinstance(res, dict):
-                    resources.append(res)
-                else:
-                    resources.append({
-                        "logical_id": getattr(res, "logical_id", "") or "",
-                        "physical_id": getattr(res, "physical_resource_id", "") or "",
-                        "type": getattr(res, "resource_type", "") or "",
-                        "status": getattr(res, "resource_status", "") or "",
+            if is_v2:
+                for ev in (getattr(stack, "events", []) or [])[-100:]:
+                    events.append({
+                        "timestamp": str(ev.get("Timestamp", "") or ""),
+                        "logical_resource_id": ev.get("LogicalResourceId", "") or "",
+                        "resource_type": ev.get("ResourceType", "") or "",
+                        "resource_status": ev.get("ResourceStatus", "") or "",
+                        "resource_status_reason": ev.get("ResourceStatusReason", "") or "",
                     })
+            else:
+                for ev in (getattr(stack, "events", []) or [])[-100:]:
+                    events.append({
+                        "timestamp": str(getattr(ev, "timestamp", "") or ""),
+                        "logical_resource_id": getattr(ev, "logical_resource_id", "") or "",
+                        "resource_type": getattr(ev, "resource_type", "") or "",
+                        "resource_status": getattr(ev, "resource_status", "") or "",
+                        "resource_status_reason": getattr(ev, "resource_status_reason", "") or "",
+                    })
+
+            resources = []
+            if is_v2:
+                for logical_id, res in (getattr(stack, "resource_states", {}) or {}).items():
+                    if isinstance(res, dict):
+                        resources.append({
+                            "logical_id": res.get("LogicalResourceId", logical_id) or logical_id,
+                            "physical_id": res.get("PhysicalResourceId", "") or "",
+                            "type": res.get("ResourceType", "") or "",
+                            "status": res.get("ResourceStatus", "") or "",
+                        })
+            else:
+                for res in (getattr(stack, "resources", []) or []):
+                    if isinstance(res, dict):
+                        resources.append(res)
+                    else:
+                        resources.append({
+                            "logical_id": getattr(res, "logical_id", "") or "",
+                            "physical_id": getattr(res, "physical_resource_id", "") or "",
+                            "type": getattr(res, "resource_type", "") or "",
+                            "status": getattr(res, "resource_status", "") or "",
+                        })
+
+            tags = getattr(stack, "tags", []) or []
+            status = getattr(stack, "status", "") or ""
+
             return _json_response({
-                "name": name,
+                "name": getattr(stack, "stack_name", name) or name,
                 "stack_id": getattr(stack, "stack_id", "") or "",
-                "status": getattr(stack, "status", "") or "",
-                "status_reason": getattr(stack, "status_reason", "") or "",
+                "status": _enum_value(status) if not isinstance(status, str) else status,
+                "status_reason": _enum_value(getattr(stack, "status_reason", None), "") or "",
                 "description": getattr(stack, "description", "") or "",
                 "creation_time": str(getattr(stack, "creation_time", "") or ""),
-                "last_updated_time": str(getattr(stack, "last_updated_time", "") or ""),
+                "last_updated_time": str(getattr(stack, "last_updated_time", "") or getattr(stack, "creation_time", "") or ""),
                 "parameters": getattr(stack, "parameters", {}) or {},
-                "outputs": getattr(stack, "outputs", []) or [],
-                "tags": getattr(stack, "tags", {}) or {},
+                "outputs": getattr(stack, "resolved_outputs", None) or getattr(stack, "outputs", []) or [],
+                "tags": tags,
                 "capabilities": list(getattr(stack, "capabilities", []) or []),
                 "notification_arns": list(getattr(stack, "notification_arns", []) or []),
                 "events": events,
@@ -2786,12 +3225,14 @@ class ElbV2LoadBalancerDetailResource:
                     "name": getattr(lb, "name", ""),
                     "arn": lb_arn,
                     "dns_name": getattr(lb, "dns_name", "") or "",
-                    "type": getattr(lb, "load_balancer_type", "") or "",
+                    "type": getattr(lb, "type", "") or "",
                     "scheme": getattr(lb, "scheme", "") or "",
                     "state": str(state_str),
                     "vpc_id": getattr(lb, "vpc_id", "") or "",
-                    "subnets": list(getattr(lb, "subnets", []) or []),
-                    "availability_zones": getattr(lb, "availability_zones", []) or [],
+                    "subnets": [getattr(s, "id", str(s)) for s in (getattr(lb, "subnets", []) or [])],
+                    "availability_zones": [
+                        getattr(az, "zone_name", str(az)) for az in (getattr(lb, "availability_zones", []) or [])
+                    ],
                     "security_groups": list(getattr(lb, "security_groups", []) or []),
                     "ip_address_type": getattr(lb, "ip_address_type", "") or "",
                     "created_time": str(getattr(lb, "created_time", "") or ""),
@@ -2844,14 +3285,15 @@ class CognitoUserPoolDetailResource:
                 continue
             clients = []
             for cid, c in (getattr(pool, "clients", {}) or {}).items():
+                cfg = getattr(c, "extended_config", {}) or {}
                 clients.append({
                     "id": cid,
-                    "name": getattr(c, "client_name", "") or "",
-                    "auth_flows": getattr(c, "explicit_auth_flows", []) or [],
-                    "callback_urls": getattr(c, "callback_urls", []) or [],
-                    "logout_urls": getattr(c, "logout_urls", []) or [],
-                    "allowed_oauth_flows": getattr(c, "allowed_oauth_flows", []) or [],
-                    "allowed_oauth_scopes": getattr(c, "allowed_oauth_scopes", []) or [],
+                    "name": cfg.get("ClientName", "") or "",
+                    "auth_flows": cfg.get("ExplicitAuthFlows", []) or [],
+                    "callback_urls": cfg.get("CallbackURLs", []) or [],
+                    "logout_urls": cfg.get("LogoutURLs", []) or [],
+                    "allowed_oauth_flows": cfg.get("AllowedOAuthFlows", []) or [],
+                    "allowed_oauth_scopes": cfg.get("AllowedOAuthScopes", []) or [],
                 })
             users_list = []
             for uname, u in (getattr(pool, "users", {}) or {}).items():
@@ -2879,11 +3321,14 @@ class CognitoUserPoolDetailResource:
                 "arn": getattr(pool, "arn", "") or "",
                 "creation_date": str(getattr(pool, "creation_date", "") or ""),
                 "mfa_configuration": getattr(pool, "mfa_config", "") or "OFF",
-                "schema_attributes": getattr(pool, "schema_attributes", []) or [],
-                "policies": getattr(pool, "policies", {}) or {},
-                "lambda_config": getattr(pool, "lambda_config", {}) or {},
-                "auto_verified_attributes": getattr(pool, "auto_verified_attributes", []) or [],
-                "username_attributes": getattr(pool, "username_attributes", []) or [],
+                "schema_attributes": [
+                    attr.to_json() if hasattr(attr, "to_json") else attr
+                    for attr in (getattr(pool, "schema_attributes", {}) or {}).values()
+                ],
+                "policies": (getattr(pool, "extended_config", {}) or {}).get("Policies", {}) or {},
+                "lambda_config": (getattr(pool, "extended_config", {}) or {}).get("LambdaConfig", {}) or {},
+                "auto_verified_attributes": (getattr(pool, "extended_config", {}) or {}).get("AutoVerifiedAttributes", []) or [],
+                "username_attributes": (getattr(pool, "extended_config", {}) or {}).get("UsernameAttributes", []) or [],
                 "clients": clients,
                 "users": users_list,
                 "groups": groups_list,
@@ -3023,10 +3468,13 @@ class OpenSearchDomainDetailResource:
             endpoint = getattr(domain, "endpoint", None) or endpoints.get("vpc") or endpoints.get("primary") or ""
             container_info = None
             try:
-                from localemu.services.plugins import SERVICE_PLUGINS
-                os_plugin = SERVICE_PLUGINS.get("opensearch")
-                provider = getattr(os_plugin, "instance", None) if os_plugin else None
-                mgr = getattr(provider, "_cluster_manager", None) if provider else None
+                # ``_cluster_manager`` is a module-level global in
+                # opensearch.docker.provider (set lazily by
+                # ``_init_cluster_manager()``), not an attribute of any
+                # plugin/provider instance - SERVICE_PLUGINS never held it.
+                from localemu.services.opensearch.docker.provider import _init_cluster_manager
+
+                mgr = _init_cluster_manager()
                 if mgr:
                     info = mgr.get_cluster_info(name)
                     if info:
@@ -3160,15 +3608,20 @@ class CloudWatchLogGroupDetailResource:
                     "destination": getattr(sf, "destination_arn", ""),
                     "role": getattr(sf, "role_arn", ""),
                 })
+            group_arn = getattr(group, "arn", "") or ""
+            try:
+                tags = backend.tagger.get_tag_dict_for_resource(group_arn)
+            except Exception:
+                tags = {}
             return _json_response({
                 "name": log_group,
-                "arn": getattr(group, "arn", "") or "",
+                "arn": group_arn,
                 "retention_in_days": getattr(group, "retention_in_days", None),
-                "stored_bytes": getattr(group, "stored_bytes", 0),
+                "stored_bytes": sum(s["stored_bytes"] for s in streams),
                 "kms_key_id": getattr(group, "kms_key_id", None),
                 "log_class": getattr(group, "log_class", "STANDARD"),
                 "creation_time": getattr(group, "creation_time", None),
-                "tags": getattr(group, "tags", {}) or {},
+                "tags": tags,
                 "streams": streams,
                 "metric_filters": metric_filters,
                 "subscription_filters": sub_filters,
@@ -3264,7 +3717,7 @@ class SqsQueueDetailResource:
         from localemu.services.sqs.models import sqs_stores
 
         queue = unquote(queue or "")
-        for _account_id, region, store in sqs_stores.iter_stores():
+        for _account_id, region, store in _iter_stores(sqs_stores):
             q = (store.queues or {}).get(queue)
             if q is None:
                 continue
@@ -3386,7 +3839,8 @@ class Ec2InstanceDetailResource:
                         "key_name": getattr(inst, "key_name", "") or "",
                         "iam_instance_profile": getattr(inst, "iam_instance_profile", None),
                         "launch_time": str(getattr(inst, "launch_time", "") or ""),
-                        "monitoring": getattr(inst, "monitoring", None),
+                        "monitoring": (getattr(inst, "monitoring", None) or {}).get("State", "disabled")
+                        if isinstance(getattr(inst, "monitoring", None), dict) else (getattr(inst, "monitoring", None) or "disabled"),
                         "ebs_optimized": getattr(inst, "ebs_optimized", False),
                         "tenancy": getattr(inst, "placement_tenancy", None),
                         "security_groups": sgs,
@@ -3416,7 +3870,7 @@ class LambdaFunctionDetailResource:
         from localemu.services.lambda_.invocation.models import lambda_stores
 
         name = unquote(name or "")
-        for _acct, region, store in lambda_stores.iter_stores():
+        for _acct, region, store in _iter_stores(lambda_stores):
             fn = (store.functions or {}).get(name)
             if fn is None:
                 continue
@@ -3491,13 +3945,13 @@ class LambdaFunctionDetailResource:
                 "role": (cfg.role if cfg else "") or "",
                 "package_type": str(cfg.package_type) if cfg else "Zip",
                 "architectures": [str(a) for a in (cfg.architectures or [])] if cfg else [],
-                "ephemeral_storage": int(getattr(cfg, "ephemeral_storage", 0) or 0) if cfg else 0,
+                "ephemeral_storage": int(getattr(getattr(cfg, "ephemeral_storage", None), "size", 0) or 0) if cfg else 0,
                 "tracing_config_mode": str(getattr(cfg, "tracing_config_mode", "PassThrough")) if cfg else "-",
-                "snap_start": getattr(cfg, "snap_start", None).__dict__ if (cfg and getattr(cfg, "snap_start", None)) else None,
+                "snap_start": _dashboard_obj_to_dict(getattr(cfg, "snap_start", None)) if cfg else None,
                 "environment": _env(),
                 "layers": _layers(),
                 "dead_letter_arn": getattr(cfg, "dead_letter_arn", None) if cfg else None,
-                "vpc_config": getattr(cfg, "vpc_config", None).__dict__ if (cfg and getattr(cfg, "vpc_config", None)) else None,
+                "vpc_config": _dashboard_obj_to_dict(getattr(cfg, "vpc_config", None)) if cfg else None,
                 "last_modified": getattr(cfg, "last_modified", "") if cfg else "",
                 "state": state_str,
                 "revision_id": getattr(cfg, "revision_id", "") if cfg else "",
@@ -3560,10 +4014,10 @@ class SecretsManagerSecretDetailResource:
                 "rotation_enabled": bool(getattr(secret, "rotation_enabled", False)),
                 "rotation_lambda_arn": getattr(secret, "rotation_lambda_arn", "") or "",
                 "rotation_rules": getattr(secret, "rotation_rules", None),
-                "last_changed_date": str(getattr(secret, "last_changed_date", "") or ""),
-                "last_rotated_date": str(getattr(secret, "last_rotated_date", "") or ""),
-                "next_rotation_date": str(getattr(secret, "next_rotation_date", "") or ""),
-                "deletion_date": str(getattr(secret, "deleted_date", "") or ""),
+                "last_changed_date": _epoch_to_iso(getattr(secret, "last_changed_date", None)),
+                "last_rotated_date": _epoch_to_iso(getattr(secret, "last_rotated_date", None)),
+                "next_rotation_date": _epoch_to_iso(getattr(secret, "next_rotation_date", None)),
+                "deletion_date": _epoch_to_iso(getattr(secret, "deleted_date", None)),
                 "versions": versions,
                 "tags": getattr(secret, "tags", []) or [],
                 "resource_policy": policy,
@@ -3593,7 +4047,7 @@ class StepFunctionsStateMachineDetailResource:
         from localemu.services.stepfunctions.backend.models import sfn_stores
 
         sm_arn = unquote(sm_arn or "")
-        for _acct, region, store in sfn_stores.iter_stores():
+        for _acct, region, store in _iter_stores(sfn_stores):
             sm = store.state_machines.get(sm_arn)
             if sm is None:
                 continue
@@ -3832,11 +4286,19 @@ class KmsKeyDetailResource:
     def on_get(self, request: Request, key_id: str = ""):
         from localemu.services.kms.models import kms_stores
 
-        for _acct, region, store in kms_stores.iter_stores():
+        for _acct, region, store in _iter_stores(kms_stores):
             key = store.keys.get(key_id)
             if key is None:
                 continue
             metadata = dict(getattr(key, "metadata", None) or {})
+            key_arn = metadata.get("Arn", "") or ""
+            try:
+                metadata["Tags"] = [
+                    {"TagKey": k, "TagValue": v}
+                    for k, v in (store.tags.get_tags(key_arn) or {}).items()
+                ]
+            except Exception:
+                metadata["Tags"] = []
             policy_raw = getattr(key, "policy", "") or ""
             try:
                 import json as _json
@@ -3953,7 +4415,7 @@ class S3ObjectsResource:
     def _list_objects(bucket_name: str) -> list[dict]:
         from localemu.services.s3.models import s3_stores
 
-        for _account_id, _region, store in s3_stores.iter_stores():
+        for _account_id, _region, store in _iter_stores(s3_stores):
             bucket = store.buckets.get(bucket_name)
             if bucket and hasattr(bucket, "objects"):
                 objects: list[dict] = []
@@ -4049,7 +4511,7 @@ class SqsMessagesResource:
         # Find the queue across all regions to learn the right URL.
         from localemu.services.sqs.models import sqs_stores
         target_region = None
-        for _account_id, region, store in sqs_stores.iter_stores():
+        for _account_id, region, store in _iter_stores(sqs_stores):
             if queue_name in store.queues:
                 target_region = region
                 break
@@ -4097,14 +4559,17 @@ class SnsSubscriptionsResource:
     def on_get(self, request: Request, topic: str = ""):
         LOG.debug("Dashboard API request: GET /resources/sns/%s/subscriptions", topic)
         try:
-            subs = self._list_subscriptions(topic)
+            subs, topic_arn, region = self._list_subscriptions(topic)
         except Exception:
             LOG.debug("error listing SNS subs for %s", topic, exc_info=True)
             return _json_response({"topic": topic, "subscriptions": None, "error": "backend error"})
-        return _json_response({"topic": topic, "subscriptions": subs, "error": None, "total": len(subs)})
+        return _json_response({
+            "topic": topic, "subscriptions": subs, "error": None, "total": len(subs),
+            "arn": topic_arn or "", "region": region or "",
+        })
 
     @staticmethod
-    def _list_subscriptions(topic_name: str) -> list[dict]:
+    def _list_subscriptions(topic_name: str) -> tuple[list[dict], str | None, str | None]:
         # Locate the topic ARN across regions, then call ListSubscriptionsByTopic.
         from localemu.aws.connect import connect_to
         from localemu.constants import DEFAULT_AWS_ACCOUNT_ID
@@ -4113,7 +4578,7 @@ class SnsSubscriptionsResource:
 
         topic_arn = None
         target_region = None
-        for _account_id, region, store in sns_stores.iter_stores():
+        for _account_id, region, store in _iter_stores(sns_stores):
             for arn, _topic in store.topics.items():
                 # SNS ARN format: arn:aws:sns:<region>:<account>:<topic-name>
                 if arn.rsplit(":", 1)[-1] == topic_name or arn == topic_name:
@@ -4123,7 +4588,7 @@ class SnsSubscriptionsResource:
             if topic_arn:
                 break
         if not topic_arn:
-            return []
+            return [], None, None
 
         with suppress_recording():
             client = connect_to(
@@ -4155,7 +4620,7 @@ class SnsSubscriptionsResource:
                     except Exception:
                         pass
                 out.append(entry)
-            return out
+            return out, topic_arn, target_region
 
 
 class EventBridgeRulesResource:
@@ -4189,7 +4654,7 @@ class EventBridgeRulesResource:
         from localemu.services.events.models import events_stores
 
         out: list[dict] = []
-        for _acct, _region, store in events_stores.iter_stores():
+        for _acct, _region, store in _iter_stores(events_stores):
             bus = store.event_buses.get(bus_name)
             if bus is None:
                 continue
@@ -4310,9 +4775,18 @@ class CloudTrailResource:
             else:
                 events = store.get_recent(limit=limit + offset)[offset:offset + limit]
 
+            from .telemetry import resolve_principal
+
             trail_events = []
             for evt in events:
+                access_key = getattr(evt, "access_key_id", "") or ""
+                principal = resolve_principal(
+                    access_key, evt.account_id or "", evt.aws_region or "",
+                )
                 trail_events.append({
+                    "accessKeyId": access_key,
+                    "principalArn": principal.get("arn") or "",
+                    "principalType": principal.get("type") or "",
                     "eventTime": evt.event_time.isoformat(),
                     "eventSource": evt.event_source,
                     "eventName": evt.event_name,
@@ -4445,6 +4919,30 @@ class StaticResource:
             return Response("Not found", status=404)
 
 
+class FaviconResource:
+    """``GET /favicon.ico`` - serve the dashboard's tab icon at the literal
+    root path browsers probe automatically, independent of any ``<link
+    rel="icon">`` in the dashboard's own HTML. Registered unauthenticated
+    (unlike the dashboard's other routes, which are loopback-gated) since
+    a favicon carries no sensitive data.
+
+    Without this route, that automatic browser probe had no route at all
+    and fell through to the AWS-API handler chain, which interpreted
+    ``favicon.ico`` as an S3 bucket name and denied it - a confusing,
+    unrelated-looking 403 in the dashboard's own live call panel.
+    """
+
+    def on_get(self, request: Request):
+        import localemu.dashboard.static as static_module
+
+        try:
+            response = Response.for_resource(static_module, "favicon.ico")
+            response.headers["Content-Type"] = "image/x-icon"
+            return response
+        except FileNotFoundError:
+            return Response("Not found", status=404)
+
+
 class CognitoMessagesResource:
     """``GET /_localemu/api/cognito-messages/<pool_id>/<username>``.
 
@@ -4535,7 +5033,7 @@ class EcrRepositoryDetailResource:
                 "arn": getattr(repo, "arn", ""),
                 "uri": getattr(repo, "uri", ""),
                 "registry_id": getattr(repo, "registry_id", ""),
-                "image_tag_mutability": str(getattr(repo, "image_tag_mutability", "-")),
+                "image_tag_mutability": _enum_value(getattr(repo, "image_tag_mutability", None)),
                 "image_scanning_configuration": getattr(repo, "image_scanning_configuration", {}) or {},
                 "encryption_configuration": getattr(repo, "encryption_configuration", {}) or {},
                 "policy": getattr(repo, "policy", None),
@@ -4574,7 +5072,7 @@ class BatchDetailResource:
                     "ecs_cluster_arn": getattr(env, "ecs_arn", ""),
                     "ecs_cluster_name": getattr(env, "ecs_name", ""),
                     "instances": [
-                        getattr(i, "instance_id", str(i))
+                        getattr(i, "id", str(i))
                         for i in (getattr(env, "instances", []) or [])
                     ],
                     "region": region,
@@ -4626,11 +5124,11 @@ class BatchDetailResource:
                     "job_id": getattr(job, "job_id", name),
                     "arn": getattr(job, "arn", ""),
                     "status": str(getattr(job, "status", "")),
-                    "status_reason": getattr(job, "status_reason", None),
+                    "status_reason": getattr(job, "job_stopped_reason", None),
                     "job_queue": getattr(getattr(job, "job_queue", None), "arn", ""),
                     "job_definition": getattr(getattr(job, "job_definition", None), "arn", ""),
-                    "started_at": getattr(job, "started_at", None),
-                    "stopped_at": getattr(job, "stopped_at", None),
+                    "started_at": getattr(job, "job_started_at", None),
+                    "stopped_at": getattr(job, "job_stopped_at", None),
                     "container_overrides": getattr(job, "container_overrides", {}) or {},
                     "depends_on": getattr(job, "depends_on", []) or [],
                     "region": region,
@@ -4783,7 +5281,7 @@ class Wafv2WebAclDetailResource:
                         "name": getattr(acl, "name", ""),
                         "id": getattr(acl, "id", ""),
                         "arn": arn,
-                        "scope": getattr(acl, "scope", ""),
+                        "scope": _wafv2_scope(acl, arn),
                         "description": getattr(acl, "description", "") or "",
                         "default_action": getattr(acl, "default_action", {}) or {},
                         "visibility_config": getattr(acl, "visibility_config", {}) or {},
@@ -4801,7 +5299,7 @@ class Wafv2WebAclDetailResource:
                         "name": getattr(ip_set, "name", ""),
                         "id": getattr(ip_set, "ip_set_id", ""),
                         "arn": arn,
-                        "scope": getattr(ip_set, "scope", ""),
+                        "scope": _wafv2_scope(ip_set, arn),
                         "description": getattr(ip_set, "description", "") or "",
                         "ip_address_version": getattr(ip_set, "ip_address_version", "IPV4"),
                         "addresses": list(getattr(ip_set, "addresses", []) or []),
@@ -4815,7 +5313,7 @@ class Wafv2WebAclDetailResource:
                         "name": getattr(rg, "name", ""),
                         "id": getattr(rg, "id", ""),
                         "arn": arn,
-                        "scope": getattr(rg, "scope", ""),
+                        "scope": _wafv2_scope(rg, arn),
                         "description": getattr(rg, "description", "") or "",
                         "capacity": getattr(rg, "capacity", 0),
                         "visibility_config": getattr(rg, "visibility_config", {}) or {},
@@ -5286,13 +5784,35 @@ class DashboardResource:
 # ---------------------------------------------------------------------------
 
 
+def _dashboard_visible_accounts() -> list:
+    """Account records the dashboard should show.
+
+    Excludes :data:`config.INTERNAL_RESOURCE_ACCOUNT` - the account
+    LocalEmu uses internally for Lambda archives and internal SQS queues.
+    It gets registered like any other account the moment the auth chain
+    sees a request signed with it (``AccountRegistry.ensure`` runs on
+    every inbound request), which happens during completely ordinary use
+    (e.g. creating a Lambda function). Its own doc comment in config.py
+    says it "should not be... visible to the user" - the dashboard's
+    Accounts list is exactly such a user-facing surface.
+    """
+    from localemu import config
+    from localemu.accounts import get_registry
+
+    return [
+        r for r in get_registry().list() if r.Id != config.INTERNAL_RESOURCE_ACCOUNT
+    ]
+
+
 class AccountsResource:
     """``GET / POST /_localemu/api/accounts`` - multi-account registry.
 
     GET returns every account this LocalEmu instance has ever seen (or
     that was explicitly registered through Organizations or the admin
-    POST). Records mirror the ``Organizations.Account`` shape so the
-    dashboard and Organizations clients can share consumers.
+    POST), except LocalEmu's own internal resource account - see
+    :func:`_dashboard_visible_accounts`. Records mirror the
+    ``Organizations.Account`` shape so the dashboard and Organizations
+    clients can share consumers.
 
     POST creates an account out-of-band without going through Organizations.
     Body: ``{"account_id": "111122223333", "name": "...", "email": "..."}``.
@@ -5301,10 +5821,7 @@ class AccountsResource:
     """
 
     def on_get(self, request: Request):
-        from localemu.accounts import get_registry
-
-        registry = get_registry()
-        payload = {"Accounts": [r.to_dict() for r in registry.list()]}
+        payload = {"Accounts": [r.to_dict() for r in _dashboard_visible_accounts()]}
         return _json_response(payload)
 
     def on_post(self, request: Request):
@@ -5356,12 +5873,18 @@ class AccountResource:
         return _json_response(record.to_dict())
 
     def on_delete(self, request: Request, account_id: str = ""):
+        from localemu import config
         from localemu.accounts import get_registry
         from localemu.constants import DEFAULT_AWS_ACCOUNT_ID
 
         if account_id == DEFAULT_AWS_ACCOUNT_ID:
             return _json_response(
                 {"error": "Default account cannot be deleted"}, status=400
+            )
+        if account_id == config.INTERNAL_RESOURCE_ACCOUNT:
+            return _json_response(
+                {"error": "LocalEmu's internal resource account cannot be deleted"},
+                status=400,
             )
         removed = get_registry().delete(account_id)
         if not removed:
@@ -5388,54 +5911,21 @@ class AccountSummaryResource:
                 {"error": f"Account {account_id} not found"}, status=404
             )
 
-        # Walk moto backends per service and count entries living under
-        # this account. Each service exposes a different concept of
-        # "resource"; we use the simple heuristic "non-empty per-region
-        # dicts/lists" which matches the dashboard's per-service counters.
-        import moto.backends as moto_backends
-
+        # Same counters the overview / sidebar use, restricted to this
+        # account. (This endpoint used to sum the length of every dict /
+        # list attribute on each moto backend, which counted internal
+        # bookkeeping as resources and missed LocalEmu-native stores such
+        # as S3, SQS, Lambda and KMS entirely.)
         per_service: dict[str, int] = {}
-        for service in (
-            "s3", "sqs", "sns", "lambda", "dynamodb", "ec2", "kms", "iam",
-            "events", "logs", "stepfunctions", "secretsmanager",
-            "cloudwatch", "kinesis", "firehose",
-        ):
-            try:
-                backend_dict = moto_backends.get_backend(service)
-            except Exception:
-                continue
-            count = 0
-            account_backend = None
-            try:
-                # ``.get(...)`` style to avoid lazily creating a backend.
-                items = list(backend_dict.items())
-                for acct, regions in items:
-                    if acct != account_id:
-                        continue
-                    account_backend = regions
-                    break
-            except Exception:
-                account_backend = None
-            if account_backend is None:
-                per_service[service] = 0
-                continue
-            try:
-                for _region, backend in account_backend.items():
-                    # Count every attribute that looks like a resource
-                    # container (dict / list) of non-trivial size.
-                    for attr_name in dir(backend):
-                        if attr_name.startswith("_"):
-                            continue
-                        try:
-                            value = getattr(backend, attr_name)
-                        except Exception:
-                            continue
-                        if isinstance(value, dict):
-                            count += len(value)
-                        elif isinstance(value, list):
-                            count += len(value)
-            except Exception:
-                pass
-            per_service[service] = count
+        with account_scope(account_id):
+            for service in sorted(COUNTED_SERVICES):
+                if service == "cloudtrail":
+                    continue  # event count, not resources
+                per_service[service] = _count_resources(service)
 
-        return _json_response({"account_id": account_id, "resources": per_service})
+        return _json_response({
+            "account_id": account_id,
+            "resources": per_service,
+            "total": sum(per_service.values()),
+            "services_in_use": sum(1 for v in per_service.values() if v > 0),
+        })

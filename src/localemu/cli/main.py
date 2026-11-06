@@ -8,6 +8,17 @@ import sys
 import click
 
 
+def _log_file_path() -> str:
+    """Where ``start -d`` writes stdout/stderr, and ``logs`` reads from.
+
+    Same directory LocalEmu already uses for its other on-disk state
+    (``CONFIG_DIR``, ``~/.localemu`` by default).
+    """
+    from localemu import config
+
+    return os.path.join(config.CONFIG_DIR, "localemu.log")
+
+
 def _is_port_in_use(port: int) -> bool:
     """Check if a port is in use by attempting to connect to it.
 
@@ -31,7 +42,10 @@ def cli():
     \b
     Quick start:
       localemu start          Start LocalEmu
+      localemu start -d       Start detached (logs go to 'localemu logs')
+      localemu logs           Show logs from a detached run
       localemu status         Show running services
+      localemu reset          Wipe persisted state (DATA_DIR)
       localemu services       List all supported services
       localemu services s3    Show S3 operations
     """
@@ -58,13 +72,19 @@ def start(detached, host, port):
         click.echo("Starting LocalEmu in detached mode...")
         import subprocess
 
+        log_path = _log_file_path()
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        # Previously stdout/stderr went to DEVNULL: `start -d` had no way
+        # to see what happened, including startup failures.
+        log_file = open(log_path, "ab")
         proc = subprocess.Popen(
             [sys.executable, "-m", "localemu.runtime.main"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
             start_new_session=True,
         )
         click.echo(f"LocalEmu started (PID: {proc.pid})")
+        click.echo(f"Logs: {log_path} (or run 'localemu logs')")
         return
 
     from localemu.runtime.main import main as runtime_main
@@ -159,12 +179,12 @@ def status(port):
         click.echo()
         services = data.get("services", {})
         for name, state in sorted(services.items()):
-            if state == "available":
+            if state == "running":
                 symbol = click.style("✓", fg="green")
                 label = click.style(state, fg="green")
-            elif state == "running":
-                symbol = click.style("○", fg="yellow")
-                label = click.style(state, fg="yellow")
+            elif state == "available":
+                symbol = click.style("○", dim=True)
+                label = click.style(state, dim=True)
             elif state == "error":
                 symbol = click.style("✗", fg="red")
                 label = click.style(state, fg="red")
@@ -184,6 +204,68 @@ def status(port):
     except Exception as e:
         click.echo(f"Error checking LocalEmu status: {e}")
         sys.exit(1)
+
+
+@cli.command()
+@click.option("-f", "--follow", is_flag=True, help="Follow the log file as it grows (like tail -f)")
+@click.option("-n", "--lines", default=200, type=int, help="Number of lines to show (default: 200)")
+def logs(follow, lines):
+    """Show logs from a detached ('start -d') LocalEmu run.
+
+    Only captures output from detached runs - a foreground 'localemu start'
+    prints directly to this terminal instead.
+    """
+    log_path = _log_file_path()
+    if not os.path.exists(log_path):
+        click.echo(f"No log file found at {log_path}.")
+        click.echo("(Only 'localemu start -d' writes one; a foreground run logs to its own terminal.)")
+        sys.exit(1)
+
+    if follow:
+        os.execvp("tail", ["tail", "-n", str(lines), "-f", log_path])
+
+    import subprocess
+
+    subprocess.run(["tail", "-n", str(lines), log_path])
+
+
+@cli.command()
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt")
+def reset(yes):
+    """Wipe LocalEmu's persisted state (DATA_DIR) and log file.
+
+    State is in-memory only unless PERSISTENCE is enabled, in which case
+    this is the only way to clear it short of deleting DATA_DIR by hand.
+    Does not stop a running instance - run 'localemu stop' first if one
+    is up, since it would otherwise keep writing to (and recreate) the
+    directory this just cleared.
+    """
+    from localemu import config
+
+    targets = [p for p in (config.DATA_DIR, _log_file_path()) if p and os.path.exists(p)]
+    if not targets:
+        click.echo("Nothing to reset: no DATA_DIR configured and no log file found.")
+        return
+
+    if not yes:
+        click.echo("This will permanently delete:")
+        for t in targets:
+            click.echo(f"  - {t}")
+        if not click.confirm("Continue?"):
+            click.echo("Aborted.")
+            return
+
+    import shutil
+
+    for t in targets:
+        if os.path.isdir(t):
+            shutil.rmtree(t, ignore_errors=True)
+        else:
+            try:
+                os.remove(t)
+            except OSError:
+                pass
+    click.echo("LocalEmu state reset.")
 
 
 @cli.command()

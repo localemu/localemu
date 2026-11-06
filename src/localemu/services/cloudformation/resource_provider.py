@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from logging import Logger
 from math import ceil
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypedDict, TypeVar
 
 import botocore
 from botocore.client import BaseClient
@@ -55,7 +55,7 @@ class OperationStatus(Enum):
 
 
 @dataclass
-class ProgressEvent[Properties]:
+class ProgressEvent(Generic[Properties]):
     status: OperationStatus
     resource_model: Properties | None = None
     resource_models: list[Properties] | None = None
@@ -155,7 +155,7 @@ def convert_payload(
 
 
 @dataclass
-class ResourceRequest[Properties]:
+class ResourceRequest(Generic[Properties]):
     _original_payload: Properties
 
     aws_client_factory: ServiceLevelClientFactory
@@ -188,7 +188,7 @@ class CloudFormationResourceProviderPlugin(Plugin):
     namespace = "localemu.cloudformation.resource_providers"
 
 
-class ResourceProvider[Properties]:
+class ResourceProvider(Generic[Properties]):
     """
     This provides a base class onto which service-specific resource providers are built.
     """
@@ -391,7 +391,7 @@ class NoResourceProvider(Exception):
     pass
 
 
-def resolve_json_pointer[Properties](resource_props: Properties, primary_id_path: str) -> str:
+def resolve_json_pointer(resource_props: Properties, primary_id_path: str) -> str:
     primary_id_path = primary_id_path.replace("/properties", "")
     parts = [p for p in primary_id_path.split("/") if p]
 

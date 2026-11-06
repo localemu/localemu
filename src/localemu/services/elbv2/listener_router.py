@@ -276,6 +276,57 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:  # noqa: A002
         LOG.debug("elbv2-listener %s - " + format, self._listener_arn, *args)
 
+    def _apply_waf(self, listener: Listener, body: Optional[bytes]):
+        """WAFv2 Web ACL enforcement, evaluated before listener-rule
+        target-group selection - an ADDITIONAL gate, not a replacement of
+        the existing rule-routing logic below. Returns an
+        ``evaluator.EvaluationResult`` only when the request is to be
+        blocked; returns None for Allow, for Count-only (no terminating
+        rule), for "no Web ACL associated with this ALB" (the overwhelmingly
+        common case - zero cost), and when WAFV2_ALB_ENFORCE=0.
+        """
+        try:
+            from localemu.services.wafv2.alb_hook import evaluate_for_alb
+            from localemu.services.wafv2.evaluator import Action, WafRequestView
+        except Exception:
+            LOG.debug("WAFv2 module unavailable - skipping WAF evaluation", exc_info=True)
+            return None
+
+        path_only = self.path.split("?", 1)[0]
+        query_string = self.path.split("?", 1)[1] if "?" in self.path else ""
+        req = WafRequestView(
+            method=self.command,
+            uri_path=path_only,
+            query_string=query_string,
+            headers=self.headers,
+            source_ip=self.client_address[0],
+            body=body,
+        )
+        try:
+            result = evaluate_for_alb(listener.lb_arn, req)
+        except Exception:
+            # A bug in WAF evaluation must never take down real ALB
+            # traffic - fail open (same posture as every other
+            # defensively-wrapped LocalEmu enforcement path) and log loudly.
+            LOG.warning("WAFv2: evaluation error - failing open (not blocking)", exc_info=True)
+            return None
+
+        if result is None or result.action != Action.BLOCK:
+            return None
+        return result
+
+    def _render_waf_block(self, result) -> None:
+        LOG.info(
+            "WAFv2: BLOCK %s %s (rule=%s)",
+            self.command, self.path, result.matched_rule,
+        )
+        body = b"Forbidden"
+        self.send_response(403)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _select_target_group_arn(self, listener: Listener) -> tuple[str, Optional[dict]]:
         """Walk rules in priority order; return the chosen target-group
         ARN plus the matched action dict (or None for the default-path
@@ -365,6 +416,20 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(503, "Listener not available")
             return
 
+        # Body is read here (rather than further down, where this used to
+        # happen) so a WAFv2 rule inspecting FieldToMatch=Body sees the
+        # real request body, not an empty read consumed later.
+        try:
+            body_len = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            body_len = 0
+        body = self.rfile.read(body_len) if body_len > 0 else None
+
+        waf_block = self._apply_waf(listener, body)
+        if waf_block is not None:
+            self._render_waf_block(waf_block)
+            return
+
         chosen_tg_arn, terminal_action = self._select_target_group_arn(listener)
         if terminal_action is not None:
             self._render_action(terminal_action, listener)
@@ -410,12 +475,6 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         if not target:
             self.send_error(503, "No registered targets")
             return
-
-        try:
-            body_len = int(self.headers.get("Content-Length", "0") or 0)
-        except ValueError:
-            body_len = 0
-        body = self.rfile.read(body_len) if body_len > 0 else None
 
         # WebSocket Upgrade tunneling. ALB supports the HTTP/1.1
         # Upgrade contract — the LB MUST forward the Upgrade headers

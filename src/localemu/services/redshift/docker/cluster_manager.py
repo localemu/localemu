@@ -38,6 +38,7 @@ from localemu.utils.container_utils.container_client import (
     VolumeMappings,
 )
 from localemu.utils.docker_utils import DOCKER_CLIENT
+from localemu.utils.sidecar import wait_for_sidecar_port
 from localemu.utils.net import get_free_tcp_port
 
 LOG = logging.getLogger(__name__)
@@ -163,7 +164,18 @@ class DockerClusterManager:
                 pass
             raise
 
-        self._wait_for_port(host_port, timeout=30)
+        if not self._wait_for_port(
+            host_port, timeout=60,
+            container_name=container_name, container_port=REDSHIFT_CONTAINER_PORT,
+        ):
+            try:
+                DOCKER_CLIENT.stop_container(container_name, timeout=5)
+                DOCKER_CLIENT.remove_container(container_name, force=True)
+            except Exception:
+                LOG.debug("cleanup after readiness timeout failed", exc_info=True)
+            raise RuntimeError(
+                f"Redshift cluster {cluster_id} did not accept connections within 60s"
+            )
 
         info = RedshiftContainerInfo(
             cluster_id=cluster_id,
@@ -218,14 +230,16 @@ class DockerClusterManager:
             DOCKER_CLIENT.pull_image(image)
 
     @staticmethod
-    def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: int = 30) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with socket.create_connection((host, port), timeout=2):
-                    return True
-            except OSError:
-                time.sleep(0.5)
+    def _wait_for_port(
+        port: int,
+        timeout: int = 30,
+        container_name: str | None = None,
+        container_port: int | None = None,
+    ) -> bool:
+        """Wait for the cluster to accept connections, on the container's own
+        address or on the published host port (see ``localemu.utils.sidecar``)."""
+        if wait_for_sidecar_port(container_name or "", container_port, port, timeout=timeout):
+            return True
         LOG.warning("Redshift port %s did not open within %ss", port, timeout)
         return False
 

@@ -201,7 +201,50 @@ ACTION_MAP: dict[tuple[str, str], list[str]] = {
 }
 
 
-def map_action(service: str, operation_name: str) -> list[str]:
+# Services whose IAM action prefix differs from the botocore service name. A policy written
+# ``states:*`` never matched Step Functions calls (``stepfunctions:*``) without this table.
+IAM_SERVICE_PREFIX: dict[str, str] = {
+    "stepfunctions": "states",
+    "elbv2": "elasticloadbalancing",
+    "elb": "elasticloadbalancing",
+    "apigatewayv2": "apigateway",
+    "sesv2": "ses",
+    "opensearch": "es",
+    "efs": "elasticfilesystem",
+    "emr": "elasticmapreduce",
+    "dynamodbstreams": "dynamodb",
+    "resourcegroupstaggingapi": "tag",
+    "kinesisanalyticsv2": "kinesisanalytics",
+    "timestream-write": "timestream",
+    "timestream-query": "timestream",
+    "docdb": "rds",
+    "neptune": "rds",
+}
+
+
+def iam_service_prefix(service: str) -> str:
+    return IAM_SERVICE_PREFIX.get(service, service)
+
+
+_APIGATEWAY_VERBS = (
+    ("Get", "GET"), ("Create", "POST"), ("Import", "POST"), ("Test", "POST"), ("Generate", "POST"),
+    ("Flush", "POST"), ("Reimport", "PUT"), ("Put", "PUT"), ("Tag", "PUT"), ("Update", "PATCH"),
+    ("Delete", "DELETE"), ("Untag", "DELETE"),
+)
+
+
+def _apigateway_action(operation_name: str) -> str:
+    """API Gateway management calls are authorised by HTTP verb: ``apigateway:GET`` for GetRestApis,
+    ``apigateway:POST`` for CreateRestApi, and so on."""
+    for prefix, verb in _APIGATEWAY_VERBS:
+        if operation_name.startswith(prefix):
+            return f"apigateway:{verb}"
+    return f"apigateway:{operation_name}"
+
+
+def map_action(
+    service: str, operation_name: str, request_params: dict | None = None
+) -> list[str]:
     """Translate an API operation to its IAM action name(s).
 
     Returns ``["{service}:{operation_name}"]`` (default 1:1) unless the
@@ -209,8 +252,21 @@ def map_action(service: str, operation_name: str) -> list[str]:
     returned. The caller should treat the response as a list of actions
     that ALL must be authorised — for actions with multi-permission
     requirements (like CopyObject), enforcement is by intersection.
+
+    ``request_params`` is only consulted for the handful of operations
+    whose required IAM action depends on the request body, not just the
+    operation name — currently S3's Get/DeleteObject, which require
+    ``s3:GetObjectVersion``/``s3:DeleteObjectVersion`` instead of the
+    unversioned action whenever a ``VersionId`` is present (including the
+    literal string ``"null"``, AWS's marker for a pre-versioning object).
     """
+    if service == "s3" and operation_name in ("GetObject", "DeleteObject"):
+        if (request_params or {}).get("VersionId") is not None:
+            return [f"s3:{operation_name}Version"]
+
     mapped = ACTION_MAP.get((service, operation_name))
     if mapped:
         return list(mapped)
-    return [f"{service}:{operation_name}"]
+    if service in ("apigateway", "apigatewayv2"):
+        return [_apigateway_action(operation_name)]
+    return [f"{iam_service_prefix(service)}:{operation_name}"]

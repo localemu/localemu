@@ -14,7 +14,7 @@ import uuid
 from collections import OrderedDict
 
 from localemu import config
-from localemu.aws.api import RequestContext, ServiceRequest, ServiceResponse
+from localemu.aws.api import CommonServiceException, RequestContext, ServiceRequest, ServiceResponse
 from localemu.aws.skeleton import DispatchTable, Skeleton
 from localemu.services.moto import _proxy_moto, call_moto
 from localemu.services.plugins import Service, ServiceLifecycleHook
@@ -129,6 +129,31 @@ def _get_user_email(pool_id: str, username: str, account_id: str, region: str) -
     except Exception:
         pass
     return None
+
+
+def _get_user_claims(pool_id: str, username: str, account_id: str, region: str) -> dict:
+    """The user's attributes as ID-token claims: custom attributes and the standard profile
+    attributes. ``sub``, ``email`` and ``phone_number`` are added by the token generator."""
+    claims: dict = {}
+    try:
+        from moto.cognitoidp.models import cognitoidp_backends
+
+        pool = cognitoidp_backends[account_id][region].user_pools.get(pool_id)
+        user = pool.users.get(username) if pool else None
+        for attr in (user.attributes if user else []):
+            name = attr.get("Name", "")
+            if name.startswith("custom:") or name in _PROFILE_CLAIMS:
+                claims[name] = attr.get("Value")
+    except Exception:
+        pass
+    return claims
+
+
+_PROFILE_CLAIMS = frozenset({
+    "name", "given_name", "family_name", "middle_name", "nickname", "preferred_username", "profile",
+    "picture", "website", "gender", "birthdate", "zoneinfo", "locale", "address", "updated_at",
+    "phone_number",
+})
 
 
 def _get_user_groups(pool_id: str, username: str, account_id: str, region: str) -> list[str]:
@@ -548,7 +573,7 @@ def _make_auth_result(
         email=email,
         email_verified=bool(email),
         groups=groups or None,
-        extra_claims=extra_claims,
+        extra_claims={**_get_user_claims(pool_id, username, account_id, region), **(extra_claims or {})},
         suppress_claims=suppress_claims,
     )
 
@@ -660,6 +685,7 @@ def _make_refresh_auth_result(
         email=email,
         email_verified=bool(email),
         groups=groups or None,
+        extra_claims=_get_user_claims(pool_id, username, account_id, region),
     )
     access_token = generate_access_token(
         pool_id=pool_id,
@@ -1066,10 +1092,66 @@ def _drive_custom_auth_respond(context, body):
     }
 
 
+def _check_client_may_write(context: RequestContext, client_id: str, attributes: list[dict]) -> None:
+    """Refuse attributes the app client is not allowed to write (``WriteAttributes``).
+
+    A client with no explicit list can write every attribute except the two verification flags,
+    as in AWS. A client with a list can write only those.
+    """
+    names = [a.get("Name") for a in attributes or [] if a.get("Name")]
+    if not names:
+        return
+    try:
+        from moto.cognitoidp.models import cognitoidp_backends
+
+        backend = cognitoidp_backends[context.account_id][context.region]
+        client = next(c.extended_config for p in backend.user_pools.values() for cid, c in p.clients.items() if cid == client_id)
+    except (StopIteration, Exception):  # noqa: BLE001
+        return
+    allowed = client.get("WriteAttributes")
+    denied = [n for n in names if (n not in allowed if allowed is not None else n in ("email_verified", "phone_number_verified"))]
+    if denied:
+        raise CommonServiceException(
+            code="NotAuthorizedException",
+            message=f"A client attempted to write unauthorized attribute: {denied[0]}",
+            status_code=400,
+        )
+
+
+def _check_admin_create_user_only(context: RequestContext, client_id: str) -> None:
+    """Refuse self-service ``SignUp`` when the pool's
+    ``AdminCreateUserConfig.AllowAdminCreateUserOnly`` is set.
+
+    Stored (moto's own backend) but never checked - a pool configured to
+    require admin-created accounts still let anyone self-register.
+    """
+    pool_id = _find_pool_for_client(client_id, context.account_id, context.region)
+    if not pool_id:
+        return
+    try:
+        from moto.cognitoidp.models import cognitoidp_backends
+
+        backend = cognitoidp_backends[context.account_id][context.region]
+        pool = backend.user_pools.get(pool_id)
+        admin_only = (pool.extended_config.get("AdminCreateUserConfig") or {}).get(
+            "AllowAdminCreateUserOnly"
+        ) if pool else False
+    except Exception:
+        return
+    if admin_only:
+        raise CommonServiceException(
+            code="NotAuthorizedException",
+            message="Can not sign up user via SDK, only Admin is allowed.",
+            status_code=400,
+        )
+
+
 def _handle_sign_up(
     context: RequestContext, request: ServiceRequest
 ) -> ServiceResponse:
     """SignUp: let Moto handle, assign a stable sub, run the PreSignUp trigger."""
+    _check_admin_create_user_only(context, request.get("ClientId", ""))
+    _check_client_may_write(context, request.get("ClientId", ""), request.get("UserAttributes"))
     result = call_moto(context)
     if result.get("UserSub"):
         body = _parse_json_body(context)
@@ -1094,6 +1176,21 @@ def _handle_sign_up(
                     client_id, "CustomMessage_SignUp",
                 )
     return result
+
+
+def _handle_update_user_attributes(
+    context: RequestContext, request: ServiceRequest
+) -> ServiceResponse:
+    """UpdateUserAttributes: the signed-in user may only change what the app client may write."""
+    try:
+        import jwt as pyjwt
+
+        client_id = pyjwt.decode(request.get("AccessToken", ""), options={"verify_signature": False}).get("client_id", "")
+    except Exception:  # noqa: BLE001
+        client_id = ""
+    if client_id:
+        _check_client_may_write(context, client_id, request.get("UserAttributes"))
+    return call_moto(context)
 
 
 def _handle_confirm_sign_up(
@@ -1212,6 +1309,7 @@ _INTERCEPTED_OPS = {
     "RespondToAuthChallenge": _handle_respond_to_auth_challenge,
     "AdminRespondToAuthChallenge": _handle_admin_respond_to_auth_challenge,
     "SignUp": _handle_sign_up,
+    "UpdateUserAttributes": _handle_update_user_attributes,
     "ConfirmSignUp": _handle_confirm_sign_up,
     "AdminConfirmSignUp": _handle_admin_confirm_sign_up,
     "AdminCreateUser": _handle_admin_create_user,

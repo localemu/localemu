@@ -333,7 +333,9 @@ class KmsKey:
         # The KeyMaterialId depends on the key material and the KeyId. Use an internal ID to prevent brute forcing
         # the value of the key material from the public KeyId and KeyMaterialId.
         # https://docs.aws.amazon.com/kms/latest/APIReference/API_ImportKeyMaterial.html
-        key_material_id_hex = uuid.uuid5(self._internal_key_id, key_material).hex
+        # uuid.uuid5 requires a str name (it internally does `bytes(name, "utf-8")`), but
+        # key_material is raw bytes, so encode it as hex text first.
+        key_material_id_hex = uuid.uuid5(self._internal_key_id, key_material.hex()).hex
         return str(key_material_id_hex) * 2
 
     def calculate_and_set_arn(self, account_id, region):

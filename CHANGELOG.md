@@ -1,5 +1,98 @@
 # Changelog
 
+## 1.4.0
+
+The dashboard at `/_localemu/dashboard` is rewritten as the LocalEmu Console: a new layout, light and dark themes, and new panels backed by request telemetry that the gateway now records for every AWS call. Alongside the Console, IAM enforcement closes several gaps where a stored policy or grant had no actual effect on authorization (Organizations SCPs, KMS grants, Cognito's admin-only sign-up setting), `sts:AssumeRoleWithWebIdentity` verifies a token's signature for the first time instead of trusting it by string match, and five more services are covered: CodeBuild, Cognito Identity, RAM, SageMaker and WAFv2.
+
+### Layout and themes
+
+The page is a top bar, a service navigation column, the workspace, and a live API-call panel on the right (folded under the workspace below 1180 px, navigation off-canvas below 780 px). Light and dark themes follow the OS preference until you pick one with the theme button; the choice is kept in `localStorage`. Service glyphs are monogram tiles. The fonts (IBM Plex Sans, IBM Plex Sans Condensed, JetBrains Mono, SIL Open Font License 1.1, files from the fontsource packages) ship in `dashboard/static/fonts/` with their licence texts, so the dashboard makes no request to a font CDN and works offline. The ~40 existing per-resource drills and the action modals keep their behaviour and take the new styles.
+
+### Request telemetry
+
+Two handlers are added to the gateway chain when the dashboard registers. One stamps the start time early in request processing, the other runs with the custom response handlers and records, for every AWS call: status, error code, server-side handling time, the calling principal (resolved with the IAM enforcer's own resolver; an unknown access key is shown as the key, not as an invented identity), the resource the call named, and whether it was an IAM denial. The same calls the CloudTrail hook skips are skipped (the dashboard's own reads, calls tagged `LocalEmu-Internal/service-call`). Other LocalEmu-to-LocalEmu calls (requests carrying `x-localemu-data`, for example CloudTrail-to-EventBridge forwarding or Lambda writing its logs) are recorded and labelled `internal`; the dashboard's write actions now send a `LocalEmu-Console/action` user-agent marker and are labelled `console`. Records are kept in memory: per-second buckets for 15 minutes, latency samples for 5 minutes, the last 500 calls and the last 200 changes. Nothing is persisted.
+
+IAM denials: with `IAM_ENFORCEMENT=1` a call is a denial when it ends in 403 `AccessDenied` / `AccessDeniedException`. With `IAM_ENFORCEMENT=soft` the enforcer only logs `IAM AUDIT DENY` and lets the call through; a logging filter on the enforcer's logger now captures that line so the call is tagged as an audit denial, with the enforcer's reason.
+
+New endpoints, loopback-gated like the rest of the dashboard API:
+
+- `GET /_localemu/api/system`: version, start time, uptime, endpoint, default region, IAM enforcement mode, persistence, Docker daemon status (`ping`, version, LocalEmu-managed containers per service, classified by the `localemu.service` label and the MQ, EKS and Lambda container names), the Docker switch of each Docker-capable service, and with `BEDROCK_BACKEND=ollama` whether the Ollama sidecar exists and answers on `/api/tags`.
+- `GET /_localemu/api/metrics/requests?window=`: per-second requests, 4xx, 5xx and denials, requests/s, p50 / p99, errors and denials in 15 minutes, the last denial.
+- `GET /_localemu/api/calls?limit=&since=&account=`: the enriched call records. Each record is also pushed on the SSE stream as a `call` event.
+- `GET /_localemu/api/changes?limit=&account=`: the latest successful mutating call per resource.
+- `GET /_localemu/api/metrics/services?minutes=&account=`: calls per minute per service.
+
+### Overview
+
+The overview shows the endpoint with copyable `AWS_ENDPOINT_URL` exports, version, uptime, IAM enforcement mode, persistence, Docker and Bedrock backend status; a requests-per-second chart for the last 5 minutes with error and denial markers; totals (resources in the selected account, services with resources or calls, running LocalEmu containers, IAM denials in 15 minutes); a grid of all 133 registered services filterable by pinned / in use, Docker-backed, or all; and a recently-changed-resources table that updates when a change is recorded. Services without a resource counter show "not counted" instead of 0. 32 of the 133 services have a counter.
+
+### Account switcher
+
+The top bar selects the account the console works in. `/_localemu/api/overview` and `/_localemu/api/resources/<service>` accept `?account=<12 digits>`: the counters and listers run through `_iter_moto_backends` and a new `_iter_stores` helper that skip other accounts for the duration of the request (no parameter means all accounts, as before). Write actions run in the selected account. `/_localemu/api/accounts/<id>/summary` now uses the same counters; it used to add up the length of every dict and list attribute of each moto backend, which counted internal bookkeeping as resources and returned 0 for S3, SQS, Lambda and KMS, whose state is not in moto. The Accounts page creates accounts from a form instead of browser prompts; its create and delete called `DASH.api.invalidate`, which did not exist.
+
+### Other changes
+
+- Command palette (`Cmd+K`, `Ctrl+K` or `/`) over all registered services, the resources of the services in use in the selected account, and actions.
+- New write actions: create an S3 bucket, SQS queue, SNS topic or DynamoDB table, and purge an SQS queue. Other services' Create button shows their sample CLI command.
+- The live panel shows status and error code, resource, principal, account and handling time, filters by errors, writes, account or LocalEmu-internal calls, pauses and resumes without losing the calls received meanwhile, and expands a call to its CloudTrail record.
+- The CloudTrail page filters by account and service over the whole event store and shows the principal of each event.
+
+### IAM enforcement: stored policies that had no effect
+
+Three previously-stored-but-unconsulted controls now actually authorize or deny:
+
+- **Organizations SCPs.** A Service Control Policy attached to the root, an OU or an account was accepted and stored (moto's native Organizations backend) but never read during evaluation, so a Deny SCP had zero effect — any identity with a permissive IAM policy could still perform the action the SCP was meant to block. The evaluator now consults the attached SCPs and an explicit Deny there overrides an identity-policy Allow, same as real AWS.
+- **KMS grants.** `kms:CreateGrant` stored the grant, but the enforcer only ever read moto's native KMS backend, which LocalEmu's own KMS provider never populates (the same gap S3 had). A grant authorized nothing. Grants are now read from LocalEmu's own KMS store and scoped correctly: a grant authorizes only its covered operations, only for its grantee, only on the key it was issued against.
+- **Cognito `AllowAdminCreateUserOnly`.** A user pool configured to require admin-created accounts still let anyone self-register with a plain `SignUp` call, because the setting was stored but never checked. `SignUp` now rejects with the real AWS error when the pool requires admin-created users.
+
+New condition-key support feeding into all of the above: `aws:PrincipalTag/<key>` resolves from the caller's IAM user/role tags, and `aws:ResourceTag/<key>` resolves from each target service's own tag store (best-effort — a resource with no tags or an unrecognized ARN shape falls through to the next statement, same as AWS). A VPC Interface endpoint's own policy is now evaluated too: each endpoint gets a dedicated local listener port instead of sharing the edge port, and the IAM handler reads `aws:SourceVpce` / `aws:SourceVpc` from the port a connection arrived on (Docker Desktop NATs all container traffic to one host address, so source IP can't carry this signal).
+
+A new in-memory, queryable decision log replaces grep-ing the server log for "why was this denied": `GET /_localemu/iam/decisions` (filterable by `principal_arn`, `action`, `resource`, `decision`) and `POST /_localemu/iam/decisions/clear`. Each entry carries the decision, the resolved reason, which policy type decided it (SCP / identity / resource / boundary / session), and the matched statement. It's a bounded 2000-entry ring buffer, not a persisted audit trail — it resets on restart like every other in-memory LocalEmu store.
+
+### STS: real signature verification for AssumeRoleWithWebIdentity
+
+LocalEmu previously accepted any `sts:AssumeRoleWithWebIdentity` token structurally — including one with no signature or a garbage one — as long as the trust policy's `Principal: {Federated: ...}` matched by string. The token's signature is now verified against the registered OIDC provider's real JWKS, fetched over HTTPS from the provider's well-known URL exactly like AWS does (3s timeout, 5-minute cache).
+
+For local lab and test use where reaching the real external provider isn't possible or desired, `POST /_localemu/api/oidc/mint-token` mints a token signed with a LocalEmu-generated per-provider keypair, so a trust policy that references a real provider (e.g. `token.actions.githubusercontent.com`) can be exercised locally with a token that passes real verification — useful for demonstrating an overly-broad trust condition without needing a real workflow run at that provider. This is a LocalEmu-only convenience, not an AWS API.
+
+### New services
+
+CodeBuild, Cognito Identity, RAM and SageMaker join the registry as moto passthroughs with targeted patches; WAFv2 gets a real evaluator.
+
+- **CodeBuild**: moto has no `UpdateProject` at all (not a stub — absent), so a blue-team fix that disables `privilegedMode` or moves secrets to Secrets Manager had nothing to call. `UpdateProject` now merges the same optional fields `CreateProject` accepts onto the existing project.
+- **Cognito Identity**: moto creates identity pools and identities but has no role attachment and returns fixed fake credentials. `SetIdentityPoolRoles`, `GetIdentityPoolRoles` and `GetCredentialsForIdentity` are implemented for real: the role is chosen the way AWS chooses it (unauthenticated callers get the pool's `unauthenticated` role if allowed, authenticated callers get `authenticated` unless a role mapping picks another one), the role's trust policy must actually trust `cognito-identity.amazonaws.com` with matching `:aud`/`:amr` conditions, and a login issued by a LocalEmu Cognito user pool is verified cryptographically.
+- **RAM**: resource shares were recorded but nothing else consulted them, so a resource shared with another account never actually appeared there. Scoped to EC2 subnets for now: a subnet shared via RAM is now visible to the account it was shared with.
+- **SageMaker**: a notebook instance's `OnStart` lifecycle script now runs.
+- **WAFv2**: real-time Web ACL rule evaluation (rules in ascending `Priority` order, `Block`/`Allow` terminate evaluation, `Count` doesn't) against an ALB, with its own decision log mirroring the IAM one.
+
+### Cognito: ID-token claims
+
+Custom and profile user attributes (`SignUp`/`AdminCreateUser` custom attributes, `given_name`, `email`, etc.) now appear as claims in the ID token Cognito issues, instead of being stored but omitted.
+
+### CloudTrail
+
+- The `userIdentity` on a recorded event now reflects the real caller shape (root, IAM user, assumed role with its issuing role's own ARN under `sessionContext.sessionIssuer`, or `AWSAccount`/`ANONYMOUS_PRINCIPAL` for an anonymous call) instead of a generic fallback.
+- CloudTrail-to-EventBridge forwarding delay is now modeled per-service instead of one flat delay (IAM events deliver before SQS events, for example), matching the relative ordering real AWS exhibits.
+
+### Lambda: two stuck-forever states fixed
+
+- A version that reached `State.Failed` during startup (Docker unavailable, image pull failure) was popped out of the starting-versions tracking without ever being added to the running-versions tracking. `DeleteFunction` and `UpdateFunctionConfiguration` both call `stop_version` on every version unconditionally, and finding the ARN in neither dict raised `ValueError`, aborting the whole call — leaving the function permanently undeletable and unupdatable. `stop_version` on an untracked ARN is now a no-op.
+- A version whose `prepare_version` (Docker image pull / runtime init) hung had no timeout at all, leaving it in `Pending` forever and making `UpdateFunctionConfiguration` fail with "cannot be updated if an old one is not running," with no way out. `prepare_version` now has a ceiling (`LAMBDA_VERSION_START_TIMEOUT_SECONDS`, 0 to disable) and the version is moved to `State.Failed` with a clear reason instead of hanging.
+
+### EKS: endpointPrivateAccess
+
+`endpointPrivateAccess` on a cluster is now threaded into a real network-isolation decision (the cluster's API server joins the VPC's Docker bridge and the public port is firewalled) instead of being accepted and ignored. The default (unset/false) path is unchanged.
+
+### IAM: smaller fixes
+
+- Re-setting a managed policy's default version to the version that's already the default is now a no-op, matching real AWS (it previously errored).
+- A trust policy naming an IAM user or role, in enforcement mode, is now validated: it may only name a user or role that actually exists.
+
+### Other fixes
+
+- `localemu status`: service state colors were backwards — `running` showed yellow and the dormant `available` state showed green, the opposite of what every other CLI traffic-light convention means. `running` is green, `available` is a dim grey circle.
+- `events:PutEvents` IAM enforcement always resolved the request's resource to the `default` event bus, because `EventBusName` is nested inside each `Entries[]` item rather than a top-level request parameter — the generic ARN resolver only read the top level. A policy scoped to a custom bus could therefore never authorize a `PutEvents` call that was correctly routed to that bus, even though the call itself worked. The resolver now reads the bus from the first entry for `PutEvents`; every other `events:*` action (`PutRule`, etc.), which does carry `EventBusName` at the top level, is unaffected.
+
 ## 1.3.2
 
 Two fixes found by running the examples on a Linux Docker host: OpenSearch domains created by LocalEmu running in Docker now become active, and Firehose delivers the records of a Kinesis source stream.
@@ -341,7 +434,6 @@ shapes:
 ### Credits
 
 The IAM enforcement and security-scanner coverage gaps were reported
-and reproduced by Tarek using his own EC2 security scanner against
-LocalEmu 1.0.0. The S3 replication and S3 Access Point data planes
-were prioritized to unblock the matching attack labs in the
-aws-scanners-articles project.
+and reproduced using an EC2 security scanner against LocalEmu 1.0.0.
+The S3 replication and S3 Access Point data planes were prioritized
+to unblock the matching attack labs in a security-research project.

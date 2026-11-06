@@ -99,7 +99,7 @@ pip install -e ../moto
 
 ### Tips
 
-* If `virtualenv` chooses system python installations before your pyenv installations, manually initialize `virtualenv` before running `make install`: `virtualenv -p ~/.pyenv/shims/python3.10 .venv` .
+* If `virtualenv` chooses system python installations before your pyenv installations, manually initialize `virtualenv` before running `make install`: `virtualenv -p ~/.pyenv/shims/python3.11 .venv` .
 * Terraform needs version <0.14 to work currently. Use [`tfenv`](https://github.com/tfutils/tfenv) to manage Terraform versions comfortable. Quick start: `tfenv install 0.13.7 && tfenv use 0.13.7`
 * Set env variable `LS_LOG='trace'` to print every `http` request sent to localemu and their responses. It is useful for debugging certain issues.
 * Catch linter or format errors early by installing Git pre-commit hooks via `pre-commit install`. [pre-commit](https://pre-commit.com/) installation: `pip install pre-commit` or `brew install pre-commit`.

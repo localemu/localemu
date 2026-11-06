@@ -52,6 +52,7 @@ class LocalemuAwsGateway(Gateway):
                 handlers.simulate_throttling,
                 handlers.validate_temporary_credentials,
                 self._access_point_resolver(),
+                handlers.tag_vpc_endpoint,
                 self._iam_enforcement_handler(),
                 self._cloudfront_oac_guard(),
                 handlers.serve_custom_service_request_handlers,

@@ -390,6 +390,19 @@ OBJECT_LOCK_MODES = get_class_attrs_from_spec_class(ObjectLockMode)
 DEFAULT_S3_TMP_DIR = "/tmp/localemu-s3-storage"
 
 
+
+def _reject_sse_c_if_blocked(s3_bucket, algorithm, encryption_key) -> None:
+    """AWS refuses SSE-C uploads (AccessDenied) to buckets whose encryption configuration blocks SSE-C."""
+    if not (algorithm or encryption_key):
+        return
+    rule = s3_bucket.encryption_rule or {}
+    blocked = (rule.get("BlockedEncryptionTypes") or {}).get("EncryptionType") or []
+    if "SSE-C" in blocked:
+        raise AccessDenied(
+            "Access Denied: the bucket blocks server-side encryption with customer-provided keys (SSE-C)"
+        )
+
+
 class S3Provider(S3Api, ServiceLifecycleHook):
     def __init__(self, storage_backend: S3ObjectStore = None) -> None:
         super().__init__()
@@ -858,6 +871,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: we're not encrypting the object with the provided key for now
         sse_c_key_md5 = request.get("SSECustomerKeyMD5")
+        _reject_sse_c_if_blocked(s3_bucket, request.get("SSECustomerAlgorithm"), request.get("SSECustomerKey"))
         validate_sse_c(
             algorithm=request.get("SSECustomerAlgorithm"),
             encryption_key=request.get("SSECustomerKey"),
@@ -1684,6 +1698,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         target_sse_c_key_md5 = request.get("SSECustomerKeyMD5")
         server_side_encryption = request.get("ServerSideEncryption")
+        _reject_sse_c_if_blocked(dest_s3_bucket, request.get("SSECustomerAlgorithm"), request.get("SSECustomerKey"))
         # validate target SSE-C parameters
         validate_sse_c(
             algorithm=request.get("SSECustomerAlgorithm"),
@@ -2491,6 +2506,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: we're not encrypting the object with the provided key for now
         sse_c_key_md5 = request.get("SSECustomerKeyMD5")
+        _reject_sse_c_if_blocked(s3_bucket, request.get("SSECustomerAlgorithm"), request.get("SSECustomerKey"))
         validate_sse_c(
             algorithm=request.get("SSECustomerAlgorithm"),
             encryption_key=request.get("SSECustomerKey"),
@@ -3374,7 +3390,12 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # kms_key_arn = get_kms_key_arn(master_kms_key, s3_bucket.bucket_account_id)
         # encryption["KMSMasterKeyID"] = master_kms_key
 
-        s3_bucket.encryption_rule = rules[0]
+        rule = dict(rules[0])
+        rule.setdefault("BucketKeyEnabled", False)
+        if not rule.get("BlockedEncryptionTypes"):
+            # AWS fills in its default (SSE-C blocked) when the request does not say; ["NONE"] lifts the block
+            rule["BlockedEncryptionTypes"] = dict(DEFAULT_BUCKET_ENCRYPTION["BlockedEncryptionTypes"])
+        s3_bucket.encryption_rule = rule
 
     def delete_bucket_encryption(
         self,
@@ -3385,7 +3406,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
     ) -> None:
         store, s3_bucket = self._get_cross_account_bucket(context, bucket)
 
-        s3_bucket.encryption_rule = None
+        # AWS does not remove default encryption: deleting the configuration restores the default one
+        s3_bucket.encryption_rule = DEFAULT_BUCKET_ENCRYPTION
 
     def put_bucket_notification_configuration(
         self,

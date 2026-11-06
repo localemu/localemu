@@ -42,7 +42,7 @@ class TestResolvePcxIface:
 
 
 class TestProgramPeeringRoutes:
-    def test_full_programming_alias_snat_and_dnat(self):
+    def test_full_programming_alias_dnat_and_source_route(self):
         dc = mock.MagicMock()
         dc.exec_in_container.return_value = (b"", b"")
         with mock.patch.object(cr, "DOCKER_CLIENT", dc):
@@ -57,11 +57,8 @@ class TestProgramPeeringRoutes:
         ]
         # Alias on pcx for own VPC IP
         assert any("ip addr add 10.80.0.3/32 dev eth2" in s for s in scripts)
-        # Blanket SNAT on pcx egress
-        assert any(
-            "POSTROUTING -o eth2 -j SNAT --to-source 172.18.0.2" in s
-            for s in scripts
-        )
+        # No blanket SNAT: packets keep the real VPC source address
+        assert not any("SNAT" in s for s in scripts)
         # DNAT per peer instance to its pcx IP
         assert any(
             "OUTPUT -d 10.81.0.3/32 -j DNAT --to-destination 172.18.0.3" in s
@@ -69,11 +66,11 @@ class TestProgramPeeringRoutes:
         )
         # /32 route to peer's pcx
         assert any(
-            "ip route replace 10.81.0.3/32 via 172.18.0.3 dev eth2" in s
+            "ip route replace 10.81.0.3/32 via 172.18.0.3 dev eth2 src 10.80.0.3" in s
             for s in scripts
         )
 
-    def test_empty_peer_list_still_aliases_and_snats(self):
+    def test_empty_peer_list_still_aliases(self):
         dc = mock.MagicMock()
         dc.exec_in_container.return_value = (b"", b"")
         with mock.patch.object(cr, "DOCKER_CLIENT", dc):
@@ -87,7 +84,7 @@ class TestProgramPeeringRoutes:
             call.args[1][2] for call in dc.exec_in_container.call_args_list
         ]
         assert any("ip addr add 10.80.0.3/32 dev eth2" in s for s in scripts)
-        assert any("SNAT --to-source 172.18.0.2" in s for s in scripts)
+        assert not any("SNAT" in s for s in scripts)
 
     def test_missing_args_noop(self):
         dc = mock.MagicMock()

@@ -183,7 +183,7 @@ class CmdDockerClient(ContainerClient):
 
     def stop_container(self, container_name: str, timeout: int = 10) -> None:
         cmd = self._docker_cmd()
-        cmd += ["stop", "--timeout", str(timeout), container_name]
+        cmd += ["stop", "-t", str(timeout), container_name]
         LOG.debug("Stopping container with cmd %s", cmd)
         try:
             run(cmd)
@@ -195,7 +195,7 @@ class CmdDockerClient(ContainerClient):
 
     def restart_container(self, container_name: str, timeout: int = 10) -> None:
         cmd = self._docker_cmd()
-        cmd += ["restart", "--timeout", str(timeout), container_name]
+        cmd += ["restart", "-t", str(timeout), container_name]
         LOG.debug("Restarting container with cmd %s", cmd)
         try:
             run(cmd)

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from enum import Enum
 from inspect import getmodule
 from threading import Lock, RLock
-from typing import Any, Generic, ParamSpec, TypeVar
+from typing import Any, Generic, Optional, ParamSpec, TypeVar
 
 from plux import Plugin, PluginManager, PluginSpec  # type: ignore
 
@@ -57,7 +57,7 @@ class PackageInstaller(abc.ABC):
     multiple versions).
     """
 
-    def __init__(self, name: str, version: str, install_lock: Lock | None = None):
+    def __init__(self, name: str, version: str, install_lock: Optional[Lock] = None):
         """
         :param name: technical package name, f.e. "opensearch"
         :param version: version of the package to install

@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localemu"
-version = "1.3.2"
+version = "1.4.0"
 authors = [
     { name = "LocalEmu Contributors", email = "info@localemu.cloud" }
 ]
 description = "The core library and runtime of LocalEmu"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "asn1crypto>=1.5.1",
     "click>=8.2.0",
@@ -26,6 +26,7 @@ dependencies = [
     "rich>=12.3.0",
     "requests>=2.20.0",
     "semver>=2.10",
+    "typing_extensions>=4.5.0",
     # --- merged from the former [base-runtime]/[runtime] extras so that
     # `pip install localemu` alone is enough to run `localemu start` -
     # previously these were opt-in, so a bare install produced a package
@@ -88,7 +89,10 @@ dependencies = [
 dynamic = ["entry-points", "readme"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Internet",
     "Topic :: Software Development :: Testing",
     "Topic :: System :: Emulators",
@@ -196,7 +200,9 @@ exclude = ["tests*"]
     "dashboard/static/index.html",
     "dashboard/static/icons/*.svg",
     "dashboard/static/css/*.css",
-    "dashboard/static/js/**/*.js"
+    "dashboard/static/js/**/*.js",
+    "dashboard/static/fonts/*.woff2",
+    "dashboard/static/fonts/*.txt"
 ]
 
 [tool.ruff]
@@ -220,13 +226,13 @@ exclude = [
 
 [tool.ruff.per-file-target-version]
 # Only allow minimum version for code used in the CLI
-"src/localemu/cli/**" = "py310"
-"src/localemu/packages/**" = "py310"
-"src/localemu/config.py" = "py310"
-"src/localemu/constants.py" = "py310"
-"src/localemu/utils/**" = "py310"  # imported by CLI tests
-"src/localemu/testing/pytest/**" = "py310" # imported by CLI tests
-"src/localemu/aws/connect.py" = "py310" # imported by CLI tests
+"src/localemu/cli/**" = "py311"
+"src/localemu/packages/**" = "py311"
+"src/localemu/config.py" = "py311"
+"src/localemu/constants.py" = "py311"
+"src/localemu/utils/**" = "py311"  # imported by CLI tests
+"src/localemu/testing/pytest/**" = "py311" # imported by CLI tests
+"src/localemu/aws/connect.py" = "py311" # imported by CLI tests
 
 [tool.deptry]
 known_first_party = [
@@ -272,8 +278,8 @@ ignore = [
 ]
 select = ["B", "C", "E", "F", "I", "W", "T", "B9", "G", "UP"]
 extend-safe-fixes = [
-    "UP006", # unsafe-fix for py39
-    "UP035", # unsafe-fix for py39
+    "UP006",
+    "UP035",
 ]
 
 # The rules below fill fix the code in a way that leaves multiple unused imports.
@@ -284,14 +290,14 @@ extend-safe-fixes = [
 
 [tool.ruff.lint.pyupgrade]
 # Avoid PEP 604 rewrites (e.g. Union[str, int] -> str | int), even with the `from __future__ import annotations`
-# import. It only affects py39 and can be removed after we drop it.
+# import.
 keep-runtime-typing = true
 
 [tool.mypy]
 # Conservative baseline so mypy can be enabled in CI without immediately
 # drowning in errors. Tighten over time: drop `ignore_missing_imports`
 # once the hot paths have stubs, then flip `check_untyped_defs` on.
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = false
@@ -328,6 +334,12 @@ exclude_lines = [
 ]
 
 [tool.pytest.ini_options]
+# Always start an isolated, in-memory LocalEmu instance for the test
+# session (see src/localemu/testing/pytest/in_memory_localemu.py), so
+# @pytest.mark.integration tests never silently fall back to whatever
+# happens to already be listening on the default port and pick up stale
+# state from it. Set TEST_SKIP_LOCALEMU_START=1 to opt out.
+addopts = "--start-localemu"
 log_cli = false
 log_level = "DEBUG"
 log_cli_format = "%(asctime)s.%(msecs)03d %(levelname)5s --- [%(threadName)12s] %(name)-26s : %(message)s"

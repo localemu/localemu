@@ -702,43 +702,6 @@ def route53_hosted_zone(aws_client):
 
 
 @pytest.fixture
-def transcribe_create_job(s3_bucket, aws_client):
-    job_names = []
-
-    def _create_job(audio_file: str, params: dict[str, Any] | None = None) -> str:
-        s3_key = "test-clip.wav"
-
-        if not params:
-            params = {}
-
-        if "TranscriptionJobName" not in params:
-            params["TranscriptionJobName"] = f"test-transcribe-{short_uid()}"
-
-        if "LanguageCode" not in params:
-            params["LanguageCode"] = "en-GB"
-
-        if "Media" not in params:
-            params["Media"] = {"MediaFileUri": f"s3://{s3_bucket}/{s3_key}"}
-
-        # upload test wav to a s3 bucket
-        with open(audio_file, "rb") as f:
-            aws_client.s3.upload_fileobj(f, s3_bucket, s3_key)
-
-        response = aws_client.transcribe.start_transcription_job(**params)
-
-        job_name = response["TranscriptionJob"]["TranscriptionJobName"]
-        job_names.append(job_name)
-
-        return job_name
-
-    yield _create_job
-
-    for job_name in job_names:
-        with contextlib.suppress(ClientError):
-            aws_client.transcribe.delete_transcription_job(TranscriptionJobName=job_name)
-
-
-@pytest.fixture
 def kinesis_create_stream(aws_client):
     stream_names = []
 

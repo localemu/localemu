@@ -89,7 +89,7 @@ awsemu dynamodb create-table \
 # Insert an item
 awsemu dynamodb put-item \
   --table-name Users \
-  --item '{"userId":{"S":"001"},"name":{"S":"Tarek"},"role":{"S":"Engineer"}}'
+  --item '{"userId":{"S":"001"},"name":{"S":"Alice"},"role":{"S":"Engineer"}}'
 
 # Read an item
 awsemu dynamodb get-item \
@@ -181,7 +181,7 @@ awsemu lambda get-function --function-name hello | grep State
 awsemu lambda invoke \
   --function-name hello \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"name": "Tarek"}' \
+  --payload '{"name": "Alice"}' \
   /tmp/lambda-output.json
 
 cat /tmp/lambda-output.json

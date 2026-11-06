@@ -479,14 +479,13 @@ class DockerRuntimeExecutor(RuntimeExecutor):
                 )
 
         CONTAINER_CLIENT.start_container(self.container_name)
-        if config.is_in_docker:
-            # Inside Docker: get the container's IP on the main network
-            self.ip = CONTAINER_CLIENT.get_container_ipv4_for_network(
-                container_name_or_id=self.container_name, container_network=main_network
-            )
-        else:
-            # Host mode: Lambda container reaches LocalEmu via the mapped port on localhost
-            self.ip = "127.0.0.1"
+        # On Linux (whether LocalEmu itself runs inside Docker or directly on the host), the
+        # host can reach a container's bridge-network IP directly, so we use that in both
+        # cases. Only platforms that can't route to container IPs from the host (macOS, see
+        # LAMBDA_DEV_PORT_EXPOSE's definition in config.py) need the published-port fallback.
+        self.ip = CONTAINER_CLIENT.get_container_ipv4_for_network(
+            container_name_or_id=self.container_name, container_network=main_network
+        )
         if config.LAMBDA_DEV_PORT_EXPOSE:
             self.ip = "127.0.0.1"
         self.executor_endpoint.container_address = self.ip
@@ -534,8 +533,14 @@ class DockerRuntimeExecutor(RuntimeExecutor):
         vpc_config = getattr(self.function_version.config, "vpc_config", None)
         vpc_id = getattr(vpc_config, "vpc_id", None) if vpc_config else None
         if vpc_id:
-            vpc_network = f"localemu-vpc-{vpc_id}"
-            if vpc_network not in base_networks:
+            # ensure (not just name-guess) the bridge: it creates the network if missing
+            # and recreates it if a cached entry went stale (e.g. removed by another
+            # test's teardown while this VPC id was reused), rather than attaching to a
+            # network name that may not actually exist
+            from localemu.services.ec2.docker.vpc_network import get_vpc_network_manager
+
+            vpc_network = get_vpc_network_manager().ensure_network_for_vpc(vpc_id)
+            if vpc_network and vpc_network not in base_networks:
                 return [*base_networks, vpc_network]
         return base_networks
 

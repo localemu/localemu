@@ -71,6 +71,11 @@
 
   function post(url, body, opts) {
     opts = opts || {};
+    // Write actions run in the account selected in the top bar.
+    if (url.indexOf("/_localemu/api/actions/") === 0 && body && typeof body === "object" &&
+        !body.account_id && DASH.app && DASH.app.state && DASH.app.state.account) {
+      body = Object.assign({ account_id: DASH.app.state.account }, body);
+    }
     opts.method = "POST";
     opts.body = body;
     opts.etag = false;
@@ -82,6 +87,10 @@
     get: get,
     getFresh: getFresh,
     post: post,
-    invalidateAllETags: function () { etags = Object.create(null); bodies = Object.create(null); }
+    invalidateAllETags: function () { etags = Object.create(null); bodies = Object.create(null); },
+    // Drop cached GET results by cache tag (accounts.js, actions).
+    invalidate: function (tags) {
+      (Array.isArray(tags) ? tags : [tags]).forEach(function (t) { DASH.cache.invalidateTag(t); });
+    }
   };
 })();

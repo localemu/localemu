@@ -590,15 +590,21 @@ def import_api_from_openapi_spec(
             parent_path = "/".join(parts[:-1])
             parent = get_or_create_path(parent_path, base_path=base_path)
             parent_id = parent.id
+        # construct relative path (without base path), then add field resources for this path
+        rel_path = abs_path.removeprefix(base_path) or "/"
+
         if existing := [
             r
             for r in rest_api.resources.values()
             if r.path_part == (parts[-1] or "/") and (r.parent_id or "") == (parent_id or "")
         ]:
-            return existing[0]
+            # the resource already exists (this only happens for the root resource, which
+            # CreateRestApi always creates upfront) - its methods from the spec still need to
+            # be attached, or the root path's methods would silently never be imported
+            resource = existing[0]
+            _populate_resource_methods(resource, rel_path, parts)
+            return resource
 
-        # construct relative path (without base path), then add field resources for this path
-        rel_path = abs_path.removeprefix(base_path)
         return add_path_methods(rel_path, parts, parent_id=parent_id)
 
     def add_path_methods(rel_path: str, parts: list[str], parent_id=""):
@@ -615,6 +621,13 @@ def import_api_from_openapi_spec(
             parent_id=parent_id,
         )
 
+        _populate_resource_methods(resource, rel_path, parts)
+
+        rest_api.resources[child_id] = resource
+        rest_api_container.resource_children.setdefault(parent_id, []).append(child_id)
+        return resource
+
+    def _populate_resource_methods(resource, rel_path: str, parts: list[str]):
         paths_dict = resolved_schema["paths"]
         method_paths = paths_dict.get(rel_path, {})
         # Iterate over each field of the `path` to try to find the methods defined
@@ -830,10 +843,6 @@ def import_api_from_openapi_spec(
                         integration_response.response_templates = None
 
             resource.resource_methods[method_name].method_integration = integration
-
-        rest_api.resources[child_id] = resource
-        rest_api_container.resource_children.setdefault(parent_id, []).append(child_id)
-        return resource
 
     def create_method_resource(child, method, method_schema):
         authorization_type = "NONE"

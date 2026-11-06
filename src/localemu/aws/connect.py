@@ -168,6 +168,14 @@ class InternalRequestParameters(TypedDict):
     service_principal: str | None
     """Service principal making this call"""
 
+    enforce_role_permissions: bool | None
+    """When true, IAM enforcement must NOT apply the usual internal-call
+    bypass to this request, even though it carries this very DTO: the
+    caller is a customer-supplied RoleArn (Pipes/Scheduler target delivery)
+    acting on the customer's behalf, not LocalEmu's own bookkeeping, and
+    its own permission policy - not just its trust policy - must gate the
+    action. See ``iam_enforcement.enforcer._is_internal_call``."""
+
 
 def dump_dto(data: InternalRequestParameters) -> str:
     # To produce a compact JSON representation of DTO, remove spaces from separators
@@ -197,7 +205,10 @@ class MetadataRequestInjector(Generic[T]):
             return target
 
     def request_metadata(
-        self, source_arn: str | None = None, service_principal: str | None = None
+        self,
+        source_arn: str | None = None,
+        service_principal: str | None = None,
+        enforce_role_permissions: bool | None = None,
     ) -> T:
         """
         Returns a new client instance preset with the given request metadata.
@@ -210,11 +221,14 @@ class MetadataRequestInjector(Generic[T]):
 
         :param source_arn: Arn on which behalf the calls of this client shall be made
         :param service_principal: Service principal on which behalf the calls of this client shall be made
+        :param enforce_role_permissions: see ``InternalRequestParameters.enforce_role_permissions``
         :return: A new version of the MetadataRequestInjector
         """
         if self._params is not None:
             raise TypeError("Request_data cannot be called on it's own return value")
         params = {}
+        if enforce_role_permissions:
+            params["_EnforceRolePermissions"] = True
         if source_arn:
             params["_SourceArn"] = source_arn
         if service_principal:

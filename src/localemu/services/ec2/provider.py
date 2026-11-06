@@ -3406,6 +3406,25 @@ class Ec2Provider(Ec2Api, ABC, ServiceLifecycleHook):
                     attr_name = first_char_to_upper(underscores_to_camelcase(attr))
                     if attr_name not in subnet:
                         subnet[attr_name] = getattr(subnet_obj, attr)
+
+        # RAM: splice in subnets shared with this account via an ACTIVE
+        # resource share (goat-bugs item 10, Phase 1 - EC2 subnets only).
+        # Only the response dict is touched, never `backend.subnets`
+        # itself, so a bug here can never make a phantom subnet appear to
+        # internal Docker-addressing code that reads the backend directly.
+        # A failure anywhere in this block must never break normal
+        # (non-shared) subnet listing - this is the single most
+        # heavily-relied-upon describe call in the codebase.
+        try:
+            from localemu.services.ram.helpers import get_shared_subnets
+
+            existing_ids = {s["SubnetId"] for s in result.get("Subnets", [])}
+            for shared_subnet in get_shared_subnets(context.account_id, context.region):
+                if shared_subnet["SubnetId"] not in existing_ids:
+                    result.setdefault("Subnets", []).append(shared_subnet)
+        except Exception:
+            LOG.debug("RAM-shared-subnet enrichment failed for DescribeSubnets", exc_info=True)
+
         return result
 
     @handler("CreateTransitGateway", expand=False)

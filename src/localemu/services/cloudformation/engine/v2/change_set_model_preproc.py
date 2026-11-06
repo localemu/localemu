@@ -5,7 +5,7 @@ import copy
 import re
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, Final, Generic, TypeVar
 
 from botocore.exceptions import ClientError
 
@@ -89,7 +89,12 @@ MOCKED_REFERENCE = "unknown"
 VALID_LOGICAL_RESOURCE_ID_RE = re.compile(r"^[A-Za-z0-9]+$")
 
 
-class PreprocEntityDelta[TBefore, TAfter]:
+TBefore = TypeVar("TBefore")
+TAfter = TypeVar("TAfter")
+_T = TypeVar("_T")
+
+
+class PreprocEntityDelta(Generic[TBefore, TAfter]):
     before: Maybe[TBefore]
     after: Maybe[TAfter]
 
@@ -450,8 +455,8 @@ class ChangeSetModelPreproc(ChangeSetModelVisitor):
     def _maybe_perform_dynamic_replacements(self, delta: PreprocEntityDelta) -> PreprocEntityDelta:
         return self._maybe_perform_on_delta(delta, self._perform_dynamic_replacements)
 
-    def _maybe_perform_on_delta[T](
-        self, delta: PreprocEntityDelta | None, f: Callable[[T], T]
+    def _maybe_perform_on_delta(
+        self, delta: PreprocEntityDelta | None, f: Callable[[_T], _T]
     ) -> PreprocEntityDelta | None:
         if isinstance(delta.before, str):
             delta.before = f(delta.before)
@@ -459,7 +464,7 @@ class ChangeSetModelPreproc(ChangeSetModelVisitor):
             delta.after = f(delta.after)
         return delta
 
-    def _perform_dynamic_replacements[T](self, value: T) -> T:
+    def _perform_dynamic_replacements(self, value: _T) -> _T:
         if not isinstance(value, str):
             return value
 

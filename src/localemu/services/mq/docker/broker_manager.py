@@ -33,6 +33,7 @@ from typing import Protocol
 
 from localemu.utils.container_utils.container_client import ContainerConfiguration
 from localemu.utils.docker_utils import DOCKER_CLIENT
+from localemu.utils.sidecar import wait_for_sidecar_port
 from localemu.utils.net import get_free_tcp_port
 
 LOG = logging.getLogger(__name__)
@@ -179,7 +180,15 @@ class BrokerManager:
         host_ports = self._reconcile_ports_from_docker(
             container_name, driver,
         ) or host_ports
-        if not self._wait_for_port(driver.readiness_port(host_ports)):
+        ready_port = driver.readiness_port(host_ports)
+        ready_container_port = next(
+            (cp for proto, cp in getattr(driver, "_container_ports", {}).items()
+             if host_ports.get(proto) == ready_port),
+            None,
+        )
+        if not self._wait_for_port(
+            ready_port, container_name=container_name, container_port=ready_container_port,
+        ):
             try:
                 DOCKER_CLIENT.stop_container(container_name, timeout=5)
                 DOCKER_CLIENT.remove_container(container_name, force=True)
@@ -188,7 +197,7 @@ class BrokerManager:
             raise RuntimeError(
                 f"MQ broker {broker_id} did not become ready within "
                 f"{_READINESS_TIMEOUT_SEC}s on port "
-                f"{driver.readiness_port(host_ports)}"
+                f"{ready_port}"
             )
         instance = BrokerInstance(
             broker_id=broker_id,
@@ -259,9 +268,15 @@ class BrokerManager:
     def _wait_for_port(
         self, port: int, host: str = "127.0.0.1",
         timeout: int = _READINESS_TIMEOUT_SEC,
+        container_name: str | None = None,
+        container_port: int | None = None,
     ) -> bool:
-        """Block until *host:port* accepts a TCP connection AND the
-        broker has had a moment to finish wiring its protocol layer.
+        """Block until the broker accepts a TCP connection AND has had a
+        moment to finish wiring its protocol layer.
+
+        The container's own address is tried as well as the published host
+        port (see ``localemu.utils.sidecar``): from inside the LocalEmu
+        container ``127.0.0.1:<host port>`` is not the Docker host.
 
         TCP-accept alone isn't enough: RabbitMQ binds the AMQP socket
         just before its plugin chain finishes initialising. A client
@@ -269,14 +284,17 @@ class BrokerManager:
         on the AMQP handshake because the protocol code isn't ready
         yet. We add a small post-accept settle delay so the first
         real client connect succeeds without per-test retry logic.
+        Measured ~1s on a warm pull of rabbitmq:3.13-management.
         """
+        if container_name:
+            return wait_for_sidecar_port(
+                container_name, container_port, port,
+                timeout=timeout, interval=_PORT_PROBE_INTERVAL_SEC, settle=3.0,
+            ) is not None
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 with socket.create_connection((host, port), timeout=2.0):
-                    # Settle delay covers the gap between AMQP socket
-                    # bind and full plugin chain readiness. Measured
-                    # ~1s on a warm pull of rabbitmq:3.13-management.
                     time.sleep(3.0)
                     return True
             except OSError:

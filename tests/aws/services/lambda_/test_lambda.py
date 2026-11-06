@@ -12,6 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from typing import TypeVar
 
 import pytest
 import requests
@@ -138,7 +139,10 @@ TEST_LAMBDA_LIBS = [
 ]
 
 
-def read_streams[T](payload: T) -> T:
+_T = TypeVar("_T")
+
+
+def read_streams(payload: _T) -> _T:
     new_payload = {}
     for k, v in payload.items():
         if isinstance(v, dict):

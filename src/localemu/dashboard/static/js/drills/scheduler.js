@@ -12,7 +12,7 @@
       service: "scheduler",
       title: function (r) { return r.name || "(schedule)"; },
       subtitle: function (r) {
-        return [r.group, r.expression, r.region].filter(Boolean).join(" \u00b7 ");
+        return [r.group, r.schedule_expression, r.region].filter(Boolean).join(" \u00b7 ");
       },
       fetch: function (key) {
         // Key can be "group/name" or just "name" — the backend handles both.

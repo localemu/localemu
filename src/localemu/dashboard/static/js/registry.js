@@ -46,6 +46,14 @@
   function all() {
     return Object.keys(SERVICES).map(function (k) { return SERVICES[k]; });
   }
+  // Real, distinct AWS services only -- excludes dashboard-only navigation
+  // entries (currently just "vpc", part of the ec2 API in real AWS) so any
+  // "N services" count matches the site's one source of truth. Everything
+  // still appears in all()/the sidebar/search; this is only for headline
+  // counts that claim to be "N AWS services".
+  function aws() {
+    return all().filter(function (s) { return s.aws_service !== false; });
+  }
   function byTier(tier) {
     return all().filter(function (s) { return s.tier === tier; });
   }
@@ -130,7 +138,7 @@
   window.DASH.registry = {
     load: load,
     isReady: isReady,
-    get: get, all: all, byTier: byTier,
+    get: get, all: all, aws: aws, byTier: byTier,
     label: label, tier: tier, banner: banner, columns: columns,
     copyCmd: copyCmd, emptyStateText: emptyStateText,
     tierBadge: tierBadge,

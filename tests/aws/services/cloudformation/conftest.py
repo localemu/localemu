@@ -1,5 +1,6 @@
 import re
 from collections.abc import Iterable
+from typing import TypeVar
 
 import pytest
 
@@ -17,5 +18,8 @@ def skip_if_legacy_engine(reason: str | None = None):
     )
 
 
-def skipped_v2_items[T](*items: Iterable[T]) -> list[T]:
+T = TypeVar("T")
+
+
+def skipped_v2_items(*items: Iterable[T]) -> list[T]:
     return optional_list(is_v2_engine(), items)

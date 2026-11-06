@@ -26,6 +26,27 @@ def _get_root_access_keys() -> set[str]:
     return {"AKIAIOSFODNN7EXAMPLE", "000000000000"}
 
 
+def _principal_tags(backend, arn: str, inline) -> dict[str, str]:
+    """Tags of an IAM user or role as ``{key: value}``.
+
+    Moto keeps user tags in the backend tagger (keyed by ARN) and role tags as a
+    list of ``{"Key", "Value"}`` dicts on the role, so both sources are read and
+    both list and dict shapes are accepted.
+    """
+    out: dict[str, str] = {}
+    tagger = getattr(backend, "tagger", None)
+    if tagger is not None:
+        try:
+            out.update(tagger.get_tag_dict_for_resource(arn))
+        except Exception:  # noqa: BLE001
+            pass
+    items = inline.values() if isinstance(inline, dict) else (inline or [])
+    for tag in items:
+        if isinstance(tag, dict) and tag.get("Key"):
+            out[tag["Key"]] = tag.get("Value", "")
+    return out
+
+
 @dataclass
 class CallerIdentity:
     """Represents the entity making an API call."""
@@ -111,12 +132,10 @@ def resolve_caller(
             user_name = getattr(user, "name", user_name)
             key = key_match
             if key.access_key_id == access_key_id and key.status == "Active":
-                    tags = {}
-                    user_tags = getattr(user, "tags", None) or {}
-                    if isinstance(user_tags, dict):
-                        for tag in user_tags.values():
-                            if isinstance(tag, dict):
-                                tags[f"aws:PrincipalTag/{tag.get('Key', '')}"] = tag.get("Value", "")
+                    tags = {
+                        f"aws:PrincipalTag/{k}": v
+                        for k, v in _principal_tags(backend, user.arn, getattr(user, "tags", None)).items()
+                    }
                     return CallerIdentity(
                         principal_type="User",
                         account_id=account_id,
@@ -192,15 +211,9 @@ def resolve_caller(
                         _iam_backend = _iam_backends[account_id]["global"]
                         for r in _iam_backend.roles.values():
                             if r.name == role_name:
-                                role_tags = getattr(r, "tags", None) or {}
-                                if isinstance(role_tags, dict):
-                                    for rt in role_tags.values():
-                                        if isinstance(rt, dict):
-                                            rk = rt.get("Key", "")
-                                            rv = rt.get("Value", "")
-                                            if rk:
-                                                # Session tags override role tags
-                                                tags.setdefault(f"aws:PrincipalTag/{rk}", rv)
+                                for rk, rv in _principal_tags(_iam_backend, r.arn, getattr(r, "tags", None)).items():
+                                    # Session tags override role tags
+                                    tags.setdefault(f"aws:PrincipalTag/{rk}", rv)
                                 break
                     except Exception as tag_err:
                         LOG.debug("Failed to load role tags for %s: %s", role_name, tag_err)

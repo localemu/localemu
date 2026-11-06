@@ -17,6 +17,7 @@ from localemu.utils.container_utils.container_client import (
     VolumeMappings,
 )
 from localemu.utils.docker_utils import DOCKER_CLIENT
+from localemu.utils.sidecar import wait_for_sidecar_port
 from localemu.utils.net import get_free_tcp_port
 
 from .engine_mapping import (
@@ -596,10 +597,10 @@ class DockerDbManager:
                         "within 240s", db_instance_id,
                     )
             else:
-                self._wait_for_port(host_port, timeout=180)
+                self._wait_for_port(host_port, timeout=180, container_name=container_name, container_port=container_port)
         else:
             wait_timeout = 180 if cluster_id else 30
-            self._wait_for_port(host_port, timeout=wait_timeout)
+            self._wait_for_port(host_port, timeout=wait_timeout, container_name=container_name, container_port=container_port)
 
         # Writer post-init: install replication role + pg_hba grant.
         if cluster_id and is_writer and repl_password is not None:
@@ -883,15 +884,28 @@ class DockerDbManager:
         LOG.info("RDS instance %s deleted", db_instance_id)
 
     @staticmethod
-    def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: int = 30) -> bool:
-        """Poll a TCP port until it accepts connections or timeout expires."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with socket.create_connection((host, port), timeout=2):
-                    return True
-            except OSError:
-                time.sleep(0.5)
+    def _wait_for_port(
+        port: int,
+        host: str = "127.0.0.1",
+        timeout: int = 30,
+        container_name: str | None = None,
+        container_port: int | None = None,
+    ) -> bool:
+        """Poll a TCP port until it accepts connections or timeout expires.
+
+        With ``container_name`` the container's own address is tried as well as
+        the published host port (see ``localemu.utils.sidecar``)."""
+        if container_name:
+            if wait_for_sidecar_port(container_name, container_port, port, timeout=timeout):
+                return True
+        else:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    with socket.create_connection((host, port), timeout=2):
+                        return True
+                except OSError:
+                    time.sleep(0.5)
         LOG.warning("Port %s did not become ready within %ss", port, timeout)
         return False
 
@@ -931,7 +945,7 @@ class DockerDbManager:
                     info.status = "rebooting"
             DOCKER_CLIENT.restart_container(container_name, timeout=10)
             if info:
-                self._wait_for_port(info.host_port, timeout=30)
+                self._wait_for_port(info.host_port, timeout=30, container_name=info.container_name, container_port=info.container_port)
             with self._lock:
                 if info:
                     info.status = "available"

@@ -118,6 +118,10 @@ DEFAULT_BUCKET_ENCRYPTION = ServerSideEncryptionRule(
         SSEAlgorithm=ServerSideEncryption.AES256,
     ),
     BucketKeyEnabled=False,
+    # Since April 2026 AWS blocks SSE-C by default on every bucket (verified against a live account:
+    # a new bucket's GetBucketEncryption reports it, and an SSE-C PutObject is refused with AccessDenied).
+    # A bucket owner (or anyone with s3:PutEncryptionConfiguration) can lift it with EncryptionType ["NONE"].
+    BlockedEncryptionTypes={"EncryptionType": ["SSE-C"]},
 )
 
 DEFAULT_PUBLIC_BLOCK_ACCESS = PublicAccessBlockConfiguration(

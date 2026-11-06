@@ -5,11 +5,11 @@ Adds the three behaviours documented in the package docstring:
 1. ``OrganizationsBackend.describe_effective_policy`` returns a
    well-formed empty effective-policy document instead of raising
    ``InternalFailure``.
-2. ``FakeAccount.__init__`` is wrapped to attach the
+2. ``OrganizationsBackend.create_account`` is wrapped to attach the
    ``AdministratorAccess`` managed policy to the auto-created
    ``OrganizationAccountAccessRole``.
-3. ``OrganizationsBackend.create_account`` is wrapped to push the new
-   account into the LocalEmu :class:`AccountRegistry`.
+3. The same wrap pushes the new account into the LocalEmu
+   :class:`AccountRegistry`.
 
 All three patches are idempotent. ``apply_patches`` is called by the
 provider factory in :mod:`localemu.services.providers`.
@@ -133,25 +133,40 @@ def apply_patches() -> None:
     # ---- Patch 2 + 3: wrap FakeAccount.__init__ to attach admin policy and
     # ---- sync to the LocalEmu registry. We wrap rather than subclass so
     # ---- any code path that instantiates FakeAccount picks the behaviour
-    # ---- up regardless of how it was reached.
-    _original_init = _m.FakeAccount.__init__
+    # ---- up regardless of how it was reached. We wrap the PUBLIC
+    # ---- create_account entrypoint rather than FakeAccount.__init__ on
+    # ---- purpose: moto's own create_organization() also builds a
+    # ---- FakeAccount for the implicit master account, then overwrites
+    # ---- master_account.id = org.master_account_id right after
+    # ---- construction (FakeAccount.__init__ always assigns a fresh random
+    # ---- id first; create_organization replaces it for the master-account
+    # ---- case only). Reading self.id inside __init__ raced that overwrite
+    # ---- and synced the wrong, immediately-discarded random id into the
+    # ---- registry - a real bug that showed up as a phantom extra
+    # ---- "master" account (with an id nothing else in the system ever
+    # ---- references) every time Organizations.CreateOrganization ran.
+    # ---- create_account() never overwrites the id it generates, so
+    # ---- reading it after the call returns is always correct.
+    _original_create_account = _m.OrganizationsBackend.create_account
 
-    def _wrapped_init(self, organization, **kwargs):
-        _original_init(self, organization, **kwargs)
+    def _wrapped_create_account(self, **kwargs):
+        result = _original_create_account(self, **kwargs)
+        account_id = self.accounts[-1].id
         role_name = kwargs.get("RoleName", "OrganizationAccountAccessRole")
-        _attach_admin_to_role(self.id, role_name)
+        _attach_admin_to_role(account_id, role_name)
         _sync_account_to_registry(
-            account_id=self.id,
-            name=self.name,
-            email=self.email,
-            org_id=self.organization_id,
+            account_id=account_id,
+            name=kwargs.get("AccountName") or f"account-{account_id}",
+            email=kwargs.get("Email") or f"{account_id}@localemu.local",
+            org_id=self.org.id if self.org is not None else None,
         )
+        return result
 
     # Idempotency: don't wrap twice across hot reloads.
-    if getattr(_m.FakeAccount.__init__, "_localemu_wrapped", False):
+    if getattr(_m.OrganizationsBackend.create_account, "_localemu_wrapped", False):
         return
-    _wrapped_init._localemu_wrapped = True
-    _m.FakeAccount.__init__ = _wrapped_init
+    _wrapped_create_account._localemu_wrapped = True
+    _m.OrganizationsBackend.create_account = _wrapped_create_account
 
     # ---- Patch 4: also sync the master/management account when an
     # ---- organization is created (moto allocates it implicitly).
