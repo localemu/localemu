@@ -1,0 +1,77 @@
+{
+  "typeName": "AWS::EC2::EIP",
+  "description": "A VPC Elastic IP address.",
+  "sourceUrl": "https://github.com/aws-cloudformation/aws-cloudformation-rpdk.git",
+  "additionalProperties": false,
+  "definitions": {
+    "Tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "Key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "Value": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "Value",
+        "Key"
+      ]
+    }
+  },
+  "properties": {
+    "Domain": {
+      "type": "string",
+      "enum": [
+        "vpc"
+      ]
+    },
+    "AllocationId": {
+      "type": "string"
+    },
+    "PublicIp": {
+      "type": "string"
+    },
+    "Tags": {
+      "description": "Any tags to assign to the internet gateway.",
+      "type": "array",
+      "uniqueItems": false,
+      "insertionOrder": false,
+      "items": {
+        "$ref": "#/definitions/Tag"
+      }
+    }
+  },
+  "taggable": true,
+  "readOnlyProperties": [
+    "/properties/AllocationId",
+    "/properties/PublicIp"
+  ],
+  "primaryIdentifier": [
+    "/properties/PublicIp"
+  ],
+  "handlers": {
+    "create": {
+      "permissions": [
+        "ec2:AllocateAddress",
+        "ec2:CreateTags"
+      ]
+    },
+    "update": {
+      "permissions": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ]
+    },
+    "delete": {
+      "permissions": [
+        "ec2:ReleaseAddress"
+      ]
+    }
+  }
+}
